@@ -149,6 +149,26 @@ impl crate::Worktree<'_> {
 pub mod proxy;
 
 ///
+pub mod remove;
+
+///
+pub mod lock;
+
+///
+pub mod prune;
+
+/// Move a worktree to a new location.
+#[cfg(feature = "worktree-mutation")]
+pub mod r#move;
+
+/// Repair worktree links.
+pub mod repair;
+
+///
+#[cfg(feature = "worktree-mutation")]
+pub mod add;
+
+///
 #[cfg(feature = "index")]
 pub mod open_index {
     use crate::Result;
