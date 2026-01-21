@@ -322,6 +322,128 @@ pub fn main() -> Result<()> {
                 None,
                 move |_progress, out, _err| core::repository::worktree::list(repository(Mode::Lenient)?, out, format),
             ),
+            crate::plumbing::options::worktree::SubCommands::Add {
+                path,
+                commit_ish,
+                branch,
+                new_branch,
+                detach,
+                lock,
+                no_checkout,
+            } => prepare_and_run(
+                "worktree-add",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, err| {
+                    core::repository::worktree::add(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        path,
+                        commit_ish,
+                        core::repository::worktree::AddOptions {
+                            branch,
+                            new_branch,
+                            detach,
+                            lock,
+                            no_checkout,
+                        },
+                    )
+                },
+            ),
+            crate::plumbing::options::worktree::SubCommands::Remove { id, force } => prepare_and_run(
+                "worktree-remove",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, err| {
+                    core::repository::worktree::remove(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        id.as_ref(),
+                        core::repository::worktree::RemoveOptions { force },
+                    )
+                },
+            ),
+            crate::plumbing::options::worktree::SubCommands::Lock { id, reason } => prepare_and_run(
+                "worktree-lock",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, err| {
+                    core::repository::worktree::lock(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        id.as_ref(),
+                        core::repository::worktree::LockOptions { reason },
+                    )
+                },
+            ),
+            crate::plumbing::options::worktree::SubCommands::Unlock { id } => prepare_and_run(
+                "worktree-unlock",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, err| {
+                    core::repository::worktree::unlock(repository(Mode::Lenient)?, out, err, id.as_ref())
+                },
+            ),
+            crate::plumbing::options::worktree::SubCommands::Prune { dry_run } => prepare_and_run(
+                "worktree-prune",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, err| {
+                    core::repository::worktree::prune(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        core::repository::worktree::PruneOptions { dry_run },
+                    )
+                },
+            ),
+            crate::plumbing::options::worktree::SubCommands::Move { id, new_path, force } => prepare_and_run(
+                "worktree-move",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, err| {
+                    core::repository::worktree::move_worktree(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        id.as_ref(),
+                        new_path,
+                        core::repository::worktree::MoveOptions { force },
+                    )
+                },
+            ),
+            crate::plumbing::options::worktree::SubCommands::Repair { paths } => prepare_and_run(
+                "worktree-repair",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, err| {
+                    core::repository::worktree::repair(repository(Mode::Lenient)?, out, err, paths)
+                },
+            ),
         },
         Subcommands::IsClean | Subcommands::IsChanged => {
             let mode = if matches!(cmd, Subcommands::IsClean) {

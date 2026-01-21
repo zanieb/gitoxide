@@ -337,6 +337,10 @@ pub mod merge_base {
 }
 
 pub mod worktree {
+    use std::path::PathBuf;
+
+    use gix::bstr::BString;
+
     #[derive(Debug, clap::Parser)]
     #[command(about = "Commands for handling worktrees")]
     pub struct Platform {
@@ -348,6 +352,83 @@ pub mod worktree {
     pub enum SubCommands {
         /// List all worktrees, along with some accompanying information.
         List,
+        /// Add a new worktree.
+        Add {
+            /// Path where the new worktree should be created.
+            path: PathBuf,
+            /// A branch, tag, or commit to check out in the new worktree.
+            /// If not specified, defaults to HEAD.
+            commit_ish: Option<String>,
+            /// Check out an existing branch.
+            #[clap(short, long)]
+            branch: Option<String>,
+            /// Create a new branch and check it out.
+            #[clap(short = 'B', long)]
+            new_branch: Option<String>,
+            /// Create the worktree with a detached HEAD.
+            #[clap(long)]
+            detach: bool,
+            /// Lock the worktree after creation.
+            #[clap(long)]
+            lock: bool,
+            /// Don't populate the worktree (skip checkout).
+            #[clap(long)]
+            no_checkout: bool,
+        },
+        /// Remove a worktree.
+        Remove {
+            /// The id of the worktree to remove.
+            #[clap(value_parser = crate::shared::AsBString)]
+            id: BString,
+            /// Force removal. Use once (-f) to remove dirty worktrees.
+            /// Use twice (-f -f) to also remove locked worktrees.
+            #[clap(short, long, action = clap::ArgAction::Count)]
+            force: u8,
+        },
+        /// Lock a worktree to prevent it from being pruned or removed.
+        Lock {
+            /// The id of the worktree to lock.
+            #[clap(value_parser = crate::shared::AsBString)]
+            id: BString,
+            /// An optional reason for locking the worktree.
+            #[clap(long)]
+            reason: Option<String>,
+        },
+        /// Unlock a previously locked worktree.
+        Unlock {
+            /// The id of the worktree to unlock.
+            #[clap(value_parser = crate::shared::AsBString)]
+            id: BString,
+        },
+        /// Remove stale worktree entries.
+        ///
+        /// A worktree is stale if its checkout directory has been deleted
+        /// or moved without using `gix worktree remove`.
+        Prune {
+            /// Only report what would be pruned, don't actually delete anything.
+            #[clap(short = 'n', long)]
+            dry_run: bool,
+        },
+        /// Move a worktree to a new location.
+        Move {
+            /// The id of the worktree to move.
+            #[clap(value_parser = crate::shared::AsBString)]
+            id: BString,
+            /// The new path for the worktree.
+            new_path: PathBuf,
+            /// Force move. Use twice (-f -f) to move locked worktrees.
+            #[clap(short, long, action = clap::ArgAction::Count)]
+            force: u8,
+        },
+        /// Repair worktree links after manual moves.
+        ///
+        /// If worktrees were moved manually (without using `gix worktree move`),
+        /// this command can fix the broken links between the worktree and the
+        /// repository.
+        Repair {
+            /// Specific worktree paths to repair. If not specified, repairs all worktrees.
+            paths: Vec<PathBuf>,
+        },
     }
 }
 

@@ -113,6 +113,26 @@ pub(crate) fn id(git_dir: &std::path::Path, has_common_dir: bool) -> Option<&BSt
 pub mod proxy;
 
 ///
+pub mod remove;
+
+///
+pub mod lock;
+
+///
+pub mod prune;
+
+/// Move a worktree to a new location.
+#[cfg(feature = "worktree-mutation")]
+pub mod r#move;
+
+/// Repair worktree links.
+pub mod repair;
+
+///
+#[cfg(feature = "worktree-mutation")]
+pub mod add;
+
+///
 #[cfg(feature = "index")]
 pub mod open_index {
     /// The error returned by [`Worktree::open_index()`][crate::Worktree::open_index()].
