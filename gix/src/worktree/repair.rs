@@ -124,11 +124,7 @@ impl crate::Repository {
                     if let Some(worktree_path) = worktree_dot_git_path.parent() {
                         if worktree_path.is_dir() {
                             // Verify and potentially repair the .git file
-                            if let Some(repair) = self.repair_dot_git_file(
-                                worktree_path,
-                                &worktree_git_dir,
-                                &id,
-                            )? {
+                            if let Some(repair) = self.repair_dot_git_file(worktree_path, &worktree_git_dir, &id)? {
                                 repairs.push(repair);
                             }
                         }
@@ -147,9 +143,7 @@ impl crate::Repository {
             path.to_owned()
         } else {
             std::env::current_dir()
-                .map_err(|_| Error::InvalidPath {
-                    path: path.to_owned(),
-                })?
+                .map_err(|_| Error::InvalidPath { path: path.to_owned() })?
                 .join(path)
         };
 
@@ -248,12 +242,9 @@ impl crate::Repository {
                 let expected_dot_git = PathBuf::from(content.trim());
                 // Check if this gitdir points to our worktree
                 if expected_dot_git == worktree_dot_git
-                    || expected_dot_git
-                        .canonicalize()
-                        .ok()
-                        .map_or(false, |p| {
-                            worktree_dot_git.canonicalize().ok().map_or(false, |w| p == w)
-                        })
+                    || expected_dot_git.canonicalize().ok().map_or(false, |p| {
+                        worktree_dot_git.canonicalize().ok().map_or(false, |w| p == w)
+                    })
                 {
                     return Ok(admin_dir);
                 }
@@ -286,11 +277,9 @@ impl crate::Repository {
         };
 
         if needs_repair {
-            std::fs::write(&dot_git_path, &expected_content).map_err(|source| {
-                Error::WriteGitFile {
-                    path: dot_git_path.clone(),
-                    source,
-                }
+            std::fs::write(&dot_git_path, &expected_content).map_err(|source| Error::WriteGitFile {
+                path: dot_git_path.clone(),
+                source,
             })?;
 
             Ok(Some(Repair {
@@ -325,11 +314,9 @@ impl crate::Repository {
         };
 
         if needs_repair {
-            std::fs::write(&gitdir_path, &expected_content).map_err(|source| {
-                Error::WriteGitdir {
-                    path: gitdir_path.clone(),
-                    source,
-                }
+            std::fs::write(&gitdir_path, &expected_content).map_err(|source| Error::WriteGitdir {
+                path: gitdir_path.clone(),
+                source,
             })?;
 
             Ok(Some(Repair {

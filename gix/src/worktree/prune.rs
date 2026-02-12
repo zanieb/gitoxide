@@ -105,10 +105,8 @@ impl crate::Repository {
             if let Some(reason) = self.check_prunable(&worktree_git_dir) {
                 if !options.dry_run {
                     // Actually remove the stale worktree entry
-                    std::fs::remove_dir_all(&worktree_git_dir).map_err(|source| Error::RemoveStale {
-                        id: id.clone(),
-                        source,
-                    })?;
+                    std::fs::remove_dir_all(&worktree_git_dir)
+                        .map_err(|source| Error::RemoveStale { id: id.clone(), source })?;
                 }
 
                 pruned.push(PrunedWorktree {

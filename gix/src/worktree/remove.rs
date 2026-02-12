@@ -79,9 +79,9 @@ impl crate::Repository {
         let id = id.into();
 
         // Find the worktree by id
-        let proxy = self.worktree_proxy_by_id(id).ok_or_else(|| Error::NotFound {
-            id: id.to_owned(),
-        })?;
+        let proxy = self
+            .worktree_proxy_by_id(id)
+            .ok_or_else(|| Error::NotFound { id: id.to_owned() })?;
 
         // The main worktree has no id in the worktrees directory, so if we found a proxy,
         // it's a linked worktree. But let's double-check by verifying the git_dir is
@@ -105,10 +105,7 @@ impl crate::Repository {
             if let Ok(base_path) = proxy.base() {
                 if base_path.is_dir() {
                     // Try to open the worktree as a repository and check if it's dirty
-                    let worktree_repo = proxy
-                        .clone()
-                        .into_repo()
-                        .map_err(Error::OpenWorktree)?;
+                    let worktree_repo = proxy.clone().into_repo().map_err(Error::OpenWorktree)?;
 
                     // Check for modified tracked files
                     let is_dirty = worktree_repo.is_dirty().map_err(Error::CheckStatus)?;

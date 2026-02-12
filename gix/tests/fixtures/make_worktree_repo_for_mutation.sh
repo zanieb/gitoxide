@@ -26,4 +26,4 @@ mkdir repo
 )
 
 # Also create a bare repository variant
-git clone --bare --shared repo repo.git
+git clone --bare repo repo.git

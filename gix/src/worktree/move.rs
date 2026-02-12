@@ -65,11 +65,7 @@ impl crate::Repository {
     /// - `2`: Allow moving locked worktrees
     ///
     /// The main worktree cannot be moved.
-    pub fn worktree_move<'a>(
-        &self,
-        id: impl Into<&'a BStr>,
-        new_path: impl AsRef<Path>,
-    ) -> Result<(), Error> {
+    pub fn worktree_move<'a>(&self, id: impl Into<&'a BStr>, new_path: impl AsRef<Path>) -> Result<(), Error> {
         self.worktree_move_inner(id.into(), new_path.as_ref(), Options::default())
     }
 
@@ -87,9 +83,9 @@ impl crate::Repository {
 
     fn worktree_move_inner(&self, id: &BStr, new_path: &Path, options: Options) -> Result<(), Error> {
         // Find the worktree by id
-        let proxy = self.worktree_proxy_by_id(id).ok_or_else(|| Error::NotFound {
-            id: id.to_owned(),
-        })?;
+        let proxy = self
+            .worktree_proxy_by_id(id)
+            .ok_or_else(|| Error::NotFound { id: id.to_owned() })?;
 
         // Verify this is not the main worktree
         let git_dir = proxy.git_dir();
@@ -143,11 +139,12 @@ impl crate::Repository {
         // Update the gitdir file to point to the new location
         let gitdir_path = git_dir.join("gitdir");
         let new_dot_git_path = new_path.join(".git");
-        std::fs::write(&gitdir_path, format!("{}\n", new_dot_git_path.display()))
-            .map_err(|source| Error::UpdateGitdir {
+        std::fs::write(&gitdir_path, format!("{}\n", new_dot_git_path.display())).map_err(|source| {
+            Error::UpdateGitdir {
                 path: gitdir_path,
                 source,
-            })?;
+            }
+        })?;
 
         Ok(())
     }

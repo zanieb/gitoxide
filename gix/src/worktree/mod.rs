@@ -113,6 +113,7 @@ pub(crate) fn id(git_dir: &std::path::Path, has_common_dir: bool) -> Option<&BSt
 pub mod proxy;
 
 ///
+#[cfg(all(feature = "worktree-mutation", feature = "status"))]
 pub mod remove;
 
 ///
@@ -129,7 +130,7 @@ pub mod r#move;
 pub mod repair;
 
 ///
-#[cfg(feature = "worktree-mutation")]
+#[cfg(all(feature = "worktree-mutation", feature = "revision"))]
 pub mod add;
 
 ///

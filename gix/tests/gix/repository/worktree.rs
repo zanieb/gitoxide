@@ -398,10 +398,7 @@ mod mutation {
             let proxy = repo.worktree_add(&worktree_path, options)?;
 
             assert!(proxy.is_locked(), "worktree should be locked");
-            assert!(
-                proxy.git_dir().join("locked").is_file(),
-                "locked file should exist"
-            );
+            assert!(proxy.git_dir().join("locked").is_file(), "locked file should exist");
             Ok(())
         }
 
@@ -419,10 +416,7 @@ mod mutation {
             let _proxy = repo.worktree_add(&worktree_path, options)?;
 
             assert!(worktree_path.join(".git").is_file(), ".git file should exist");
-            assert!(
-                !worktree_path.join("a").exists(),
-                "files should NOT be checked out"
-            );
+            assert!(!worktree_path.join("a").exists(), "files should NOT be checked out");
             Ok(())
         }
 
@@ -653,7 +647,11 @@ mod mutation {
 
             // Both should be visible from the linked worktree too
             let wts_from_linked = first_wt_repo.worktrees()?;
-            assert_eq!(wts_from_linked.len(), 2, "both worktrees should be visible from linked wt");
+            assert_eq!(
+                wts_from_linked.len(),
+                2,
+                "both worktrees should be visible from linked wt"
+            );
 
             // Verify the second worktree is a valid repo
             let second_repo = second_proxy.into_repo()?;
@@ -665,34 +663,22 @@ mod mutation {
         fn from_subdir() -> crate::Result {
             let (repo, _keep) = repo_rw()?;
 
-            // Create a subdirectory in the worktree
-            let subdir = repo.workdir().unwrap().join("subdir");
-            std::fs::create_dir_all(&subdir)?;
+            // Test adding a worktree using a path that is a sibling of the workdir.
+            // Instead of changing the process-global CWD (which breaks parallel tests),
+            // we compute an absolute path that a relative "../sibling-wt" would resolve to.
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("sibling-wt");
 
-            // Change to the subdir and create a worktree with a relative path
-            let old_cwd = std::env::current_dir()?;
-            std::env::set_current_dir(&subdir)?;
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
 
-            let result = (|| -> crate::Result<()> {
-                // Open the repo from the subdir
-                let repo_from_subdir = gix::open_opts(repo.git_dir(), crate::restricted())?;
-
-                // Add worktree using a relative path from the subdir
-                let options = gix::worktree::add::Options {
-                    detach: true,
-                    ..Default::default()
-                };
-                let proxy = repo_from_subdir.worktree_add("../sibling-wt", options)?;
-
-                // Verify the worktree was created correctly
-                let base = proxy.base()?;
-                assert!(base.is_dir());
-                assert!(base.join("a").is_file(), "files should be checked out");
-                Ok(())
-            })();
-
-            std::env::set_current_dir(old_cwd)?;
-            result
+            // Verify the worktree was created correctly
+            let base = proxy.base()?;
+            assert!(base.is_dir());
+            assert!(base.join("a").is_file(), "files should be checked out");
+            Ok(())
         }
 
         #[test]
@@ -872,10 +858,7 @@ mod mutation {
             let worktrees_dir = repo.common_dir().join("worktrees");
 
             // Initially there should be no worktrees directory
-            assert!(
-                !worktrees_dir.exists(),
-                "worktrees dir should not exist initially"
-            );
+            assert!(!worktrees_dir.exists(), "worktrees dir should not exist initially");
 
             // Add a worktree
             let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-cleanup-test");
@@ -952,10 +935,7 @@ mod mutation {
             );
 
             // But with force level 2 it should succeed
-            repo.worktree_remove(
-                worktree_id.as_bstr(),
-                gix::worktree::remove::Options { force: 2 },
-            )?;
+            repo.worktree_remove(worktree_id.as_bstr(), gix::worktree::remove::Options { force: 2 })?;
             Ok(())
         }
 
@@ -1641,7 +1621,12 @@ mod mutation {
         fn move_locked_worktree_with_force() -> crate::Result {
             let (repo, _keep) = repo_rw()?;
             let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-locked-force");
-            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-locked-force-new");
+            let new_path = repo
+                .workdir()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("wt-move-locked-force-new");
 
             // Add a locked worktree
             let options = gix::worktree::add::Options {
