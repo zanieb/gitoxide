@@ -22,6 +22,8 @@ mod reset;
 #[cfg(feature = "revision")]
 mod revision;
 mod signing;
+#[cfg(feature = "worktree-mutation")]
+mod stash;
 #[cfg(feature = "status")]
 mod status;
 #[cfg(feature = "attributes")]
