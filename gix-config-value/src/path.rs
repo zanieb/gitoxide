@@ -60,6 +60,24 @@ pub mod interpolate {
                 let cstr = unsafe { std::ffi::CStr::from_ptr((*pwd).pw_dir) };
                 Some(std::ffi::OsStr::from_bytes(cstr.to_bytes()).into())
             }
+
+            // Fallback for platforms without getpwnam_r
+            #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
+            {
+                use std::os::unix::ffi::OsStrExt;
+                // SAFETY: calling this in a threaded program that modifies the pw database is not actually safe.
+                #[allow(unsafe_code)]
+                let pwd = unsafe { libc::getpwnam(cname.as_ptr()) };
+                if pwd.is_null() {
+                    None
+                } else {
+                    // SAFETY: pw_dir is a cstr and it lives as long as nobody changes the pw database
+                    //         from another thread.
+                    #[allow(unsafe_code)]
+                    let cstr = unsafe { std::ffi::CStr::from_ptr((*pwd).pw_dir) };
+                    Some(std::ffi::OsStr::from_bytes(cstr.to_bytes()).into())
+                }
+            }
         }
         #[cfg(any(
             target_os = "android",
