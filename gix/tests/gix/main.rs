@@ -16,6 +16,8 @@ mod init;
 #[cfg(feature = "note")]
 mod note;
 mod object;
+#[cfg(feature = "blocking-network-client")]
+mod push;
 mod reference;
 mod remote;
 mod repository;
