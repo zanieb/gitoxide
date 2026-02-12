@@ -67,7 +67,8 @@ extras = [
     "interrupt",
     "status",
     "dirwalk",
-    "blame"
+    "blame",
+    "hooks"
 ]
 
 ## A collection of features that need a larger MSRV, and thus are disabled by default.
@@ -127,6 +128,10 @@ sha1 = [
 
 ## Provide a top-level `command` module that helps with spawning commands similarly to `git`.
 command = ["dep:gix-command"]
+
+## Discover and execute Git hooks (pre-commit, commit-msg, pre-push, etc.).
+## Requires the `attributes` feature for command context support.
+hooks = ["command", "attributes"]
 
 ## Obtain information similar to `git status`.
 status = ["gix-status", "dirwalk", "index", "blob-diff", "gix-diff/index"]

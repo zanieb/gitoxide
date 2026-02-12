@@ -7,6 +7,8 @@ mod config;
 mod excludes;
 #[cfg(feature = "attributes")]
 mod filter;
+#[cfg(feature = "hooks")]
+mod hook;
 #[cfg(feature = "merge")]
 mod merge;
 mod object;
