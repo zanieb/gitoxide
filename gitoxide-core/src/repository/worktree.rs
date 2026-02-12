@@ -10,10 +10,7 @@ pub fn list(repo: gix::Repository, out: &mut dyn std::io::Write, format: OutputF
 
     if let Some(worktree) = repo.worktree() {
         let locked_info = if worktree.is_locked() {
-            let reason = worktree
-                .lock_reason()
-                .map(|r| format!(" ({})", r))
-                .unwrap_or_default();
+            let reason = worktree.lock_reason().map(|r| format!(" ({})", r)).unwrap_or_default();
             format!(" locked{reason}")
         } else {
             String::new()
@@ -29,10 +26,7 @@ pub fn list(repo: gix::Repository, out: &mut dyn std::io::Write, format: OutputF
     }
     for proxy in repo.worktrees()? {
         let locked_info = if proxy.is_locked() {
-            let reason = proxy
-                .lock_reason()
-                .map(|r| format!(" ({})", r))
-                .unwrap_or_default();
+            let reason = proxy.lock_reason().map(|r| format!(" ({})", r)).unwrap_or_default();
             format!(" locked{reason}")
         } else {
             String::new()
@@ -41,11 +35,7 @@ pub fn list(repo: gix::Repository, out: &mut dyn std::io::Write, format: OutputF
             .base()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "<missing>".to_string());
-        writeln!(
-            out,
-            "{base_display} [{name}]{locked_info}",
-            name = proxy.id()
-        )?;
+        writeln!(out, "{base_display} [{name}]{locked_info}", name = proxy.id())?;
     }
     Ok(())
 }
@@ -141,9 +131,7 @@ pub fn prune(
     err: &mut dyn std::io::Write,
     opts: PruneOptions,
 ) -> anyhow::Result<()> {
-    let options = gix::worktree::prune::Options {
-        dry_run: opts.dry_run,
-    };
+    let options = gix::worktree::prune::Options { dry_run: opts.dry_run };
 
     let pruned = repo.worktree_prune(options)?;
 
