@@ -98,7 +98,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] use credential helper configuration and to obtain credentials with `gix_credentials::helper::Cascade`
     * **traverse**
         * [x] commit graphs
-        * [ ] make [git-notes](https://git-scm.com/docs/git-notes) accessible
+        * [x] make [git-notes](https://git-scm.com/docs/git-notes) accessible
         * [x] tree entries
     * **diffs/changes**
         * [x] tree with other tree
@@ -135,7 +135,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * **Objects**
         * [x] lookup
         * [x] peel to object kind
-        * [ ] create [signed commits and tags](https://github.com/GitoxideLabs/gitoxide/issues/12)
+        * [x] create [signed commits and tags](https://github.com/GitoxideLabs/gitoxide/issues/12)
         * **trees**
             * [x] lookup path
             * [x] edit
@@ -157,7 +157,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
             * [x] 'ref-in-want'
             * [ ] 'wanted-ref'
             * [x] standard negotiation algorithms `consecutive`, `skipping` and `noop`.
-        * [ ] push
+        * [x] push
         * [x] ls-refs
         * [x] ls-refs with ref-spec filter
         * [x] list, find by name
@@ -167,8 +167,8 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] apply transport and remote configuration from `git-config`, including `http.*`
         * [ ] groups
         * [ ] [remote and branch files](https://github.com/git/git/blob/master/remote.c#L300)
-    * [ ] execute hooks
-        * [ ] respect [`core.hooksPath`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)
+    * [x] execute hooks
+        * [x] respect [`core.hooksPath`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)
         * [ ] client-side hooks for checkout, commit, rebase, merge, am and push
         * [ ] receive-side hooks and [`reference-transaction`](https://git-scm.com/docs/githooks#_reference_transaction)
     * **refs**
@@ -181,7 +181,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [ ] sparse checkout support
         * [x] read per-worktree config if `extensions.worktreeConfig` is enabled.
         * **index**
-            * [ ] tree from index
+            * [x] tree from index
             * [x] index from tree
     * **worktrees**
         * [x] open a repository with worktrees
@@ -199,18 +199,18 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] read the primitive types `boolean`, `integer`, `string`
         * [x] read and interpolate trusted paths
         * [x] low-level API for more elaborate access to all details of `git-config` files
-        * [ ] a way to make changes to individual configuration files in memory
-        * [ ] write configuration back
+        * [x] a way to make changes to individual configuration files in memory
+        * [x] write configuration back
         * [ ] auto-refresh configuration values after they changed on disk
         * [ ] facilities to apply the [url-match](https://git-scm.com/docs/git-config#Documentation/git-config.txt-httplturlgt) algorithm and to [normalize urls](https://github.com/git/git/blob/be1a02a17ede4082a86dfbfee0f54f345e8b43ac/urlmatch.c#L109:L109) before comparison.
     * [x] mailmap
     * [x] object replacements (`git replace`)
     * [x] read git configuration
     * [ ] merging
-    * [ ] stashing
+    * [x] stashing (save, apply, pop, drop, list, --keep-index, --include-untracked)
     * [ ] Use _Commit Graph_ to speed up certain queries
     * [ ] subtree
-    * [ ] interactive rebase status/manipulation
+    * [x] interactive rebase status/manipulation (state read/write + step-by-step driver)
     * **submodules**
         * [x] handle 'old' form for reading and detect old form
         * [x] list
@@ -357,7 +357,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
 * **blobs**
     * **patches**
         * There are various ways to generate a patch from two blobs.
-        * [ ] text
+        * [x] text
         * [ ] binary
         * [ ] `git-apply` compatibility
         * [ ] merge hunks that are close enough based on line-setting (`interhunk-lines`)
@@ -417,13 +417,13 @@ Check out the [performance discussion][gix-diff-performance] as well.
 ### gix-blame
 
 * [x] commit-annotations for a single file
-    - [ ] progress
-    - [ ] interruptibility
+    - [x] progress (via `file_with_progress()` with `AtomicUsize` counter)
+    - [x] interruptibility
     - [ ] streaming
-- [ ] support for worktree changes (creates virtual commit on top of `HEAD`) 
+- [x] support for worktree changes (`worktree_blob` option, attributes to null ObjectId)
 - [ ] shallow-history support
 - [ ] rename tracking (track different paths through history)
-- [ ] commits to ignore
+- [x] commits to ignore
 - [ ] pass all blame-cornercases (from Git)
 * **Performance-Improvements**
     * Without the following the performance isn't competitive with Git.
@@ -554,9 +554,10 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
     * [x] packfile negotiation
         * [x] delegate can support for all fetch features, including shallow, deepen, etc.
         * [x] receive parsed shallow refs
-* [ ] push
-    * [ ] send-pack / receive-pack client plumbing
-    * [ ] report-status, sideband, delete-refs, push-options and atomic pushes
+* [x] push
+    * [x] send-pack / receive-pack client plumbing
+    * [x] report-status, sideband, delete-refs and atomic pushes
+    * [ ] push-options and dry-run
     * [ ] object-format negotiation
 * [ ] upload-pack / receive-pack server plumbing for in-process transports
 * [ ] bundle-uri protocol integration
@@ -619,7 +620,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 
 A mechanism to associate metadata with any object, and keep revisions of it using git itself.
 
-* [ ] CRUD for git notes
+* [x] CRUD for git notes
 
 ### gix-negotiate
 * **algorithms**
@@ -688,8 +689,8 @@ Provides a trust model to share across gitoxide crates. It helps configuring how
    * [x] gix
 
 ### gix-rebase
-* [ ] obtain rebase status
-* [ ] drive a rebase operation
+* [x] obtain rebase status
+* [x] drive a rebase operation (pick, reword, edit, squash, fixup, drop, break, noop via `Driver` trait)
     * [ ] apply backend
     * [ ] merge backend
     * [ ] [`--onto`, `--keep-base`, `--fork-point`, `--rebase-merges`](https://git-scm.com/docs/git-rebase)
@@ -896,7 +897,7 @@ The git staging area.
     * [ ] IEOT index entry offset table
     * [ ] 'link' base indices to take information from, split index
     * [ ] 'sdir' sparse directory entries
-* [ ] add and remove entries
+* [x] add and remove entries
 * [x] API documentation
     * [ ] Some examples
 
@@ -1037,7 +1038,11 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
       * [x] find single ref by name
       * [x] iterate refs with optional prefix
       * [x] handle unsorted packed refs and those without a header
-  * [ ] **[reftable][reftable-spec]**,
+  * [x] **[reftable][reftable-spec]** (gix-reftable crate)
+    * [x] C Git-compatible binary format (MSB-first varint, BE24 block_len, absolute restarts, CRC32 footer)
+    * [x] ref record read/write with prefix compression
+    * [x] log record support with zlib compression
+    * [x] stack management (tables.list manifest)
     * see [here for a Go/C implementation][reftable-impl]
 * [x] API documentation
     * [ ] Some examples

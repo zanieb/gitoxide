@@ -71,13 +71,6 @@ mod thread_safe;
 mod worktree;
 
 ///
-#[cfg(feature = "worktree-mutation")]
-pub mod reset;
-
-#[cfg(feature = "worktree-mutation")]
-pub(crate) mod worktree_ops;
-
-///
 mod new_commit {
     /// The error returned by [`new_commit(…)`](crate::Repository::new_commit()).
     #[derive(Debug, thiserror::Error)]
@@ -579,3 +572,14 @@ pub mod worktree_archive {
     /// The error returned by [`Repository::worktree_archive()`](crate::Repository::worktree_archive()).
     pub type Error = gix_error::Error;
 }
+
+///
+#[cfg(feature = "worktree-mutation")]
+pub mod reset;
+
+///
+#[cfg(feature = "worktree-mutation")]
+pub mod stash;
+
+#[cfg(feature = "worktree-mutation")]
+pub(crate) mod worktree_ops;
