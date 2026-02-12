@@ -1475,6 +1475,7 @@ dependencies = [
  "gix-archive",
  "gix-attributes",
  "gix-blame",
+ "gix-bundle",
  "gix-command",
  "gix-commitgraph",
  "gix-config",
