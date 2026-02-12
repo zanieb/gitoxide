@@ -102,8 +102,7 @@ impl crate::Repository {
         let path = path.as_ref();
 
         // Validate mutually exclusive options
-        let option_count =
-            options.branch.is_some() as u8 + options.new_branch.is_some() as u8 + options.detach as u8;
+        let option_count = options.branch.is_some() as u8 + options.new_branch.is_some() as u8 + options.detach as u8;
         if option_count > 1 {
             return Err(Error::MutuallyExclusiveOptions);
         }
@@ -114,10 +113,8 @@ impl crate::Repository {
 
         // Validate path doesn't exist or is empty
         if path.exists() {
-            let is_empty_dir = path.is_dir()
-                && std::fs::read_dir(path)
-                    .map(|mut d| d.next().is_none())
-                    .unwrap_or(false);
+            let is_empty_dir =
+                path.is_dir() && std::fs::read_dir(path).map(|mut d| d.next().is_none()).unwrap_or(false);
             if !is_empty_dir {
                 return Err(Error::PathExists { path: path.to_owned() });
             }
@@ -181,8 +178,10 @@ impl crate::Repository {
         .map_err(|source| Error::WriteFile { file: "gitdir", source })?;
 
         // 2. commondir: relative path to the common directory
-        std::fs::write(worktree_git_dir.join("commondir"), "../..\n")
-            .map_err(|source| Error::WriteFile { file: "commondir", source })?;
+        std::fs::write(worktree_git_dir.join("commondir"), "../..\n").map_err(|source| Error::WriteFile {
+            file: "commondir",
+            source,
+        })?;
 
         // 3. HEAD: symbolic ref or detached commit id
         match &head_target {
@@ -200,11 +199,8 @@ impl crate::Repository {
         }
 
         // Write the .git file in the worktree pointing back
-        std::fs::write(
-            &worktree_dot_git,
-            format!("gitdir: {}\n", worktree_git_dir.display()),
-        )
-        .map_err(|source| Error::WriteFile { file: ".git", source })?;
+        std::fs::write(&worktree_dot_git, format!("gitdir: {}\n", worktree_git_dir.display()))
+            .map_err(|source| Error::WriteFile { file: ".git", source })?;
 
         // If a new branch is requested, create it in the main repo before opening the worktree
         if let Some(new_branch_name) = options.new_branch {
@@ -377,10 +373,7 @@ enum HeadTarget {
 }
 
 fn sanitize_worktree_id(path: &Path) -> String {
-    let basename = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("worktree");
+    let basename = path.file_name().and_then(|s| s.to_str()).unwrap_or("worktree");
 
     // Replace characters that are not allowed in ref names
     basename
@@ -435,10 +428,7 @@ fn checkout_worktree(repo: &crate::Repository) -> Result<(), Error> {
 
     // Create index from tree
     let index = gix_index::State::from_tree(&tree_id, &repo.objects, Default::default()).map_err(|e| {
-        Error::Checkout(crate::clone::checkout::main_worktree::Error::IndexFromTree {
-            id: tree_id,
-            source: e,
-        })
+        Error::Checkout(crate::clone::checkout::main_worktree::Error::IndexFromTree { id: tree_id, source: e })
     })?;
     let mut index = gix_index::File::from_state(index, repo.index_path());
 
@@ -455,9 +445,10 @@ fn checkout_worktree(repo: &crate::Repository) -> Result<(), Error> {
     gix_worktree_state::checkout(
         &mut index,
         workdir,
-        repo.objects.clone().into_arc().map_err(|e| {
-            Error::Checkout(crate::clone::checkout::main_worktree::Error::OpenArcOdb(e))
-        })?,
+        repo.objects
+            .clone()
+            .into_arc()
+            .map_err(|e| Error::Checkout(crate::clone::checkout::main_worktree::Error::OpenArcOdb(e)))?,
         &files,
         &bytes,
         &should_interrupt,

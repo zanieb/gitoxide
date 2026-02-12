@@ -49,9 +49,9 @@ impl crate::Repository {
         let id = id.into();
 
         // Find the worktree by id
-        let proxy = self.worktree_proxy_by_id(id).ok_or_else(|| Error::NotFound {
-            id: id.to_owned(),
-        })?;
+        let proxy = self
+            .worktree_proxy_by_id(id)
+            .ok_or_else(|| Error::NotFound { id: id.to_owned() })?;
 
         // Verify this is not the main worktree (main worktree has no entry in worktrees/)
         let git_dir = proxy.git_dir();
@@ -65,10 +65,7 @@ impl crate::Repository {
         }
 
         // Write the lock file
-        let lock_content = options
-            .reason
-            .map(|r| r.to_vec())
-            .unwrap_or_default();
+        let lock_content = options.reason.map(|r| r.to_vec()).unwrap_or_default();
         std::fs::write(git_dir.join("locked"), lock_content).map_err(Error::WriteLock)?;
 
         Ok(())
@@ -84,9 +81,9 @@ impl crate::Repository {
         let id = id.into();
 
         // Find the worktree by id
-        let proxy = self.worktree_proxy_by_id(id).ok_or_else(|| UnlockError::NotFound {
-            id: id.to_owned(),
-        })?;
+        let proxy = self
+            .worktree_proxy_by_id(id)
+            .ok_or_else(|| UnlockError::NotFound { id: id.to_owned() })?;
 
         // Verify this is not the main worktree
         let git_dir = proxy.git_dir();
