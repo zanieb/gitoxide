@@ -2,7 +2,13 @@ use std::path::Path;
 
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-/// An account based identity
+/// An account based identity.
+///
+/// Note: Sensitive fields (`password`, `oauth_refresh_token`) are stored as plain
+/// `String` values. Callers handling credentials should clear these fields when
+/// they are no longer needed (e.g., `password.clear()` or reassigning to an empty
+/// string). A future version may use a zeroing wrapper type (like `zeroize::Zeroizing`)
+/// to automatically clear credentials on drop.
 pub struct Account {
     /// The user's name
     pub username: String,
@@ -10,6 +16,32 @@ pub struct Account {
     pub password: String,
     /// An OAuth refresh token that may accompany the password. It is to be treated confidentially, just like the password.
     pub oauth_refresh_token: Option<String>,
+}
+
+impl Account {
+    /// Clear sensitive credential fields (password and OAuth refresh token) in place,
+    /// overwriting their memory with zeros as a defense-in-depth measure.
+    ///
+    /// This should be called when the credentials are no longer needed.
+    pub fn clear_secrets(&mut self) {
+        zero_string(&mut self.password);
+        if let Some(ref mut token) = self.oauth_refresh_token {
+            zero_string(token);
+        }
+    }
+}
+
+/// Overwrite a string's buffer with zeros in a way that is less likely to be
+/// optimized away.
+fn zero_string(s: &mut String) {
+    // SAFETY: filling valid UTF-8 bytes with 0 produces a byte sequence of NUL
+    // bytes, which is still valid UTF-8. The string is about to be cleared.
+    #[allow(unsafe_code)]
+    let bytes = unsafe { s.as_bytes_mut() };
+    bytes.fill(0);
+    // Use a compiler fence to prevent the optimizer from removing the fill.
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    s.clear();
 }
 
 /// Returns true if the given `path` is owned by the user who is executing the current process.
