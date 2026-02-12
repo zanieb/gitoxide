@@ -1496,6 +1496,7 @@ dependencies = [
  "gix-mailmap",
  "gix-merge",
  "gix-negotiate",
+ "gix-note",
  "gix-object",
  "gix-odb",
  "gix-pack",
@@ -1623,6 +1624,16 @@ dependencies = [
  "gix-worktree",
  "pretty_assertions",
  "smallvec",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "gix-bundle"
+version = "0.1.0"
+dependencies = [
+ "bstr",
+ "gix-hash",
+ "gix-testtools",
  "thiserror 2.0.18",
 ]
 
@@ -2076,6 +2087,12 @@ dependencies = [
 [[package]]
 name = "gix-note"
 version = "0.0.0"
+dependencies = [
+ "bstr",
+ "gix-hash",
+ "gix-object",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "gix-object"
@@ -2269,6 +2286,14 @@ dependencies = [
 [[package]]
 name = "gix-rebase"
 version = "0.0.0"
+dependencies = [
+ "bstr",
+ "gix-hash",
+ "gix-object",
+ "gix-sequencer",
+ "tempfile",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "gix-ref"
@@ -2379,6 +2404,11 @@ dependencies = [
 [[package]]
 name = "gix-sequencer"
 version = "0.0.0"
+dependencies = [
+ "bstr",
+ "gix-hash",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "gix-shallow"

@@ -10,6 +10,8 @@ mod diff;
 mod head;
 mod id;
 mod init;
+#[cfg(feature = "note")]
+mod note;
 mod object;
 mod reference;
 mod remote;
