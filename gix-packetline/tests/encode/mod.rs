@@ -86,6 +86,72 @@ mod error {
     }
 }
 
+mod proptests {
+    #[cfg(all(feature = "async-io", not(feature = "blocking-io")))]
+    use gix_packetline::async_io::encode::data_to_write;
+    #[cfg(all(feature = "blocking-io", not(feature = "async-io")))]
+    use gix_packetline::blocking_io::encode::data_to_write;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn data_encode_decode_roundtrip(data in proptest::collection::vec(any::<u8>(), 1..=65516)) {
+            let mut buf = Vec::new();
+            #[cfg(feature = "blocking-io")]
+            {
+                data_to_write(&data, &mut buf).expect("encoding valid-size data must succeed");
+            }
+            #[cfg(all(feature = "async-io", not(feature = "blocking-io")))]
+            {
+                async_std::task::block_on(async {
+                    data_to_write(&data, &mut buf).await.expect("encoding valid-size data must succeed");
+                });
+            }
+            let line = gix_packetline::decode::all_at_once(&buf).expect("decoding encoded data must succeed");
+            prop_assert_eq!(line.as_slice().expect("data line"), data.as_slice());
+        }
+
+        #[test]
+        fn streaming_multi_packet_parse(
+            items in proptest::collection::vec(
+                proptest::collection::vec(any::<u8>(), 1..=100),
+                1..=10
+            )
+        ) {
+            // Encode multiple packet lines, concatenate, then parse them all with streaming decoder
+            let mut wire = Vec::new();
+            for item in &items {
+                #[cfg(feature = "blocking-io")]
+                {
+                    data_to_write(item, &mut wire).expect("encode");
+                }
+                #[cfg(all(feature = "async-io", not(feature = "blocking-io")))]
+                {
+                    async_std::task::block_on(async {
+                        data_to_write(item, &mut wire).await.expect("encode");
+                    });
+                }
+            }
+
+            let mut remaining = wire.as_slice();
+            let mut parsed = Vec::new();
+            while !remaining.is_empty() {
+                match gix_packetline::decode::streaming(remaining).expect("no error") {
+                    gix_packetline::decode::Stream::Complete { line, bytes_consumed } => {
+                        parsed.push(line.as_slice().expect("data").to_vec());
+                        remaining = &remaining[bytes_consumed..];
+                    }
+                    gix_packetline::decode::Stream::Incomplete { .. } => break,
+                }
+            }
+            prop_assert_eq!(parsed.len(), items.len(), "must parse all {} items", items.len());
+            for (parsed_item, original) in parsed.iter().zip(items.iter()) {
+                prop_assert_eq!(parsed_item, original);
+            }
+        }
+    }
+}
+
 mod flush_delim_response_end {
     use bstr::ByteSlice;
     #[cfg(all(feature = "async-io", not(feature = "blocking-io")))]
