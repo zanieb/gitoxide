@@ -519,6 +519,104 @@ fn empty() -> crate::Result {
     Ok(())
 }
 
+#[test]
+fn vec_u8_delegate() -> crate::Result {
+    let a = "hello\nworld\n";
+    let b = "hello\nrust\n";
+
+    let interner = gix_diff::blob::intern::InternedInput::new(a, b);
+    let actual: Vec<u8> = gix_diff::blob::diff(
+        Algorithm::Myers,
+        &interner,
+        UnifiedDiff::new(
+            &interner,
+            ConsumeBinaryHunk::new(Vec::<u8>::new(), "\n"),
+            ContextSize::symmetrical(3),
+        ),
+    )?;
+
+    let output = String::from_utf8(actual)?;
+    insta::assert_snapshot!(output, @r"
+    @@ -1,2 +1,2 @@
+     hello
+    -world
+    +rust
+    ");
+    Ok(())
+}
+
+#[test]
+fn bstring_delegate() -> crate::Result {
+    let a = "line1\nline2\n";
+    let b = "line1\nchanged\n";
+
+    let interner = gix_diff::blob::intern::InternedInput::new(a, b);
+    let actual: BString = gix_diff::blob::diff(
+        Algorithm::Myers,
+        &interner,
+        UnifiedDiff::new(
+            &interner,
+            ConsumeBinaryHunk::new(BString::default(), "\n"),
+            ContextSize::symmetrical(3),
+        ),
+    )?;
+
+    let output = actual.to_string();
+    assert!(output.contains("-line2"), "should have removed line: {output:?}");
+    assert!(output.contains("+changed"), "should have added line: {output:?}");
+    Ok(())
+}
+
+#[test]
+fn large_context_on_small_file() -> crate::Result {
+    // Context size larger than the file shouldn't cause issues.
+    let a = "a\nb\n";
+    let b = "a\nc\n";
+
+    let interner = gix_diff::blob::intern::InternedInput::new(a, b);
+    let actual = gix_diff::blob::diff(
+        Algorithm::Myers,
+        &interner,
+        UnifiedDiff::new(
+            &interner,
+            ConsumeBinaryHunk::new(String::new(), "\n"),
+            ContextSize::symmetrical(100),
+        ),
+    )?;
+
+    insta::assert_snapshot!(actual, @r"
+    @@ -1,2 +1,2 @@
+     a
+    -b
+    +c
+    ");
+    Ok(())
+}
+
+#[test]
+fn single_line_change() -> crate::Result {
+    let a = "only line";
+    let b = "changed line";
+
+    let interner = gix_diff::blob::intern::InternedInput::new(a, b);
+    let actual = gix_diff::blob::diff(
+        Algorithm::Myers,
+        &interner,
+        UnifiedDiff::new(
+            &interner,
+            ConsumeBinaryHunk::new(String::new(), "\n"),
+            ContextSize::symmetrical(3),
+        ),
+    )?;
+
+    insta::assert_snapshot!(actual, @r"
+    @@ -1,1 +1,1 @@
+    -only line
+    +changed line
+    ");
+    Ok(())
+}
+
 struct Recorder {
     #[allow(clippy::type_complexity)]
     hunks: Vec<((u32, u32), (u32, u32), String)>,

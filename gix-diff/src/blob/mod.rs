@@ -50,6 +50,10 @@ pub mod platform;
 pub mod unified_diff;
 pub use unified_diff::impls::UnifiedDiff;
 
+/// Produce complete unified diff patches compatible with `git diff` output,
+/// including file headers, index lines, mode annotations, and no-newline markers.
+pub mod patch;
+
 /// Information about the diff performed to detect similarity.
 #[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
 pub struct DiffLineStats {
