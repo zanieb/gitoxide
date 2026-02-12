@@ -1,0 +1,26 @@
+lints.workspace = true
+
+[package]
+name = "gix-reftable"
+version = "0.0.0"
+repository = "https://github.com/GitoxideLabs/gitoxide"
+license = "MIT OR Apache-2.0"
+description = "A crate of the gitoxide project implementing the reftable binary format"
+authors = ["Sebastian Thiel <sebastian.thiel@icloud.com>"]
+edition = "2021"
+rust-version = "1.82"
+
+[lib]
+doctest = false
+
+[dependencies]
+gix-hash = { version = "^0.22.0", path = "../gix-hash" }
+thiserror = "2.0.0"
+bstr = { version = "1.5.0", default-features = false, features = ["std"] }
+crc32fast = "1.5.0"
+flate2 = "1.0"
+
+[dev-dependencies]
+proptest = "1.6.0"
+tempfile = "3"
+bstr = { version = "1.5.0", default-features = false, features = ["std"] }

@@ -256,6 +256,7 @@ members = [
     "gix-mailmap",
     "gix-macros",
     "gix-note",
+    "gix-reftable",
     "gix-negotiate",
     "gix-fetchhead",
     "gix-prompt",
