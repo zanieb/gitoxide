@@ -579,6 +579,24 @@ pub fn main() -> Result<()> {
                     )
                 },
             ),
+            #[cfg(feature = "gitoxide-core-blocking-client")]
+            crate::plumbing::options::submodule::Subcommands::Update { init, recursive } => prepare_and_run(
+                "submodule-update",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |progress, out, _err| {
+                    core::repository::submodule::update(
+                        repository(Mode::Lenient)?,
+                        out,
+                        progress,
+                        format,
+                        core::repository::submodule::UpdateOptions { init, recursive },
+                    )
+                },
+            ),
         },
         #[cfg(feature = "gitoxide-core-tools-archive")]
         Subcommands::Archive(crate::plumbing::options::archive::Platform {

@@ -1308,6 +1308,16 @@ pub mod submodule {
             #[clap(short = 'd', long)]
             dirty_suffix: Option<Option<String>>,
         },
+        /// Update submodules by cloning missing ones and checking out the commit recorded in the superproject.
+        #[cfg(feature = "gitoxide-core-blocking-client")]
+        Update {
+            /// Initialize submodules that have not yet been initialized before updating.
+            #[clap(long)]
+            init: bool,
+            /// Recursively update nested submodules.
+            #[clap(long)]
+            recursive: bool,
+        },
     }
 }
 
