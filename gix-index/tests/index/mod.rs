@@ -3,6 +3,7 @@ mod entry;
 mod file;
 mod fs;
 mod init;
+mod write_tree;
 
 use std::path::{Path, PathBuf};
 

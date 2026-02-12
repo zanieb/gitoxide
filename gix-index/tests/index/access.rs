@@ -552,3 +552,263 @@ fn path_is_directory_icase_with_clashes() {
         "x is a symlink, not a directory"
     );
 }
+
+#[test]
+fn add_entry_inserts_at_correct_position() {
+    let mut state = gix_index::State::new(gix_hash::Kind::Sha1);
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    let flags = gix_index::entry::Flags::empty();
+    let mode = gix_index::entry::Mode::FILE;
+
+    // Insert entries out of order -- add_entry should place them correctly.
+    assert!(state.add_entry(stat, id, flags, mode, "c.txt".into()).is_none());
+    assert!(state.add_entry(stat, id, flags, mode, "a.txt".into()).is_none());
+    assert!(state.add_entry(stat, id, flags, mode, "b.txt".into()).is_none());
+
+    assert_eq!(state.entries().len(), 3);
+    let paths: Vec<&bstr::BStr> = state.entries().iter().map(|e| e.path(&state)).collect();
+    assert_eq!(paths, &["a.txt", "b.txt", "c.txt"], "entries must be sorted");
+    assert!(state.verify_entries().is_ok(), "sort invariant must hold");
+}
+
+#[test]
+fn add_entry_replaces_existing() {
+    let mut state = gix_index::State::new(gix_hash::Kind::Sha1);
+    let stat = gix_index::entry::Stat::default();
+    let id_a = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    let id_b = gix_hash::ObjectId::from_hex(b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+    let flags = gix_index::entry::Flags::empty();
+    let mode = gix_index::entry::Mode::FILE;
+
+    assert!(
+        state.add_entry(stat, id_a, flags, mode, "file.txt".into()).is_none(),
+        "first insert returns None"
+    );
+    let old = state
+        .add_entry(stat, id_b, flags, mode, "file.txt".into())
+        .expect("replacing returns old entry");
+    assert_eq!(old.id, id_a);
+    assert_eq!(state.entries().len(), 1, "entry was replaced, not added");
+    assert_eq!(state.entries()[0].id, id_b);
+}
+
+#[test]
+fn add_entry_different_stages_coexist() {
+    use gix_index::entry::{Flags, Stage};
+
+    let mut state = gix_index::State::new(gix_hash::Kind::Sha1);
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    let mode = gix_index::entry::Mode::FILE;
+
+    // Add entries at different stages for the same path.
+    state.add_entry(
+        stat,
+        id,
+        Flags::from_stage(Stage::Unconflicted),
+        mode,
+        "conflict".into(),
+    );
+    state.add_entry(stat, id, Flags::from_stage(Stage::Ours), mode, "conflict".into());
+    state.add_entry(stat, id, Flags::from_stage(Stage::Theirs), mode, "conflict".into());
+
+    assert_eq!(state.entries().len(), 3, "three stages for the same path");
+    assert!(state.verify_entries().is_ok(), "sort invariant must hold");
+}
+
+#[test]
+fn add_entry_invalidates_tree_extension() {
+    let worktree_dir =
+        gix_testtools::scripted_fixture_read_only_standalone("make_index/v2_more_files.sh").expect("fixture works");
+    let git_dir = worktree_dir.join(".git");
+    let odb = gix_odb::at(git_dir.join("objects")).expect("odb");
+    let head_tree_hex = std::fs::read_to_string(worktree_dir.join("head.tree")).expect("head.tree exists");
+    let tree_id: gix_hash::ObjectId = head_tree_hex.trim().parse().expect("valid hash");
+
+    let mut state = gix_index::State::from_tree(&tree_id, &odb, Default::default()).expect("from_tree");
+
+    // Manually set up a tree extension by writing it once.
+    fn hash_tree(tree: &gix_object::Tree) -> Result<gix_hash::ObjectId, std::io::Error> {
+        use gix_object::WriteTo;
+        let mut buf = Vec::new();
+        tree.write_to(&mut buf)?;
+        let header = format!("tree {}\0", buf.len());
+        let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
+        hasher.update(header.as_bytes());
+        hasher.update(&buf);
+        hasher
+            .try_finalize()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+    state.write_tree_to(hash_tree).expect("write_tree_to");
+    assert!(
+        state.tree().expect("tree extension set").num_entries.is_some(),
+        "tree extension is valid before mutation"
+    );
+
+    // Now add an entry -- the root tree should be invalidated.
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    state.add_entry(
+        stat,
+        id,
+        gix_index::entry::Flags::empty(),
+        gix_index::entry::Mode::FILE,
+        "new_file.txt".into(),
+    );
+
+    assert_eq!(
+        state.tree().expect("tree extension still present").num_entries,
+        None,
+        "root tree node should be invalidated after adding an entry"
+    );
+}
+
+#[test]
+fn add_entry_invalidates_tree_extension_for_nested_path() {
+    let mut state = gix_index::State::new(gix_hash::Kind::Sha1);
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    let flags = gix_index::entry::Flags::empty();
+    let mode = gix_index::entry::Mode::FILE;
+
+    // Populate some entries.
+    state.add_entry(stat, id, flags, mode, "a/b/c.txt".into());
+    state.add_entry(stat, id, flags, mode, "a/d.txt".into());
+    state.add_entry(stat, id, flags, mode, "x.txt".into());
+
+    // Build the TREE extension by writing.
+    fn hash_tree(tree: &gix_object::Tree) -> Result<gix_hash::ObjectId, std::io::Error> {
+        use gix_object::WriteTo;
+        let mut buf = Vec::new();
+        tree.write_to(&mut buf)?;
+        let header = format!("tree {}\0", buf.len());
+        let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
+        hasher.update(header.as_bytes());
+        hasher.update(&buf);
+        hasher
+            .try_finalize()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+    state.write_tree_to(hash_tree).expect("write_tree_to");
+    let tree = state.tree().expect("tree ext");
+    assert!(tree.num_entries.is_some(), "root valid");
+    // Find child "a"
+    let child_a = tree
+        .children
+        .iter()
+        .find(|c| c.name.as_slice() == b"a")
+        .expect("child a");
+    assert!(child_a.num_entries.is_some(), "child a valid");
+    let child_b = child_a
+        .children
+        .iter()
+        .find(|c| c.name.as_slice() == b"b")
+        .expect("child b");
+    assert!(child_b.num_entries.is_some(), "child b valid");
+
+    // Add an entry under a/b/ -- should invalidate root, a, and b but NOT other nodes.
+    state.add_entry(stat, id, flags, mode, "a/b/new.txt".into());
+
+    let tree = state.tree().expect("tree ext");
+    assert_eq!(tree.num_entries, None, "root invalidated");
+    let child_a = tree
+        .children
+        .iter()
+        .find(|c| c.name.as_slice() == b"a")
+        .expect("child a");
+    assert_eq!(child_a.num_entries, None, "child a invalidated");
+    let child_b = child_a
+        .children
+        .iter()
+        .find(|c| c.name.as_slice() == b"b")
+        .expect("child b");
+    assert_eq!(child_b.num_entries, None, "child b invalidated");
+}
+
+#[test]
+fn remove_entry_by_path_and_stage_basic() {
+    let mut state = gix_index::State::new(gix_hash::Kind::Sha1);
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    let flags = gix_index::entry::Flags::empty();
+    let mode = gix_index::entry::Mode::FILE;
+
+    state.add_entry(stat, id, flags, mode, "a.txt".into());
+    state.add_entry(stat, id, flags, mode, "b.txt".into());
+    state.add_entry(stat, id, flags, mode, "c.txt".into());
+    assert_eq!(state.entries().len(), 3);
+
+    let removed = state
+        .remove_entry_by_path_and_stage("b.txt".into(), gix_index::entry::Stage::Unconflicted)
+        .expect("entry existed");
+    assert_eq!(removed.path(&state), "b.txt");
+    assert_eq!(state.entries().len(), 2);
+
+    let paths: Vec<&bstr::BStr> = state.entries().iter().map(|e| e.path(&state)).collect();
+    assert_eq!(paths, &["a.txt", "c.txt"]);
+    assert!(state.verify_entries().is_ok());
+}
+
+#[test]
+fn remove_entry_by_path_and_stage_returns_none_for_missing() {
+    let mut state = gix_index::State::new(gix_hash::Kind::Sha1);
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    state.add_entry(
+        stat,
+        id,
+        gix_index::entry::Flags::empty(),
+        gix_index::entry::Mode::FILE,
+        "a.txt".into(),
+    );
+
+    assert!(
+        state
+            .remove_entry_by_path_and_stage("nonexistent.txt".into(), gix_index::entry::Stage::Unconflicted)
+            .is_none(),
+        "removing a non-existent entry returns None"
+    );
+    assert_eq!(state.entries().len(), 1, "nothing was removed");
+}
+
+#[test]
+fn remove_entry_by_path_and_stage_invalidates_tree() {
+    let mut state = gix_index::State::new(gix_hash::Kind::Sha1);
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+    let flags = gix_index::entry::Flags::empty();
+    let mode = gix_index::entry::Mode::FILE;
+
+    state.add_entry(stat, id, flags, mode, "dir/file.txt".into());
+    state.add_entry(stat, id, flags, mode, "other.txt".into());
+
+    // Build tree extension
+    fn hash_tree(tree: &gix_object::Tree) -> Result<gix_hash::ObjectId, std::io::Error> {
+        use gix_object::WriteTo;
+        let mut buf = Vec::new();
+        tree.write_to(&mut buf)?;
+        let header = format!("tree {}\0", buf.len());
+        let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
+        hasher.update(header.as_bytes());
+        hasher.update(&buf);
+        hasher
+            .try_finalize()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+    state.write_tree_to(hash_tree).expect("write_tree_to");
+    assert!(state.tree().unwrap().num_entries.is_some());
+
+    state
+        .remove_entry_by_path_and_stage("dir/file.txt".into(), gix_index::entry::Stage::Unconflicted)
+        .expect("existed");
+
+    let tree = state.tree().expect("tree ext");
+    assert_eq!(tree.num_entries, None, "root is invalidated on remove");
+    let dir_child = tree.children.iter().find(|c| c.name.as_slice() == b"dir");
+    assert!(
+        dir_child.map_or(true, |c| c.num_entries.is_none()),
+        "dir subtree is invalidated"
+    );
+}

@@ -566,8 +566,9 @@ impl State {
 
     /// Physically remove all entries for which `should_remove(idx, path, entry)` returns `true`, traversing them from first to last.
     ///
-    /// Note that the memory used for the removed entries paths is not freed, as it's append-only, and
-    /// that some extensions might refer to paths which are now deleted.
+    /// Note that the memory used for the removed entries paths is not freed, as it's append-only.
+    ///
+    /// If any entries are removed, the [TREE extension](extension::Tree) root is invalidated.
     ///
     /// ### Performance
     ///
@@ -575,13 +576,22 @@ impl State {
     /// them when [writing the index](Self::write_to()).
     pub fn remove_entries(&mut self, mut should_remove: impl FnMut(usize, &BStr, &mut Entry) -> bool) {
         let mut index = 0;
+        let mut any_removed = false;
         let paths = &self.path_backing;
         self.entries.retain_mut(|e| {
             let path = e.path_in(paths);
             let res = !should_remove(index, path, e);
+            if !res {
+                any_removed = true;
+            }
             index += 1;
             res
         });
+        if any_removed {
+            if let Some(ref mut tree) = self.tree {
+                tree.num_entries = None;
+            }
+        }
     }
 
     /// Physically remove the entry at `index`, or panic if the entry didn't exist.
@@ -590,8 +600,94 @@ impl State {
     ///
     /// Note that the memory used for the removed entries paths is not freed, as it's append-only, and
     /// that some extensions might refer to paths which are now deleted.
+    ///
+    /// The [TREE extension](extension::Tree) is invalidated along the components of the
+    /// removed entry's path.
     pub fn remove_entry_at_index(&mut self, index: usize) -> Entry {
+        let path_range = self.entries[index].path.clone();
+        let path_bytes = &self.path_backing[path_range];
+        if let Some(ref mut tree) = self.tree {
+            invalidate_tree_node_recursive(tree, path_bytes);
+        }
         self.entries.remove(index)
+    }
+
+    /// Add a new entry with `stat`, `id`, `flags`, `mode` and `path`, inserting it at the correct
+    /// sorted position to maintain the index invariant.
+    ///
+    /// If an entry at the same `path` and stage (as determined by `flags`) already exists, it is
+    /// replaced and the old entry is returned. Otherwise `None` is returned.
+    ///
+    /// The [TREE extension](extension::Tree) is invalidated along the components of `path` so
+    /// that a subsequent call to [`write_tree_to()`](Self::write_tree_to()) will recompute
+    /// the affected trees.
+    ///
+    /// Any entries that would be "under" this new path (if this is a file replacing a directory,
+    /// or vice versa) are **not** removed by this method -- the caller is responsible for
+    /// cleaning up conflicting directory/file entries.
+    pub fn add_entry(
+        &mut self,
+        stat: entry::Stat,
+        id: gix_hash::ObjectId,
+        flags: entry::Flags,
+        mode: entry::Mode,
+        path: &BStr,
+    ) -> Option<Entry> {
+        self.invalidate_tree_at_path(path);
+
+        let stage = flags.stage();
+        let path_backing = &self.path_backing;
+        match self.entries.binary_search_by(|e| {
+            Entry::cmp_filepaths(e.path_in(path_backing), path).then_with(|| e.stage().cmp(&stage))
+        }) {
+            Ok(existing_idx) => {
+                // Reuse the existing entry's path range to avoid growing path_backing
+                // with duplicate bytes.
+                let path_range = self.entries[existing_idx].path.clone();
+                let new_entry = Entry {
+                    stat,
+                    id,
+                    flags,
+                    mode,
+                    path: path_range,
+                };
+                let old = std::mem::replace(&mut self.entries[existing_idx], new_entry);
+                Some(old)
+            }
+            Err(insert_idx) => {
+                let path_start = self.path_backing.len();
+                self.path_backing.push_str(path);
+                let new_entry = Entry {
+                    stat,
+                    id,
+                    flags,
+                    mode,
+                    path: path_start..self.path_backing.len(),
+                };
+                self.entries.insert(insert_idx, new_entry);
+                None
+            }
+        }
+    }
+
+    /// Remove the entry at `path` and `stage`, returning it if found.
+    ///
+    /// The [TREE extension](extension::Tree) is invalidated along the components of `path`.
+    pub fn remove_entry_by_path_and_stage(&mut self, path: &BStr, stage: entry::Stage) -> Option<Entry> {
+        let idx = self.entry_index_by_path_and_stage(path, stage)?;
+        self.invalidate_tree_at_path(path);
+        Some(self.entries.remove(idx))
+    }
+
+    /// Invalidate the [TREE extension](extension::Tree) for all directory components
+    /// that are part of `path`.
+    ///
+    /// For example, if `path` is `a/b/c.txt`, then tree nodes for `""` (root), `"a"`, and `"b"`
+    /// will have their `num_entries` set to `None`, marking them as requiring recomputation.
+    fn invalidate_tree_at_path(&mut self, path: &BStr) {
+        if let Some(ref mut tree) = self.tree {
+            invalidate_tree_node_recursive(tree, path.as_bytes());
+        }
     }
 }
 
@@ -632,6 +728,23 @@ impl State {
     /// Return `true` if the offset-table extension was present when decoding this index.
     pub fn had_offset_table(&self) -> bool {
         self.offset_table_at_decode_time
+    }
+}
+
+/// Walk `tree` and invalidate (set `num_entries = None`) every node along the directory
+/// components of `path`. `path` is a full entry path like `a/b/c.txt`.
+fn invalidate_tree_node_recursive(tree: &mut extension::Tree, path: &[u8]) {
+    tree.num_entries = None;
+
+    if let Some(slash_pos) = path.iter().position(|&b| b == b'/') {
+        let component = &path[..slash_pos];
+        let rest = &path[slash_pos + 1..];
+        for child in &mut tree.children {
+            if child.name.as_slice() == component {
+                invalidate_tree_node_recursive(child, rest);
+                break;
+            }
+        }
     }
 }
 
