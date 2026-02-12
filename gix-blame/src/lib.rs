@@ -20,4 +20,4 @@ mod types;
 pub use types::{BlameEntry, BlamePathEntry, BlameRanges, Options, Outcome, Statistics};
 
 mod file;
-pub use file::function::file;
+pub use file::function::{file, file_with_progress};

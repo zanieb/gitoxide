@@ -37,4 +37,6 @@ pub enum Error {
     DecodeCommit(#[from] gix_object::decode::Error),
     #[error("Failed to get parent from commitgraph during traversal")]
     GetParentFromCommitGraph(#[from] gix_error::Message),
+    #[error("Blame operation was interrupted")]
+    Interrupted,
 }
