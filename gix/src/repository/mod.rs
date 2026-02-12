@@ -104,6 +104,29 @@ pub mod blame_file {
         pub since: Option<gix_date::Time>,
         /// Determine if rename tracking should be performed, and how.
         pub rewrites: Option<gix_diff::Rewrites>,
+        /// A set of commits to ignore when blaming.
+        ///
+        /// Changes made by these commits are passed through to their parents instead
+        /// of being attributed to them. Equivalent to `git blame --ignore-rev`.
+        pub ignore_revs: Vec<gix_hash::ObjectId>,
+        /// If set, the blame operation checks this flag periodically and aborts
+        /// if it has been set to `true`. This allows the caller to implement
+        /// cancellation/interrupt support.
+        ///
+        /// If `None`, a private flag is used that cannot be interrupted externally.
+        pub should_interrupt: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        /// If set, include uncommitted worktree changes in the blame output.
+        ///
+        /// The provided bytes should be the raw content of the file as it exists in the worktree.
+        /// Lines that differ between the worktree version and the HEAD version will be attributed
+        /// to a virtual "uncommitted changes" entry using [`gix_hash::ObjectId::null()`] as the
+        /// commit id.
+        pub worktree_blob: Option<Vec<u8>>,
+        /// If set, stop traversal when reaching this commit and mark remaining entries as boundary.
+        ///
+        /// This is the OID-based equivalent of [`since`](Self::since). When a parent commit
+        /// matches `oldest_commit`, it is not enqueued for further traversal.
+        pub oldest_commit: Option<gix_hash::ObjectId>,
     }
 
     /// The error returned by [Repository::blame_file()](crate::Repository::blame_file()).

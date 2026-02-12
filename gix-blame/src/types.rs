@@ -164,6 +164,33 @@ pub struct Options {
     /// Collect debug information whenever there's a diff or rename that affects the outcome of a
     /// blame.
     pub debug_track_path: bool,
+    /// A set of commits to ignore when blaming.
+    ///
+    /// When a commit in this set is encountered during the blame traversal, its changes are
+    /// passed through to its parent(s) rather than being attributed to the ignored commit.
+    /// This is equivalent to `git blame --ignore-rev` / `--ignore-revs-file`.
+    ///
+    /// **Warning**: Not yet implemented. Setting this field has no effect.
+    /// See [GitHub issue #2064](https://github.com/GitoxideLabs/gitoxide/issues/2064).
+    ///
+    /// See [Git documentation](https://git-scm.com/docs/git-blame#Documentation/git-blame.txt---ignore-revltrevgt).
+    pub ignore_revs: Vec<ObjectId>,
+    /// If set, stop traversal when reaching this commit and mark remaining entries as boundary.
+    ///
+    /// This is the OID-based equivalent of [`since`](Self::since). When a parent commit matches
+    /// `oldest_commit`, it is not enqueued for further traversal, and any unblamed lines
+    /// are attributed to the current commit as boundary entries.
+    ///
+    /// This is equivalent to libgit2's `oldest_commit` option in `git_blame_options`.
+    pub oldest_commit: Option<ObjectId>,
+    /// If set, include uncommitted worktree changes in the blame output.
+    ///
+    /// The provided bytes should be the raw content of the file as it exists in the worktree.
+    /// Lines that differ between the worktree version and the HEAD version will be attributed
+    /// to a virtual "uncommitted changes" entry using [`ObjectId::null()`] as the commit id.
+    ///
+    /// This is similar to C Git's `fake_working_tree_commit()` in `blame.c`.
+    pub worktree_blob: Option<Vec<u8>>,
 }
 
 /// Represents a change during history traversal for blame. It is supposed to capture enough
@@ -325,6 +352,13 @@ pub struct BlameEntry {
     /// The *Source File*'s name, in case it differs from *Blamed File*'s name.
     /// This happens when the file was renamed.
     pub source_file_name: Option<BString>,
+    /// If `true`, this entry is at a traversal boundary.
+    ///
+    /// A boundary entry means the blame algorithm stopped here -- the commit
+    /// may not be the true origin of these lines. This happens when the commit
+    /// is the root of the repository, or when traversal was stopped by
+    /// [`Options::since`] or [`Options::oldest_commit`].
+    pub boundary: bool,
 }
 
 impl BlameEntry {
@@ -351,6 +385,7 @@ impl BlameEntry {
             len: NonZeroU32::new(range_in_blamed_file.len() as u32).expect("BUG: hunks are never empty"),
             commit_id,
             source_file_name,
+            boundary: false,
         }
     }
 }

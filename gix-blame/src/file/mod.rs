@@ -448,6 +448,7 @@ impl BlameEntry {
             len: force_non_zero(range_in_source_file.len() as u32),
             commit_id,
             source_file_name: unblamed_hunk.source_file_name.clone(),
+            boundary: false,
         })
     }
 }

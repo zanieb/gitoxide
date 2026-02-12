@@ -41,6 +41,9 @@ pub(super) mod function {
             since: None,
             rewrites: Some(gix::diff::Rewrites::default()),
             debug_track_path: true,
+            ignore_revs: Vec::new(),
+            oldest_commit: None,
+            worktree_blob: None,
         };
 
         let index = repo.index_or_empty()?;
@@ -71,6 +74,7 @@ pub(super) mod function {
             &mut resource_cache,
             file.as_bstr(),
             options,
+            &std::sync::atomic::AtomicBool::new(false),
         )?;
 
         let blame_infos = outcome
