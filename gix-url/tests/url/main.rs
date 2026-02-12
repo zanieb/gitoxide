@@ -6,3 +6,4 @@ mod baseline;
 mod expand_path;
 mod fuzzed;
 mod parse;
+mod proptests;
