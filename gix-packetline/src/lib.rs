@@ -42,8 +42,10 @@ pub mod blocking_io {
 pub mod read;
 
 const U16_HEX_BYTES: usize = 4;
-const MAX_DATA_LEN: usize = 65516;
-const MAX_LINE_LEN: usize = MAX_DATA_LEN + U16_HEX_BYTES;
+/// The maximum allowed length of data in a packet line.
+pub const MAX_DATA_LEN: usize = 65516;
+/// The maximum allowed total length of a packet line (data + 4-byte hex header).
+pub const MAX_LINE_LEN: usize = MAX_DATA_LEN + U16_HEX_BYTES;
 const FLUSH_LINE: &[u8] = b"0000";
 const DELIMITER_LINE: &[u8] = b"0001";
 const RESPONSE_END_LINE: &[u8] = b"0002";

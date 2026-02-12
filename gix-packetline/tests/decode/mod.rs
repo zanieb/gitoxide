@@ -137,6 +137,52 @@ mod streaming {
         assert_err_display(streaming(b"0004"), "Received an invalid empty line");
     }
 
+    mod proptests {
+        use gix_packetline::decode::{self, streaming, Stream};
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn streaming_never_panics(data in proptest::collection::vec(any::<u8>(), 0..1024)) {
+                // The streaming decoder must never panic on any input
+                let _ = streaming(&data);
+            }
+
+            #[test]
+            fn hex_prefix_never_panics(bytes in proptest::collection::vec(any::<u8>(), 4..=4)) {
+                let _ = decode::hex_prefix(&bytes);
+            }
+
+            #[test]
+            fn all_at_once_never_panics(data in proptest::collection::vec(any::<u8>(), 0..1024)) {
+                let _ = decode::all_at_once(&data);
+            }
+
+            #[test]
+            fn streaming_complete_consumes_valid_range(data in proptest::collection::vec(any::<u8>(), 5..256)) {
+                if let Ok(Stream::Complete { bytes_consumed, .. }) = streaming(&data) {
+                    prop_assert!(bytes_consumed <= data.len(),
+                        "consumed {} but input only has {} bytes", bytes_consumed, data.len());
+                    prop_assert!(bytes_consumed >= 4,
+                        "complete packet must consume at least 4 bytes, got {}", bytes_consumed);
+                }
+            }
+
+            #[test]
+            fn streaming_incomplete_needs_positive_bytes(data in proptest::collection::vec(any::<u8>(), 0..256)) {
+                if let Ok(Stream::Incomplete { bytes_needed }) = streaming(&data) {
+                    prop_assert!(bytes_needed > 0, "incomplete must need at least 1 byte");
+                }
+            }
+
+            #[test]
+            fn to_data_line_rejects_oversized(size in (gix_packetline::MAX_LINE_LEN + 1)..70000) {
+                let data = vec![0u8; size];
+                prop_assert!(decode::to_data_line(&data).is_err());
+            }
+        }
+    }
+
     mod incomplete {
         use gix_packetline::decode::{self, streaming, Stream};
 
