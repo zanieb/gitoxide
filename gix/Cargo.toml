@@ -200,6 +200,7 @@ worktree-archive = ["gix-archive", "worktree-stream", "attributes"]
 async-network-client = [
     "gix-protocol/async-client",
     "gix-pack/streaming-input",
+    "gix-pack/generate",
     "dep:gix-transport",
     "attributes",
     "credentials",
@@ -214,6 +215,7 @@ async-network-client-async-std = [
 blocking-network-client = [
     "gix-protocol/blocking-client",
     "gix-pack/streaming-input",
+    "gix-pack/generate",
     "dep:gix-transport",
     "attributes",
     "credentials",
