@@ -124,7 +124,11 @@ fn streaming_parse_header_info(read: &mut dyn io::Read) -> std::result::Result<(
     Ok((type_id, size, i))
 }
 
-/// Parses the header of a pack-entry, yielding object type id, decompressed object size, and consumed bytes
+/// Parses the header of a pack-entry, yielding object type id, decompressed object size, and consumed bytes.
+///
+/// # Panics
+///
+/// If `data` is empty.
 #[inline]
 fn parse_header_info(data: &[u8]) -> Result<(u8, u64, usize)> {
     let mut c = *data

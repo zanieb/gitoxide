@@ -11,6 +11,7 @@ cargo-fuzz = true
 gix-utils = { version = "^0.5.2", path = "../../gix-utils", features = ["progress"] }
 gix-error = { version = "^0.5.2", path = "../../gix-error" }
 libfuzzer-sys = "0.4"
+tempfile = "3"
 
 [dependencies.gix-zlib]
 path = "../../gix-zlib"
@@ -45,5 +46,23 @@ doc = false
 [[bin]]
 name = "multi_index_file"
 path = "fuzz_targets/multi_index_file.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_header"
+path = "fuzz_targets/pack_header.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_entry"
+path = "fuzz_targets/pack_entry.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "delta_apply"
+path = "fuzz_targets/delta_apply.rs"
 test = false
 doc = false
