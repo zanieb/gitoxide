@@ -129,6 +129,8 @@ mod reference;
 mod remote;
 mod revision;
 mod shallow;
+/// Support for signing commits and tags.
+pub mod signing;
 mod state;
 #[cfg(feature = "attributes")]
 mod submodule;
