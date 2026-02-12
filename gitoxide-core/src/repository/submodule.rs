@@ -74,3 +74,55 @@ fn submodule_short_hash(id: Option<gix::ObjectId>, repo: Option<&Repository>) ->
         |id| repo.map_or_else(|| id.to_string(), |repo| id.attach(repo).shorten_or_id().to_string()),
     )
 }
+
+/// Options for `gix submodule update`.
+pub struct UpdateOptions {
+    /// Initialize submodules before updating.
+    pub init: bool,
+    /// Recursively update nested submodules.
+    pub recursive: bool,
+}
+
+/// Update submodules to the commit recorded in the superproject's index.
+#[cfg(feature = "blocking-client")]
+pub fn update(
+    repo: Repository,
+    mut out: impl std::io::Write,
+    _progress: impl gix::NestedProgress + 'static,
+    format: OutputFormat,
+    options: UpdateOptions,
+) -> anyhow::Result<()> {
+    if format != OutputFormat::Human {
+        bail!("Only human output is supported for now")
+    }
+
+    let Some(submodules) = repo.submodules()? else {
+        writeln!(out, "No submodules configured")?;
+        return Ok(());
+    };
+
+    let should_interrupt = std::sync::atomic::AtomicBool::new(false);
+    let update_opts = gix::submodule::update::Options::new(options.init, options.recursive);
+
+    for sm in submodules {
+        let name = sm.name().to_owned();
+        let path = sm.path()?.into_owned();
+        match sm.update_submodule(gix::progress::Discard, &should_interrupt, &update_opts) {
+            Ok(Some(outcome)) => {
+                let action = if outcome.freshly_cloned {
+                    "cloned and checked out"
+                } else {
+                    "checked out"
+                };
+                writeln!(out, "Submodule path '{path}': {action} '{}'", outcome.target_commit)?;
+            }
+            Ok(None) => {
+                // Submodule was skipped (not initialized, no index entry, etc.)
+            }
+            Err(err) => {
+                writeln!(out, "warning: failed to update submodule '{name}': {err}")?;
+            }
+        }
+    }
+    Ok(())
+}
