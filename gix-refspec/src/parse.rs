@@ -12,7 +12,7 @@ pub enum Error {
     NegativeObjectHash,
     #[error("Negative specs must be full ref names, starting with \"refs/\"")]
     NegativePartialName,
-    #[error("Negative glob patterns are not allowed")]
+    #[error("Negative glob patterns must not contain more than one '*'")]
     NegativeGlobPattern,
     #[error("Fetch destinations must be ref-names, like 'HEAD:refs/heads/branch'")]
     InvalidFetchDestination,
@@ -127,7 +127,7 @@ pub(crate) mod function {
         if mode == Mode::Negative {
             match src {
                 Some(spec) => {
-                    if src_had_pattern {
+                    if src_had_pattern && spec.iter().filter(|&&b| b == b'*').count() > 1 {
                         return Err(Error::NegativeGlobPattern);
                     } else if looks_like_object_hash(spec) {
                         return Err(Error::NegativeObjectHash);

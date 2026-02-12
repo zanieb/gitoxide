@@ -316,6 +316,36 @@ mod complex_globs {
         "#);
     }
 
+    #[test]
+    fn negative_glob_pattern_excludes_matching_refs() {
+        use bstr::ByteSlice;
+
+        let refs = [
+            new_ref("refs/heads/main", "1111111111111111111111111111111111111111"),
+            new_ref("refs/heads/feature-deploy", "2222222222222222222222222222222222222222"),
+            new_ref("refs/heads/bugfix", "3333333333333333333333333333333333333333"),
+            new_ref("refs/heads/release-deploy", "4444444444444444444444444444444444444444"),
+        ];
+        let items: Vec<_> = refs.iter().map(|r| r.to_item()).collect();
+
+        // Fetch all heads, but exclude *-deploy branches using a negative glob pattern
+        let fetch_spec = gix_refspec::parse("refs/heads/*:refs/remotes/origin/*".into(), Operation::Fetch).unwrap();
+        let neg_spec = gix_refspec::parse("^refs/heads/*-deploy".into(), Operation::Fetch).unwrap();
+        let group = MatchGroup::from_fetch_specs([fetch_spec, neg_spec]);
+        let outcome = group.match_lhs(items.iter().copied());
+
+        // Only main and bugfix should remain, deploy branches should be excluded
+        assert_eq!(outcome.mappings.len(), 2);
+        assert_eq!(
+            outcome.mappings[0].lhs,
+            gix_refspec::match_group::SourceRef::FullName(b"refs/heads/main".as_bstr().into())
+        );
+        assert_eq!(
+            outcome.mappings[1].lhs,
+            gix_refspec::match_group::SourceRef::FullName(b"refs/heads/bugfix".as_bstr().into())
+        );
+    }
+
     fn new_ref(name: &str, id_hex: &str) -> Ref {
         Ref {
             name: name.into(),
