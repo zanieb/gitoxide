@@ -25,6 +25,9 @@ mod checkout;
 mod config;
 
 ///
+#[cfg(all(feature = "merge", feature = "worktree-mutation"))]
+pub mod cherry_pick;
+///
 #[cfg(feature = "blob-diff")]
 mod diff;
 ///
