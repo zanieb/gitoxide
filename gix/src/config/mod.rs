@@ -47,6 +47,21 @@ pub struct SnapshotMut<'repo> {
     pub(crate) config: gix_config::File,
 }
 
+/// A guard that provides mutable access to the repository's local configuration file, backed by a lock file.
+///
+/// Changes are written to disk atomically when [`commit()`][Self::commit()] is called, or on drop.
+/// The in-memory configuration of the repository is also updated to reflect the new values.
+///
+/// Use [`forget()`][Self::forget()] to release the lock without writing any changes.
+pub struct ConfigEditGuard<'repo> {
+    /// The owning repository.
+    pub(crate) repo: Option<&'repo mut Repository>,
+    /// The in-memory configuration being edited.
+    pub(crate) config: gix_config::File<'static>,
+    /// The lock file for atomic writes.
+    pub(crate) lock: Option<gix_lock::File>,
+}
+
 /// A utility structure created by [`SnapshotMut::commit_auto_rollback()`] that restores the previous configuration on drop.
 pub struct CommitAutoRollback<'repo> {
     /// The owning repository.
