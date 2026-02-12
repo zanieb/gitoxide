@@ -193,6 +193,9 @@ merge = ["tree-editor", "blob-diff", "dep:gix-merge", "attributes"]
 ## Add blame command similar to `git blame`.
 blame = ["dep:gix-blame", "blob-diff"]
 
+## Read and write git bundle files.
+bundle = ["dep:gix-bundle"]
+
 ## Support for git notes (add, read, list, remove).
 note = ["dep:gix-note"]
 
@@ -427,6 +430,7 @@ gix-command = { version = "^0.8.0", path = "../gix-command", optional = true }
 gix-worktree-stream = { version = "^0.29.0", path = "../gix-worktree-stream", optional = true }
 gix-archive = { version = "^0.29.0", path = "../gix-archive", default-features = false, optional = true }
 gix-blame = { version = "^0.10.0", path = "../gix-blame", optional = true }
+gix-bundle = { version = "^0.1.0", path = "../gix-bundle", optional = true }
 gix-note = { version = "0.0.0", path = "../gix-note", optional = true }
 
 # For communication with remotes
