@@ -49,6 +49,9 @@ mod mailmap;
 ///
 #[cfg(feature = "merge")]
 mod merge;
+/// Support for git notes.
+#[cfg(feature = "note")]
+pub mod note;
 mod object;
 #[cfg(feature = "attributes")]
 mod pathspec;

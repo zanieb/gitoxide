@@ -125,6 +125,8 @@ pub use gix_index as index;
 pub use gix_lock as lock;
 #[cfg(feature = "credentials")]
 pub use gix_negotiate as negotiate;
+#[cfg(feature = "note")]
+pub use gix_note as note;
 pub use gix_object as objs;
 pub use gix_object::bstr;
 pub use gix_odb as odb;
