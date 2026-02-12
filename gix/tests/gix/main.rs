@@ -31,3 +31,5 @@ mod stash;
 mod status;
 #[cfg(feature = "attributes")]
 mod submodule;
+#[cfg(feature = "attributes")]
+mod submodule_update;

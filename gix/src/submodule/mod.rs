@@ -21,6 +21,60 @@ pub(crate) const MODULES_FILE: &str = ".gitmodules";
 mod errors;
 pub use errors::*;
 
+///
+pub mod update;
+
+mod init_impl;
+
+#[cfg(feature = "blocking-network-client")]
+mod update_impl;
+
+pub(crate) mod git_dir_layout;
+
+/// Validate that no component of the submodule path is a symbolic link.
+/// This prevents symlink attacks from untrusted `.gitmodules` files.
+fn validate_submodule_path(sm_path: &std::path::Path, worktree: &std::path::Path) -> Result<(), SymlinkInPathError> {
+    // Only check for symlinks in the submodule path components *within* the worktree,
+    // not in the worktree's own parent directories. System-level symlinks (e.g. /var -> /private/var
+    // on macOS) are outside our control and must be allowed.
+    let mut check = worktree.to_path_buf();
+    for component in sm_path.components() {
+        check.push(component);
+        if check.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
+            return Err(SymlinkInPathError {
+                path: sm_path.to_owned(),
+                symlink: check,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Internal error type for symlink path validation, convertible to both `init::Error` and `update::Error`.
+struct SymlinkInPathError {
+    path: std::path::PathBuf,
+    symlink: std::path::PathBuf,
+}
+
+impl From<SymlinkInPathError> for init::Error {
+    fn from(e: SymlinkInPathError) -> Self {
+        init::Error::SymlinkInPath {
+            path: e.path,
+            symlink: e.symlink,
+        }
+    }
+}
+
+#[cfg(feature = "blocking-network-client")]
+impl From<SymlinkInPathError> for update::Error {
+    fn from(e: SymlinkInPathError) -> Self {
+        update::Error::SymlinkInPath {
+            path: e.path,
+            symlink: e.symlink,
+        }
+    }
+}
+
 /// A platform maintaining state needed to interact with submodules, created by [`Repository::submodules()].
 pub(crate) struct SharedState<'repo> {
     pub repo: &'repo Repository,
@@ -102,10 +156,29 @@ impl Submodule<'_> {
         self.state.modules.url(self.name())
     }
 
+    /// Return the raw url from `.gitmodules` only, without configuration overrides.
+    ///
+    /// This is useful when the overridden URL (e.g. from `.git/config`) is stale or
+    /// invalid and we need the original relative URL for fallback resolution.
+    pub(crate) fn gitmodules_url(&self) -> Option<gix_url::Url> {
+        let worktree = self.state.repo.workdir()?;
+        let gitmodules_path = worktree.join(MODULES_FILE);
+        let bytes = std::fs::read(&gitmodules_path).ok()?;
+        let gitmodules = gix_config::File::from_bytes_no_includes(
+            &bytes,
+            gix_config::file::Metadata::from(gix_config::Source::Local),
+            Default::default(),
+        )
+        .ok()?;
+        let key = format!("submodule.{}.url", self.name());
+        let url_value = gitmodules.string(&key)?;
+        gix_url::Url::from_bytes(url_value.as_ref()).ok()
+    }
+
     /// Return the `update` field from this submodule's configuration, if present, or `None`.
     ///
     /// This method takes into consideration submodule configuration overrides.
-    pub fn update(&self) -> Result<Option<config::Update>, config::update::Error> {
+    pub fn update_strategy(&self) -> Result<Option<config::Update>, config::update::Error> {
         self.state.modules.update(self.name())
     }
 
@@ -143,6 +216,24 @@ impl Submodule<'_> {
     /// If `true`, the submodule will be checked out with `depth = 1`. If unset, `false` is assumed.
     pub fn shallow(&self) -> Result<Option<bool>, gix_config::value::Error> {
         self.state.modules.shallow(self.name())
+    }
+
+    /// Returns whether this submodule is initialized in the superproject's local config.
+    ///
+    /// A submodule is considered initialized if `submodule.<name>.url` exists in `.git/config`.
+    pub fn is_initialized(&self) -> bool {
+        self.state
+            .repo
+            .config
+            .resolved
+            .sections_by_name("submodule")
+            .into_iter()
+            .flatten()
+            .any(|s| {
+                s.header().subsection_name() == Some(self.name().into())
+                    && s.value("url").is_some()
+                    && s.meta().source == gix_config::Source::Local
+            })
     }
 
     /// Returns true if this submodule is considered active and can thus participate in an operation.

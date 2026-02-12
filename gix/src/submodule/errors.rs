@@ -110,3 +110,114 @@ pub mod head_id {
         PathConfiguration(#[from] gix_submodule::config::path::Error),
     }
 }
+
+///
+pub mod init {
+    /// The error returned by [`Submodule::init()`](crate::Submodule::init()).
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error(transparent)]
+        PathConfiguration(#[from] gix_submodule::config::path::Error),
+        #[error(transparent)]
+        UrlConfiguration(#[from] gix_submodule::config::url::Error),
+        #[error(transparent)]
+        UpdateConfiguration(#[from] gix_submodule::config::update::Error),
+        #[error("Could not write the local repository configuration")]
+        WriteConfig(#[from] std::io::Error),
+        #[error(transparent)]
+        ReadConfig(#[from] gix_config::file::init::from_paths::Error),
+        #[error("Submodule path '{}' contains a symbolic link at '{}'", path.display(), symlink.display())]
+        SymlinkInPath {
+            /// The submodule path that was being validated.
+            path: std::path::PathBuf,
+            /// The component that is a symbolic link.
+            symlink: std::path::PathBuf,
+        },
+    }
+}
+
+///
+#[cfg(feature = "blocking-network-client")]
+pub mod update {
+    /// The error returned by [`Submodule::update()`](crate::Submodule::update()).
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error(transparent)]
+        Init(#[from] super::init::Error),
+        #[error(transparent)]
+        PathConfiguration(#[from] gix_submodule::config::path::Error),
+        #[error(transparent)]
+        UrlConfiguration(#[from] gix_submodule::config::url::Error),
+        #[error(transparent)]
+        UpdateConfiguration(#[from] gix_submodule::config::update::Error),
+        #[error(transparent)]
+        IndexId(#[from] super::index_id::Error),
+        #[error(transparent)]
+        Clone(#[from] crate::clone::Error),
+        #[error(transparent)]
+        CloneFetch(#[from] crate::clone::fetch::Error),
+        #[error(transparent)]
+        CloneCheckout(#[from] crate::clone::checkout::main_worktree::Error),
+        #[error(transparent)]
+        OpenRepository(#[from] super::open::Error),
+        #[error(transparent)]
+        Fetch(#[from] crate::remote::fetch::Error),
+        #[error(transparent)]
+        FetchConnect(#[from] crate::remote::connect::Error),
+        #[error(transparent)]
+        FetchPrepareFetch(#[from] crate::remote::fetch::prepare::Error),
+        #[error(transparent)]
+        FindRemote(#[from] crate::remote::find::existing::Error),
+        #[error(transparent)]
+        HeadSet(#[from] crate::reference::edit::Error),
+        #[error("The submodule update strategy is '{command}' which requires running an external command, but this is not yet supported")]
+        CommandUnsupported {
+            /// The command that was configured.
+            command: crate::bstr::BString,
+        },
+        #[error("The submodule update strategy 'rebase' is not yet supported")]
+        RebaseUnsupported,
+        #[error("The submodule update strategy 'merge' is not yet supported")]
+        MergeUnsupported,
+        #[error("Failed to create index from tree for submodule checkout")]
+        IndexFromTree {
+            /// The tree id that failed.
+            id: gix_hash::ObjectId,
+            /// The underlying error.
+            source: gix_index::init::from_tree::Error,
+        },
+        #[error(transparent)]
+        CheckoutOptions(#[from] crate::config::checkout_options::Error),
+        #[error(transparent)]
+        IndexCheckout(#[from] gix_worktree_state::checkout::Error),
+        #[error(transparent)]
+        WriteIndex(#[from] gix_index::file::write::Error),
+        #[error(transparent)]
+        BooleanConfig(#[from] crate::config::boolean::Error),
+        #[error("Failed to reopen object database as Arc")]
+        OpenArcOdb(std::io::Error),
+        #[error(transparent)]
+        SubmoduleModules(#[from] super::modules::Error),
+        #[error(transparent)]
+        IsActive(#[from] super::is_active::Error),
+        #[error(transparent)]
+        RefMap(#[from] crate::remote::ref_map::Error),
+        #[error("Failed to find commit object in submodule repository")]
+        FindObject(#[from] crate::object::find::existing::Error),
+        #[error("Failed to peel commit to tree in submodule repository")]
+        PeelToTree(#[from] crate::object::peel::to_kind::Error),
+        #[error("Submodule repository has no working directory")]
+        MissingWorkdir,
+        #[error(transparent)]
+        GitDirLayout(#[from] crate::submodule::git_dir_layout::Error),
+        #[error("Submodule path '{}' contains a symbolic link at '{}'", path.display(), symlink.display())]
+        SymlinkInPath {
+            /// The submodule path that was being validated.
+            path: std::path::PathBuf,
+            /// The component that is a symbolic link.
+            symlink: std::path::PathBuf,
+        },
+    }
+}

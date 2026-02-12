@@ -210,5 +210,9 @@ pub mod path {
         Missing { submodule: BString },
         #[error("The path '{actual}' would lead outside of the repository worktree")]
         OutsideOfWorktree { actual: BString, submodule: BString },
+        /// Paths containing carriage return (`\r`) are rejected to prevent differential
+        /// parsing attacks. See CVE-2025-48384.
+        #[error("The path of submodule '{submodule}' contains a carriage return which is disallowed")]
+        ContainsCarriageReturn { actual: BString, submodule: BString },
     }
 }
