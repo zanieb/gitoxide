@@ -74,6 +74,7 @@ pretty_assertions = "1.0.0"
 gix-testtools = { path = "../tests/tools" }
 gix-odb = { path = "../gix-odb" }
 termtree = "1.0.0"
+proptest = "1.6.0"
 
 [package.metadata.docs.rs]
 all-features = true
