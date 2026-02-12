@@ -68,6 +68,13 @@ mod thread_safe;
 mod worktree;
 
 ///
+#[cfg(feature = "worktree-mutation")]
+pub mod reset;
+
+#[cfg(feature = "worktree-mutation")]
+pub(crate) mod worktree_ops;
+
+///
 mod new_commit {
     /// The error returned by [`new_commit(…)`](crate::Repository::new_commit()).
     #[derive(Debug, thiserror::Error)]
