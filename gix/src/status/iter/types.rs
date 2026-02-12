@@ -108,6 +108,7 @@ impl Outcome {
         Some(index.write(crate::index::write::Options {
             extensions: Default::default(),
             skip_hash: self.skip_hash,
+            skip_stale_tree_cache: false,
         }))
     }
 }
