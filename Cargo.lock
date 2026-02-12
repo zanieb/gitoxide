@@ -1706,6 +1706,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gix-bundle"
+version = "0.1.0"
+dependencies = [
+ "bstr",
+ "gix-hash",
+ "gix-testtools",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "gix-chunk"
 version = "0.10.1"
 dependencies = [
@@ -2408,6 +2418,14 @@ dependencies = [
 [[package]]
 name = "gix-rebase"
 version = "0.0.0"
+dependencies = [
+ "bstr",
+ "gix-hash",
+ "gix-object",
+ "gix-sequencer",
+ "tempfile",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "gix-ref"
@@ -2515,6 +2533,11 @@ dependencies = [
 [[package]]
 name = "gix-sequencer"
 version = "0.0.0"
+dependencies = [
+ "bstr",
+ "gix-hash",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "gix-shallow"

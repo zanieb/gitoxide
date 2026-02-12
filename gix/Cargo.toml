@@ -177,6 +177,9 @@ merge = ["blob-diff", "dep:gix-merge", "attributes"]
 ## Add blame command similar to `git blame`.
 blame = ["dep:gix-blame", "blob-diff"]
 
+## Support for git notes (add, read, list, remove).
+note = ["dep:gix-note"]
+
 ## Make it possible to turn a tree into a stream of bytes, which can be decoded to entries and turned into various other formats.
 ##
 ## Tree streaming always uses a background producer thread. This feature therefore enables `parallel`, also when
