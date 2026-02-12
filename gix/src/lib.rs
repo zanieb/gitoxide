@@ -163,6 +163,10 @@ pub use hash::{ObjectId, oid};
 
 pub use gix_error::{Error, Exn};
 
+///
+#[cfg(feature = "hooks")]
+pub mod hook;
+
 pub mod interrupt;
 
 mod ext;
