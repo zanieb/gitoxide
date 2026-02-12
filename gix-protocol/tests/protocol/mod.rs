@@ -9,6 +9,7 @@ mod command;
 pub mod fetch;
 mod handshake;
 pub use fetch::_impl::{FetchConnection, fetch};
+mod push;
 pub mod remote_progress;
 
 #[gix_protocol::bisync::bisync]
