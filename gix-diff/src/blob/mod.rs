@@ -9,6 +9,10 @@ pub use imara_diff::*;
 pub mod unified_diff;
 pub use unified_diff::impls::UnifiedDiff;
 
+/// Produce complete unified diff patches compatible with `git diff` output,
+/// including file headers, index lines, mode annotations, and no-newline markers.
+pub mod patch;
+
 /// Compute a diff with Git's slider heuristics to produce more intuitive diffs.
 ///
 /// This function uses [`Diff`] from `imara-diff`
