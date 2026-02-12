@@ -181,3 +181,14 @@ pub mod blame_file {
         pub oldest_commit: Option<gix_hash::ObjectId>,
     }
 }
+
+///
+#[cfg(feature = "worktree-mutation")]
+pub mod reset;
+
+///
+#[cfg(feature = "worktree-mutation")]
+pub mod stash;
+
+#[cfg(feature = "worktree-mutation")]
+pub(crate) mod worktree_ops;
