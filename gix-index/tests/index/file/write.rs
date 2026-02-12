@@ -59,6 +59,7 @@ fn skip_hash() -> TestResult {
     expected.write(Options {
         extensions: Default::default(),
         skip_hash: false,
+        skip_stale_tree_cache: false,
     })?;
 
     let actual = gix_index::File::at(
@@ -76,6 +77,7 @@ fn skip_hash() -> TestResult {
     expected.write(Options {
         extensions: Default::default(),
         skip_hash: true,
+        skip_stale_tree_cache: false,
     })?;
 
     let actual = gix_index::File::at(
@@ -317,6 +319,7 @@ fn only_tree_ext() -> Options {
             tree_cache: true,
         },
         skip_hash: false,
+        skip_stale_tree_cache: false,
     }
 }
 
@@ -324,5 +327,6 @@ fn options_with(extensions: write::Extensions) -> Options {
     Options {
         extensions,
         skip_hash: false,
+        skip_stale_tree_cache: false,
     }
 }

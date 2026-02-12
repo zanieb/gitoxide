@@ -47,7 +47,7 @@ impl Extensions {
 /// The options for use when [writing an index][State::write_to()].
 ///
 /// Note that default options write either index V2 or V3 depending on the content of the entries.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Options {
     /// Configures which extensions to write.
     pub extensions: Extensions,
@@ -55,8 +55,31 @@ pub struct Options {
     ///
     /// This value is typically controlled by `index.skipHash` and is respected when the index is written
     /// via [`File::write()`](crate::File::write()) and [`File::write_to()`](crate::File::write_to()).
-    /// Note that
     pub skip_hash: bool,
+    /// If `true`, the tree cache extension will be removed before writing to avoid writing a potentially stale
+    /// tree cache that doesn't match the current state of entries.
+    ///
+    /// Gitoxide does not yet support updating the tree cache extension after modifying entries, so writing
+    /// a stale tree cache can lead to index corruption where external git clients see incorrect status
+    /// information or create commits with unexpected contents.
+    ///
+    /// If `true`, skip writing the tree cache extension, which may be stale.
+    ///
+    /// Defaults to `false` because `write_tree_to()` updates the tree cache,
+    /// so it is generally up-to-date after normal operations.
+    /// Set to `true` only if you have reason to believe the tree cache is stale
+    /// and you want to omit it rather than write incorrect data.
+    pub skip_stale_tree_cache: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            extensions: Extensions::default(),
+            skip_hash: false,
+            skip_stale_tree_cache: false,
+        }
+    }
 }
 
 impl State {
@@ -71,6 +94,7 @@ impl State {
         Options {
             extensions,
             skip_hash: _,
+            skip_stale_tree_cache,
         }: Options,
     ) -> Result<Version> {
         let _span = gix_trace::detail!("gix_index::State::write()");
@@ -98,7 +122,7 @@ impl State {
             .map_err(gix_hash::io::from_std_io)?;
 
         if num_entries > 0
-            && extensions
+            && effective_extensions
                 .should_write(extension::end_of_index_entry::SIGNATURE)
                 .is_some()
             && !extension_toc.is_empty()
