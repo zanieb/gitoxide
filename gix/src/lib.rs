@@ -217,6 +217,9 @@ pub use types::{
 pub use types::{Pathspec, PathspecDetached, Submodule};
 
 ///
+#[cfg(feature = "bundle")]
+pub mod bundle;
+///
 pub mod clone;
 pub mod commit;
 ///
