@@ -17,6 +17,8 @@ mod object;
 mod reference;
 mod remote;
 mod repository;
+#[cfg(feature = "worktree-mutation")]
+mod reset;
 #[cfg(feature = "revision")]
 mod revision;
 mod signing;
