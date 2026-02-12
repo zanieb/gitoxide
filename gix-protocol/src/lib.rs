@@ -1,4 +1,4 @@
-//! An abstraction over [fetching][fetch()] a pack from the server.
+//! An abstraction over [fetching][fetch()] a pack from the server and [pushing][push()] to it.
 //!
 //! Generally, there is the following order of operations.
 //!
@@ -7,7 +7,7 @@
 //! * execute a [`Command`]
 //!     - [list references](LsRefsCommand)
 //!          - create a mapping between [refspecs and references](fetch::RefMap)
-//!     - [receive a pack](fetch())
+//!     - [receive a pack](fetch()) or [send a pack](push())
 //!
 //! ## Feature Flags
 #![cfg_attr(
@@ -49,6 +49,12 @@ pub use maybe_async;
 pub mod fetch;
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub use fetch::function::fetch;
+
+///
+pub mod push;
+#[cfg(any(feature = "blocking-client", feature = "async-client"))]
+#[cfg(feature = "push")]
+pub use push::function::push;
 
 mod remote_progress;
 pub use remote_progress::RemoteProgress;
