@@ -32,6 +32,7 @@ insta = "1.46.3"
 gix-hash = { path = "../gix-hash" }
 gix-testtools = { path = "../tests/tools", default-features = false, features = ["sha1"] }
 pretty_assertions = "1.4.1"
+proptest = "1.6.0"
 
 [package.metadata.docs.rs]
 all-features = true
