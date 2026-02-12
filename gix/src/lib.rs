@@ -212,6 +212,10 @@ pub mod progress;
 ///
 pub mod push;
 
+/// Re-export the reset mode for convenience.
+#[cfg(feature = "worktree-mutation")]
+pub use repository::reset::ResetMode;
+
 /// Re-export signing types for convenience.
 pub use repository::signing::{Sign, SigningConfig, SigningFormat};
 
