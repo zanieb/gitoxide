@@ -23,7 +23,7 @@ impl data::Entry {
     ///
     /// # Panics
     ///
-    /// If we cannot understand the header, garbage data is likely to trigger this.
+    /// If `d` is empty.
     pub fn from_bytes(d: &[u8], pack_offset: data::Offset, hash_len: usize) -> Result<data::Entry, Error> {
         let (type_id, size, mut consumed) = parse_header_info(d)?;
 
@@ -130,7 +130,11 @@ fn streaming_parse_header_info(read: &mut dyn io::Read) -> Result<(u8, u64, usiz
     Ok((type_id, size, i))
 }
 
-/// Parses the header of a pack-entry, yielding object type id, decompressed object size, and consumed bytes
+/// Parses the header of a pack-entry, yielding object type id, decompressed object size, and consumed bytes.
+///
+/// # Panics
+///
+/// If `data` is empty.
 #[inline]
 fn parse_header_info(data: &[u8]) -> Result<(u8, u64, usize), Error> {
     let mut c = *data.first().ok_or(Error::Corrupt {

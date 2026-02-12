@@ -9,7 +9,9 @@ cargo-fuzz = true
 
 [dependencies]
 anyhow = "1.0.100"
+arbitrary = { version = "1", features = ["derive"] }
 libfuzzer-sys = "0.4"
+tempfile = "3"
 
 [dependencies.gix-features]
 path = "../../gix-features"
@@ -45,5 +47,23 @@ doc = false
 [[bin]]
 name = "multi_index_file"
 path = "fuzz_targets/multi_index_file.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_header"
+path = "fuzz_targets/pack_header.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_entry"
+path = "fuzz_targets/pack_entry.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "delta_apply"
+path = "fuzz_targets/delta_apply.rs"
 test = false
 doc = false
