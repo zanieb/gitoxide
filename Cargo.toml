@@ -281,6 +281,7 @@ members = [
     "gix-utils",
     "gix-fs",
     "gix-blame",
+    "gix-bundle",
     "gix",
     "gitoxide-core",
     "gix-hashtable",
