@@ -5,7 +5,7 @@ use gix_features::threading::OwnShared;
 
 use crate::{
     bstr::{BStr, BString, ByteSlice},
-    config::{CommitAutoRollback, Snapshot, SnapshotMut},
+    config::{CommitAutoRollback, ConfigEditGuard, Snapshot, SnapshotMut},
 };
 
 /// Access configuration values, frozen in time, using a `key` which is a `.` separated string of up to
@@ -203,6 +203,84 @@ impl<'repo> CommitAutoRollback<'repo> {
         repo: &'repo mut crate::Repository,
     ) -> Result<&'repo mut crate::Repository, crate::config::Error> {
         repo.reread_values_and_clear_caches_replacing_config(OwnShared::clone(&self.prev_config))?;
+        Ok(repo)
+    }
+}
+
+/// Utilities
+impl<'repo> ConfigEditGuard<'repo> {
+    /// Set the value at `key` to `new_value`, possibly creating the section if it doesn't exist yet, or overriding the most recent existing
+    /// value, which will be returned.
+    pub fn set_value<'b>(
+        &mut self,
+        key: &'static dyn crate::config::tree::Key,
+        new_value: impl Into<&'b BStr>,
+    ) -> Result<Option<BString>, crate::config::set_value::Error> {
+        if let Some(crate::config::tree::SubSectionRequirement::Parameter(_)) = key.subsection_requirement() {
+            return Err(crate::config::set_value::Error::SubSectionRequired);
+        }
+        let value = new_value.into();
+        key.validate(value)?;
+        let section = key.section();
+        let current = match section.parent() {
+            Some(parent) => {
+                self.config
+                    .set_raw_value_by(parent.name(), Some(section.name().into()), key.name(), value)?
+            }
+            None => self.config.set_raw_value_by(section.name(), None, key.name(), value)?,
+        };
+        Ok(current.map(std::borrow::Cow::into_owned))
+    }
+
+    /// Set the value at `key` to `new_value` in the given `subsection`, possibly creating the section and sub-section if it doesn't exist yet,
+    /// or overriding the most recent existing value, which will be returned.
+    pub fn set_subsection_value<'a, 'b>(
+        &mut self,
+        key: &'static dyn crate::config::tree::Key,
+        subsection: impl Into<&'a BStr>,
+        new_value: impl Into<&'b BStr>,
+    ) -> Result<Option<BString>, crate::config::set_value::Error> {
+        if let Some(crate::config::tree::SubSectionRequirement::Never) = key.subsection_requirement() {
+            return Err(crate::config::set_value::Error::SubSectionForbidden);
+        }
+        let value = new_value.into();
+        key.validate(value)?;
+
+        let name = key
+            .full_name(Some(subsection.into()))
+            .expect("we know it needs a subsection");
+        let key = gix_config::KeyRef::parse_unvalidated((**name).as_bstr())
+            .expect("statically known keys can always be parsed");
+        let current =
+            self.config
+                .set_raw_value_by(key.section_name, key.subsection_name, key.value_name.to_owned(), value)?;
+        Ok(current.map(std::borrow::Cow::into_owned))
+    }
+
+    /// Apply all changes made to this instance, writing them to disk atomically and updating the in-memory configuration.
+    ///
+    /// Note that this would also happen once this instance is dropped, but using this method may be more intuitive and won't squelch errors.
+    pub fn commit(mut self) -> Result<&'repo mut crate::Repository, crate::config::edit::CommitError> {
+        let repo = self.repo.take().expect("always present here");
+        self.commit_inner(repo)
+    }
+
+    /// Don't apply any of the changes after consuming this instance, effectively forgetting them and releasing the lock.
+    pub fn forget(mut self) {
+        self.repo.take();
+        self.lock.take();
+    }
+
+    pub(crate) fn commit_inner(
+        &mut self,
+        repo: &'repo mut crate::Repository,
+    ) -> Result<&'repo mut crate::Repository, crate::config::edit::CommitError> {
+        if let Some(mut lock) = self.lock.take() {
+            self.config
+                .write_to_filter(&mut lock, |s| s.meta().source == gix_config::Source::Local)?;
+            lock.commit().map_err(|err| std::io::Error::other(err.error))?;
+        }
+        repo.reread_values_and_clear_caches_replacing_config(std::mem::take(&mut self.config).into())?;
         Ok(repo)
     }
 }

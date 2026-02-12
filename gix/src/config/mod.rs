@@ -29,12 +29,25 @@ pub struct Snapshot<'repo> {
 /// Note that these values won't update even if the underlying file(s) change.
 ///
 /// Use [`forget()`][Self::forget()] to not apply any of the changes.
-// TODO: make it possible to load snapshots with reloading via .config() and write mutated snapshots back to disk which should be the way
-//       to affect all instances of a repo, probably via `config_mut()` and `config_mut_at()`.
 pub struct SnapshotMut<'repo> {
     /// The owning repository.
     pub repo: Option<&'repo mut Repository>,
     pub(crate) config: gix_config::File<'static>,
+}
+
+/// A guard that provides mutable access to the repository's local configuration file, backed by a lock file.
+///
+/// Changes are written to disk atomically when [`commit()`][Self::commit()] is called, or on drop.
+/// The in-memory configuration of the repository is also updated to reflect the new values.
+///
+/// Use [`forget()`][Self::forget()] to release the lock without writing any changes.
+pub struct ConfigEditGuard<'repo> {
+    /// The owning repository.
+    pub(crate) repo: Option<&'repo mut Repository>,
+    /// The in-memory configuration being edited.
+    pub(crate) config: gix_config::File<'static>,
+    /// The lock file for atomic writes.
+    pub(crate) lock: Option<gix_lock::File>,
 }
 
 /// A utility structure created by [`SnapshotMut::commit_auto_rollback()`] that restores the previous configuration on drop.
@@ -50,6 +63,29 @@ pub mod section {
     /// This is either the case if its file is fully trusted, or if it's a section from a system-wide file.
     pub fn is_trusted(meta: &gix_config::file::Metadata) -> bool {
         meta.trust == gix_sec::Trust::Full || meta.source.kind() != gix_config::source::Kind::Repository
+    }
+}
+
+///
+pub mod edit {
+    /// The error produced when calling [`Repository::config_edit()`](crate::Repository::config_edit()).
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error("The local configuration file path could not be determined")]
+        NoLocalConfigPath,
+        #[error("Failed to acquire lock on configuration file")]
+        AcquireLock(#[from] gix_lock::acquire::Error),
+    }
+
+    /// The error produced when calling [`ConfigEditGuard::commit()`](super::ConfigEditGuard::commit()).
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum CommitError {
+        #[error("Failed to write configuration to lock file")]
+        Write(#[from] std::io::Error),
+        #[error("Failed to apply configuration to repository")]
+        Config(#[from] crate::config::Error),
     }
 }
 

@@ -25,6 +25,32 @@ impl crate::Repository {
         }
     }
 
+    /// Return a mutable configuration guard that locks the repository-local configuration file and allows
+    /// persistent edits.
+    ///
+    /// Changes will be written to disk atomically when the guard is [committed](config::ConfigEditGuard::commit())
+    /// or dropped. The in-memory configuration of this repository instance is also updated to reflect the new values.
+    ///
+    /// Use [`ConfigEditGuard::forget()`](config::ConfigEditGuard::forget()) to release the lock without persisting changes.
+    pub fn config_edit(&mut self) -> Result<config::ConfigEditGuard<'_>, config::edit::Error> {
+        let config_path = self
+            .config
+            .resolved
+            .meta()
+            .path
+            .as_deref()
+            .ok_or(config::edit::Error::NoLocalConfigPath)?
+            .to_owned();
+        let lock =
+            gix_lock::File::acquire_to_update_resource(&config_path, gix_lock::acquire::Fail::Immediately, None)?;
+        let config = self.config.resolved.as_ref().clone();
+        Ok(config::ConfigEditGuard {
+            repo: Some(self),
+            config,
+            lock: Some(lock),
+        })
+    }
+
     /// Return filesystem options as retrieved from the repository configuration.
     ///
     /// Note that these values have not been [probed](gix_fs::Capabilities::probe()).
