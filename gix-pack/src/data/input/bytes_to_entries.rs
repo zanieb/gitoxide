@@ -106,7 +106,11 @@ where
             inner: read_and_pass_to(
                 &mut self.read,
                 if self.compressed.keep() {
-                    Vec::with_capacity(entry.decompressed_size as usize)
+                    // Cap the initial allocation to prevent OOM from crafted pack headers
+                    // claiming huge decompressed sizes. The actual data will grow the buffer
+                    // incrementally via io::copy if the real size exceeds this cap.
+                    const MAX_PREALLOC: usize = 64 * 1024 * 1024; // 64 MiB
+                    Vec::with_capacity((entry.decompressed_size as usize).min(MAX_PREALLOC))
                 } else {
                     compressed_buf
                 },

@@ -1,0 +1,42 @@
+[package]
+name = "gix-pack-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+tempfile = "3"
+
+[dependencies.gix-pack]
+path = ".."
+
+[dependencies.gix-hash]
+path = "../../gix-hash"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "pack_header"
+path = "fuzz_targets/pack_header.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_entry"
+path = "fuzz_targets/pack_entry.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "delta_apply"
+path = "fuzz_targets/delta_apply.rs"
+test = false
+doc = false

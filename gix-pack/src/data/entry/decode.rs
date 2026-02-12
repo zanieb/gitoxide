@@ -19,7 +19,7 @@ impl data::Entry {
     ///
     /// # Panics
     ///
-    /// If we cannot understand the header, garbage data is likely to trigger this.
+    /// If `d` is empty.
     pub fn from_bytes(d: &[u8], pack_offset: data::Offset, hash_len: usize) -> Result<data::Entry, Error> {
         let (type_id, size, mut consumed) = parse_header_info(d);
 
@@ -111,7 +111,11 @@ fn streaming_parse_header_info(read: &mut dyn io::Read) -> Result<(u8, u64, usiz
     Ok((type_id, size, i))
 }
 
-/// Parses the header of a pack-entry, yielding object type id, decompressed object size, and consumed bytes
+/// Parses the header of a pack-entry, yielding object type id, decompressed object size, and consumed bytes.
+///
+/// # Panics
+///
+/// If `data` is empty.
 #[inline]
 fn parse_header_info(data: &[u8]) -> (u8, u64, usize) {
     let mut c = data[0];
@@ -119,7 +123,12 @@ fn parse_header_info(data: &[u8]) -> (u8, u64, usize) {
     let type_id = (c >> 4) & 0b0000_0111;
     let mut size = u64::from(c) & 0b0000_1111;
     let mut s = 4;
+    // Security: Check bounds before reading continuation bytes to prevent
+    // out-of-bounds panic from crafted pack data (e.g. from untrusted remotes).
     while c & 0b1000_0000 != 0 {
+        if i >= data.len() {
+            break;
+        }
         c = data[i];
         i += 1;
         size += u64::from(c & 0b0111_1111) << s;

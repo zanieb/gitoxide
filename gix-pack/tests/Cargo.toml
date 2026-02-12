@@ -29,3 +29,4 @@ gix-object = { path = "../../gix-object" }
 gix-traverse = { path = "../../gix-traverse" }
 gix-hash = { path = "../../gix-hash", features = ["sha256"] }
 memmap2 = "0.9.10"
+proptest = "1"

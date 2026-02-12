@@ -2122,6 +2122,7 @@ dependencies = [
  "gix-traverse",
  "maplit",
  "memmap2",
+ "proptest",
 ]
 
 [[package]]
