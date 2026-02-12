@@ -2,6 +2,8 @@
 mod util;
 use util::*;
 
+#[cfg(all(feature = "merge", feature = "worktree-mutation"))]
+mod cherry_pick;
 mod clone;
 mod commit;
 mod config;
