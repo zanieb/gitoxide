@@ -1214,6 +1214,7 @@ version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
+ "crc32fast",
  "miniz_oxide",
  "zlib-rs",
 ]
@@ -2177,6 +2178,7 @@ dependencies = [
  "gix-trace",
  "maybe-async",
  "pin-project-lite",
+ "proptest",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -2306,6 +2308,20 @@ dependencies = [
  "gix-validate",
  "insta",
  "smallvec",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "gix-reftable"
+version = "0.0.0"
+dependencies = [
+ "bstr",
+ "crc32fast",
+ "criterion",
+ "flate2",
+ "gix-hash",
+ "proptest",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

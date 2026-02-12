@@ -45,6 +45,11 @@ harness = false
 required-features = ["blob"]
 path = "./benches/line_count.rs"
 
+[[bench]]
+name = "patch"
+harness = false
+path = "./benches/patch.rs"
+
 [dependencies]
 gix-index = { version = "^0.51.0", path = "../gix-index", optional = true }
 gix-pathspec = { version = "^0.18.0", path = "../gix-pathspec", optional = true }

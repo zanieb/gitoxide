@@ -1,0 +1,33 @@
+[package]
+name = "gix-reftable-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.gix-reftable]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_varint"
+path = "fuzz_targets/fuzz_varint.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_ref_record"
+path = "fuzz_targets/fuzz_ref_record.rs"
+test = false
+doc = false
