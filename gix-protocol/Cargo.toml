@@ -27,7 +27,8 @@ blocking-client = [
     "gix-transport/blocking-client",
     "maybe-async/is_sync",
     "handshake",
-    "fetch"
+    "fetch",
+    "push"
 ]
 ## As above, but provides async implementations instead.
 # no `dep:` for futures-lite (https://github.com/rust-secure-code/cargo-auditable/issues/124)
@@ -37,7 +38,8 @@ async-client = [
     "dep:futures-io",
     "futures-lite",
     "handshake",
-    "fetch"
+    "fetch",
+    "push"
 ]
 
 ## Add implementations for performing a `handshake` along with the dependencies needed for it.
@@ -50,6 +52,11 @@ fetch = [
     "dep:gix-revwalk",
     "dep:gix-lock",
     "dep:gix-refspec",
+    "dep:gix-trace",
+]
+
+## Add implementations for performing a `push` (send-pack) along with the dependencies needed for it.
+push = [
     "dep:gix-trace",
 ]
 
