@@ -75,6 +75,8 @@ impl Core {
     /// The `core.useReplaceRefs` key.
     pub const USE_REPLACE_REFS: keys::Boolean = keys::Boolean::new_boolean("useReplaceRefs", &config::Tree::CORE)
         .with_environment_override("GIT_NO_REPLACE_OBJECTS");
+    /// The `core.hooksPath` key.
+    pub const HOOKS_PATH: keys::Path = keys::Path::new_path("hooksPath", &config::Tree::CORE);
     /// The `core.commitGraph` key.
     pub const COMMIT_GRAPH: keys::Boolean = keys::Boolean::new_boolean("commitGraph", &config::Tree::CORE);
     /// The `core.safecrlf` key.
@@ -127,6 +129,7 @@ impl Section for Core {
             &Self::ATTRIBUTES_FILE,
             &Self::SSH_COMMAND,
             &Self::USE_REPLACE_REFS,
+            &Self::HOOKS_PATH,
             &Self::COMMIT_GRAPH,
             #[cfg(feature = "attributes")]
             &Self::SAFE_CRLF,

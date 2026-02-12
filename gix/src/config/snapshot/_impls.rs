@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::config::{CommitAutoRollback, Snapshot, SnapshotMut};
+use crate::config::{CommitAutoRollback, ConfigEditGuard, Snapshot, SnapshotMut};
 
 impl Debug for Snapshot<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -72,5 +72,33 @@ impl DerefMut for CommitAutoRollback<'_> {
 impl DerefMut for SnapshotMut<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.config
+    }
+}
+
+impl Debug for ConfigEditGuard<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.config.to_string())
+    }
+}
+
+impl Deref for ConfigEditGuard<'_> {
+    type Target = gix_config::File<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
+impl DerefMut for ConfigEditGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.config
+    }
+}
+
+impl Drop for ConfigEditGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(repo) = self.repo.take() {
+            self.commit_inner(repo).ok();
+        }
     }
 }
