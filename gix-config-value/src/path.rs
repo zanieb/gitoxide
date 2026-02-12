@@ -60,19 +60,65 @@ pub mod interpolate {
         )))]
         {
             let cname = std::ffi::CString::new(name).ok()?;
-            // SAFETY: calling this in a threaded program that modifies the pw database is not actually safe.
-            //         TODO: use the `*_r` version, but it's much harder to use.
-            #[allow(unsafe_code)]
-            let pwd = unsafe { libc::getpwnam(cname.as_ptr()) };
-            if pwd.is_null() {
-                None
-            } else {
+
+            // Use getpwnam_r (thread-safe) on platforms that support it.
+            // Falls back to getpwnam only on platforms without _r support.
+            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+            {
                 use std::os::unix::ffi::OsStrExt;
-                // SAFETY: pw_dir is a cstr and it lives as long as… well, we hope nobody changes the pw database while we are at it
-                //         from another thread. Otherwise it lives long enough.
+                // SAFETY: zeroed passwd is a valid initial state for the struct.
                 #[allow(unsafe_code)]
-                let cstr = unsafe { std::ffi::CStr::from_ptr((*pwd).pw_dir) };
+                let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+                let mut buf = vec![0u8; 4096];
+                let mut result: *mut libc::passwd = std::ptr::null_mut();
+
+                loop {
+                    // SAFETY: getpwnam_r is thread-safe and writes into caller-provided buffers.
+                    #[allow(unsafe_code)]
+                    let rc = unsafe {
+                        libc::getpwnam_r(
+                            cname.as_ptr(),
+                            &mut pwd,
+                            buf.as_mut_ptr() as *mut libc::c_char,
+                            buf.len(),
+                            &mut result,
+                        )
+                    };
+
+                    if rc == libc::ERANGE && buf.len() < 1024 * 1024 {
+                        // Buffer too small, grow and retry
+                        buf.resize(buf.len() * 2, 0);
+                        continue;
+                    }
+
+                    if rc != 0 || result.is_null() {
+                        return None;
+                    }
+                    break;
+                }
+
+                // SAFETY: result is non-null and points to pwd, whose pw_dir points into buf.
+                #[allow(unsafe_code)]
+                let cstr = unsafe { std::ffi::CStr::from_ptr(pwd.pw_dir) };
                 Some(std::ffi::OsStr::from_bytes(cstr.to_bytes()).into())
+            }
+
+            // Fallback for platforms without getpwnam_r
+            #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
+            {
+                use std::os::unix::ffi::OsStrExt;
+                // SAFETY: calling this in a threaded program that modifies the pw database is not actually safe.
+                #[allow(unsafe_code)]
+                let pwd = unsafe { libc::getpwnam(cname.as_ptr()) };
+                if pwd.is_null() {
+                    None
+                } else {
+                    // SAFETY: pw_dir is a cstr and it lives as long as nobody changes the pw database
+                    //         from another thread.
+                    #[allow(unsafe_code)]
+                    let cstr = unsafe { std::ffi::CStr::from_ptr((*pwd).pw_dir) };
+                    Some(std::ffi::OsStr::from_bytes(cstr.to_bytes()).into())
+                }
             }
         }
         #[cfg(any(
