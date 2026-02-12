@@ -16,6 +16,7 @@ mod remote;
 mod repository;
 #[cfg(feature = "revision")]
 mod revision;
+mod signing;
 #[cfg(feature = "status")]
 mod status;
 #[cfg(feature = "attributes")]

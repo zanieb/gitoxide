@@ -219,6 +219,9 @@ pub mod progress;
 ///
 pub mod push;
 
+/// Re-export signing types for convenience.
+pub use repository::signing::{Sign, SigningConfig, SigningFormat};
+
 ///
 pub mod diff;
 
