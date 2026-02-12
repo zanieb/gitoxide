@@ -81,12 +81,13 @@ mod baseline {
             let mut commit_id = fixture_hash_kind().null();
             let mut skip_lines: u32 = 0;
             let mut source_file_name: Option<gix_object::bstr::BString> = None;
+            let mut is_boundary = false;
 
             for line in self.lines.by_ref() {
                 if line.starts_with(b"\t") {
                     // Each group consists of a header and one or more lines. We break from the
                     // loop, thus returning a `BlameEntry` from `next` once we have seen the number
-                    // of lines starting with "\t" as indicated in the group’s header.
+                    // of lines starting with "\t" as indicated in the group's header.
                     skip_lines -= 1;
 
                     if skip_lines == 0 {
@@ -98,10 +99,10 @@ mod baseline {
 
                 let fields: Vec<&str> = line.to_str().unwrap().split(' ').collect();
                 if fields.len() == 4 {
-                    // We’re possibly dealing with a group header.
-                    // If we can’t parse the first field as an `ObjectId`, we know this is not a
+                    // We're possibly dealing with a group header.
+                    // If we can't parse the first field as an `ObjectId`, we know this is not a
                     // group header, so we continue. This can yield false positives, but for
-                    // testing purposes, we don’t bother.
+                    // testing purposes, we don't bother.
                     commit_id = match ObjectId::from_hex(fields[0].as_bytes()) {
                         Ok(id) => id,
                         Err(_) => continue,
@@ -110,7 +111,7 @@ mod baseline {
                     let line_number_in_source_file = fields[1].parse::<u32>().unwrap();
                     let line_number_in_final_file = fields[2].parse::<u32>().unwrap();
                     // The last field indicates the number of lines this group contains info for
-                    // (this is not equal to the number of lines in git blame’s porcelain output).
+                    // (this is not equal to the number of lines in git blame's porcelain output).
                     let number_of_lines_in_group = fields[3].parse::<u32>().unwrap();
 
                     skip_lines = number_of_lines_in_group;
@@ -121,6 +122,8 @@ mod baseline {
                         (line_number_in_final_file - 1)..(line_number_in_final_file + number_of_lines_in_group - 1);
                     assert!(ranges.is_none(), "should not overwrite existing ranges");
                     ranges = Some((blame_range, source_range));
+                } else if fields[0] == "boundary" {
+                    is_boundary = true;
                 } else if fields[0] == "filename" {
                     // We need to store `source_file_name` as it is not repeated for subsequent
                     // hunks that have the same `commit_id`.
@@ -136,12 +139,14 @@ mod baseline {
                 // No new lines were parsed, so we assume the iterator is finished.
                 return None;
             };
-            Some(BlameEntry::new(
+            let mut entry = BlameEntry::new(
                 range_in_blamed_file,
                 range_in_source_file,
                 commit_id,
                 source_file_name.or_else(|| self.filenames.get(&commit_id).cloned()),
-            ))
+            );
+            entry.boundary = is_boundary;
+            Some(entry)
         }
     }
 }
@@ -242,6 +247,7 @@ impl Fixture {
             &mut self.resource_cache,
             source_file_name,
             options,
+            &std::sync::atomic::AtomicBool::new(false),
         )
     }
 }
@@ -270,7 +276,11 @@ macro_rules! mktest {
                     since: None,
                     rewrites: Some(gix_diff::Rewrites::default()),
                     debug_track_path: false,
+                    ignore_revs: Vec::new(),
+                    worktree_blob: None,
+                    oldest_commit: None,
                 },
+                &std::sync::atomic::AtomicBool::new(false),
             )?
             .entries;
 
@@ -359,7 +369,11 @@ fn diff_algorithm_parity() {
                 since: None,
                 rewrites: Some(gix_diff::Rewrites::default()),
                 debug_track_path: false,
+                ignore_revs: Vec::new(),
+                worktree_blob: None,
+                oldest_commit: None,
             },
+            &std::sync::atomic::AtomicBool::new(false),
         )
         .unwrap()
         .entries;
@@ -391,6 +405,7 @@ fn file_that_was_added_in_two_branches() -> gix_testtools::TestResult {
         &mut resource_cache,
         source_file_name.into(),
         gix_blame::Options::default(),
+        &std::sync::atomic::AtomicBool::new(false),
     )?
     .entries;
 
@@ -426,7 +441,11 @@ fn since() -> gix_testtools::TestResult {
             since: Some(gix_date::parse("2025-01-31", None)?),
             rewrites: Some(gix_diff::Rewrites::default()),
             debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: None,
         },
+        &std::sync::atomic::AtomicBool::new(false),
     )?
     .entries;
 
@@ -466,7 +485,11 @@ mod blame_ranges {
                 since: None,
                 rewrites: Some(gix_diff::Rewrites::default()),
                 debug_track_path: false,
+                ignore_revs: Vec::new(),
+                worktree_blob: None,
+                oldest_commit: None,
             },
+            &std::sync::atomic::AtomicBool::new(false),
         )?
         .entries;
 
@@ -509,7 +532,11 @@ mod blame_ranges {
                 since: None,
                 rewrites: None,
                 debug_track_path: false,
+                ignore_revs: Vec::new(),
+                worktree_blob: None,
+                oldest_commit: None,
             },
+            &std::sync::atomic::AtomicBool::new(false),
         )?
         .entries;
 
@@ -550,7 +577,11 @@ mod blame_ranges {
                 since: None,
                 rewrites: None,
                 debug_track_path: false,
+                ignore_revs: Vec::new(),
+                worktree_blob: None,
+                oldest_commit: None,
             },
+            &std::sync::atomic::AtomicBool::new(false),
         )?
         .entries;
 
@@ -596,7 +627,11 @@ mod rename_tracking {
                 since: None,
                 rewrites: Some(gix_diff::Rewrites::default()),
                 debug_track_path: false,
+                ignore_revs: Vec::new(),
+                worktree_blob: None,
+                oldest_commit: None,
             },
+            &std::sync::atomic::AtomicBool::new(false),
         )?
         .entries;
 
@@ -626,6 +661,9 @@ mod rename_tracking {
                     since: None,
                     rewrites: Some(gix_diff::Rewrites::default()),
                     debug_track_path: false,
+                    ignore_revs: Vec::new(),
+                    worktree_blob: None,
+                    oldest_commit: None,
                 },
             )?
             .entries;

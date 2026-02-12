@@ -24,6 +24,10 @@ impl Repository {
             ranges,
             since,
             rewrites,
+            ignore_revs,
+            should_interrupt,
+            worktree_blob,
+            oldest_commit,
         } = options;
         let diff_algorithm = match diff_algorithm {
             Some(diff_algorithm) => diff_algorithm,
@@ -36,6 +40,15 @@ impl Repository {
             since,
             rewrites,
             debug_track_path: false,
+            ignore_revs,
+            worktree_blob,
+            oldest_commit,
+        };
+
+        let default_interrupt = std::sync::atomic::AtomicBool::new(false);
+        let interrupt_flag = match &should_interrupt {
+            Some(flag) => flag.as_ref(),
+            None => &default_interrupt,
         };
 
         let outcome = gix_blame::file(
@@ -45,6 +58,7 @@ impl Repository {
             &mut resource_cache,
             file_path,
             options,
+            interrupt_flag,
         )?;
 
         Ok(outcome)

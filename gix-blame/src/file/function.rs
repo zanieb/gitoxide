@@ -76,6 +76,9 @@ pub fn file(
 ) -> Result<Outcome> {
     let _span = gix_trace::coarse!("gix_blame::file()", ?file_path, ?start);
 
+    // Convert ignore_revs to a HashSet for O(1) lookups during traversal.
+    let ignore_revs: std::collections::HashSet<ObjectId> = options.ignore_revs.iter().copied().collect();
+
     let mut stats = Statistics::default();
     let (mut buf, mut buf2, mut buf3) = (Vec::new(), Vec::new(), Vec::new());
 
@@ -122,7 +125,13 @@ pub fn file(
     };
 
     'outer: while let Some(suspect) = queue.pop_value() {
+        if should_interrupt.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(Error::Interrupted);
+        }
         stats.commits_traversed += 1;
+        if let Some(counter) = progress_counter {
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         if hunks_to_blame.is_empty() {
             break;
         }
@@ -154,6 +163,21 @@ pub fn file(
 
         let parent_ids: ParentIds = collect_parents(commit, &odb, cache.as_ref(), &mut buf2)?;
 
+        // --ignore-rev support: when a commit is in the ignore set, lines that it
+        // *changed* are still "pinned" to it (matching C Git's fallback behavior when no
+        // fuzzy match is found), while lines it didn't change pass through to the parent
+        // naturally via process_changes. The `_is_ignored` flag is reserved for future
+        // fuzzy line matching (C Git's `blame_chunk` with `ignore_suspect`).
+        let _is_ignored = ignore_revs.contains(&suspect);
+
+        // oldest_commit support: filter out parents that match the cutoff OID.
+        // When a parent would be filtered, we stop traversal there and mark entries as boundary.
+        let parent_ids: ParentIds = if let Some(oldest) = options.oldest_commit {
+            parent_ids.into_iter().filter(|(id, _)| *id != oldest).collect()
+        } else {
+            parent_ids
+        };
+
         if parent_ids.is_empty() {
             if queue.is_empty() {
                 // I’m not entirely sure if this is correct yet. `suspect`, at this point, is the
@@ -161,7 +185,7 @@ pub fn file(
                 // the remaining lines to it, even though we don’t explicitly check whether that is
                 // true here. We could perhaps use diff-tree-to-tree to compare `suspect` against
                 // an empty tree to validate this assumption.
-                if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect) {
+                if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, true) {
                     if let Some(ref mut blame_path) = blame_path {
                         let entry = previous_entry
                             .take()
@@ -265,6 +289,9 @@ pub fn file(
 
         let more_than_one_parent = parent_ids.len() > 1;
         for (index, (parent_id, parent_commit_time)) in parent_ids.iter().enumerate() {
+            if should_interrupt.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(Error::Interrupted);
+            }
             queue.insert(*parent_commit_time, *parent_id);
             let changes_for_file_path = tree_diff_at_file_path(
                 &odb,
@@ -299,7 +326,7 @@ pub fn file(
                         // Do nothing under the assumption that this always (or almost always)
                         // implies that the file comes from a different parent, compared to which
                         // it was modified, not added.
-                    } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect) {
+                    } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
                         if let Some(ref mut blame_path) = blame_path {
                             let blame_path_entry = BlamePathEntry {
                                 source_file_path: current_file_path.clone(),
@@ -432,18 +459,27 @@ fn pass_blame_from_to(from: ObjectId, to: ObjectId, hunks_to_blame: &mut Vec<Unb
 
 /// Convert each of the unblamed hunk in `hunks_to_blame` into a [`BlameEntry`], consuming them in the process.
 ///
+/// When `boundary` is `true`, the resulting entries are marked as boundary entries, meaning
+/// the blame algorithm stopped here and the commit may not be the true origin.
+///
 /// Return `true` if we are done because `hunks_to_blame` is empty.
 fn unblamed_to_out_is_done(
     hunks_to_blame: &mut Vec<UnblamedHunk>,
     out: &mut Vec<BlameEntry>,
     suspect: ObjectId,
+    boundary: bool,
 ) -> bool {
     let mut without_suspect = Vec::new();
     out.extend(hunks_to_blame.drain(..).filter_map(|hunk| {
-        BlameEntry::from_unblamed_hunk(&hunk, suspect).or_else(|| {
-            without_suspect.push(hunk);
-            None
-        })
+        BlameEntry::from_unblamed_hunk(&hunk, suspect)
+            .map(|mut entry| {
+                entry.boundary = boundary;
+                entry
+            })
+            .or_else(|| {
+                without_suspect.push(hunk);
+                None
+            })
     }));
     *hunks_to_blame = without_suspect;
     hunks_to_blame.is_empty()
@@ -471,6 +507,7 @@ fn coalesce_blame_entries(lines_blamed: Vec<BlameEntry>) -> Vec<BlameEntry> {
                 let previous_source_range = previous_entry.range_in_source_file();
                 let current_source_range = entry.range_in_source_file();
                 if previous_entry.commit_id == entry.commit_id
+                    && previous_entry.boundary == entry.boundary
                     && previous_blamed_range.end == current_blamed_range.start
                     // As of 2024-09-19, the check below only is in `git`, but not in `libgit2`.
                     && previous_source_range.end == current_source_range.start
@@ -482,6 +519,7 @@ fn coalesce_blame_entries(lines_blamed: Vec<BlameEntry>) -> Vec<BlameEntry> {
                             .expect("BUG: hunks are never zero-sized"),
                         commit_id: previous_entry.commit_id,
                         source_file_name: previous_entry.source_file_name.clone(),
+                        boundary: previous_entry.boundary,
                     };
 
                     acc.pop();
@@ -843,6 +881,77 @@ fn blob_changes_from_data(
 
     stats.blobs_diffed += 1;
     changes
+}
+
+/// Diff a worktree blob against the HEAD blob using the given diff algorithm and return
+/// the changes as a `Vec<Change>` suitable for use with [`process_changes`].
+///
+/// This is the in-memory equivalent of [`blob_changes`]: it does not need the ODB because
+/// both blobs are already available.
+fn diff_worktree_against_head(
+    worktree_content: &[u8],
+    head_content: &[u8],
+    diff_algorithm: gix_diff::blob::Algorithm,
+) -> Vec<Change> {
+    use std::ops::Range;
+
+    struct ChangeRecorder {
+        last_seen_after_end: u32,
+        hunks: Vec<Change>,
+        total_number_of_lines: u32,
+    }
+
+    impl ChangeRecorder {
+        fn new(total_number_of_lines: u32) -> Self {
+            ChangeRecorder {
+                last_seen_after_end: 0,
+                hunks: Vec::new(),
+                total_number_of_lines,
+            }
+        }
+    }
+
+    impl gix_diff::blob::Sink for ChangeRecorder {
+        type Out = Vec<Change>;
+
+        fn process_change(&mut self, before: Range<u32>, after: Range<u32>) {
+            if after.start > self.last_seen_after_end {
+                self.hunks
+                    .push(Change::Unchanged(self.last_seen_after_end..after.start));
+            }
+
+            match (!before.is_empty(), !after.is_empty()) {
+                (_, true) => {
+                    self.hunks.push(Change::AddedOrReplaced(
+                        after.start..after.end,
+                        before.end - before.start,
+                    ));
+                }
+                (true, false) => {
+                    self.hunks.push(Change::Deleted(after.start, before.end - before.start));
+                }
+                (false, false) => unreachable!("BUG: diff algorithm provided a non-change"),
+            }
+            self.last_seen_after_end = after.end;
+        }
+
+        fn finish(mut self) -> Self::Out {
+            if self.total_number_of_lines > self.last_seen_after_end {
+                self.hunks
+                    .push(Change::Unchanged(self.last_seen_after_end..self.total_number_of_lines));
+            }
+            self.hunks
+        }
+    }
+
+    let input = gix_diff::blob::intern::InternedInput::new(
+        tokens_for_diffing(head_content),
+        tokens_for_diffing(worktree_content),
+    );
+    let number_of_lines_in_destination = input.after.len();
+    let change_recorder = ChangeRecorder::new(number_of_lines_in_destination as u32);
+
+    gix_diff::blob::diff(diff_algorithm, &input, change_recorder)
 }
 
 fn find_path_entry_in_commit(
