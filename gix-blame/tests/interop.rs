@@ -127,9 +127,7 @@ mod baseline {
                 }
             }
 
-            let Some((range_in_blamed_file, range_in_source_file)) = ranges else {
-                return None;
-            };
+            let (range_in_blamed_file, range_in_source_file) = ranges?;
             let mut entry = BlameEntry::new(
                 range_in_blamed_file,
                 range_in_source_file,
@@ -612,11 +610,7 @@ fn entries_with_lines_consistency() -> gix_testtools::Result {
     }
 
     // The concatenation of all lines should reconstruct the file content
-    let reconstructed: Vec<u8> = all_lines
-        .iter()
-        .flat_map(|l| AsRef::<[u8]>::as_ref(l))
-        .copied()
-        .collect();
+    let reconstructed: Vec<u8> = all_lines.iter().flat_map(AsRef::<[u8]>::as_ref).copied().collect();
     assert_eq!(
         reconstructed, outcome.blob,
         "entries_with_lines should cover the entire blamed file content"

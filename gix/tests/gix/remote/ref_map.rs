@@ -79,7 +79,7 @@ mod blocking_and_async_io {
         let excluded_in_mappings = map_with_exclusion
             .mappings
             .iter()
-            .any(|m| m.remote.as_name().is_some_and(|n| n.to_string() == *excluded_branch));
+            .any(|m| m.remote.as_name().is_some_and(|n| n == excluded_branch));
         assert!(
             !excluded_in_mappings,
             "branch {excluded_branch:?} should have been excluded by the negative refspec"

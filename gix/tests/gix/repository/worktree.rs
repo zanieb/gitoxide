@@ -444,8 +444,7 @@ mod mutation {
             let result = repo.worktree_add(&worktree_path, options);
             assert!(
                 matches!(result, Err(gix::worktree::add::Error::PathExists { .. })),
-                "should fail with PathExists error, got {:?}",
-                result
+                "should fail with PathExists error, got {result:?}"
             );
             Ok(())
         }
@@ -490,8 +489,7 @@ mod mutation {
 
             assert!(
                 matches!(result, Err(gix::worktree::add::Error::BranchCheckedOut { .. })),
-                "should fail because branch is already checked out, got {:?}",
-                result
+                "should fail because branch is already checked out, got {result:?}"
             );
             Ok(())
         }
@@ -509,8 +507,7 @@ mod mutation {
             let result = repo.worktree_add(&worktree_path, options);
             assert!(
                 matches!(result, Err(gix::worktree::add::Error::BranchNotFound { .. })),
-                "should fail with BranchNotFound error, got {:?}",
-                result
+                "should fail with BranchNotFound error, got {result:?}"
             );
             Ok(())
         }
@@ -529,8 +526,7 @@ mod mutation {
             let result = repo.worktree_add(&worktree_path, options);
             assert!(
                 matches!(result, Err(gix::worktree::add::Error::MutuallyExclusiveOptions)),
-                "should fail with MutuallyExclusiveOptions error, got {:?}",
-                result
+                "should fail with MutuallyExclusiveOptions error, got {result:?}"
             );
             Ok(())
         }
@@ -790,8 +786,7 @@ mod mutation {
 
             assert!(
                 matches!(result, Err(gix::worktree::remove::Error::Locked { .. })),
-                "should fail because worktree is locked, got {:?}",
-                result
+                "should fail because worktree is locked, got {result:?}"
             );
             Ok(())
         }
@@ -829,8 +824,7 @@ mod mutation {
 
             assert!(
                 matches!(result, Err(gix::worktree::remove::Error::NotFound { .. })),
-                "should fail with NotFound error, got {:?}",
-                result
+                "should fail with NotFound error, got {result:?}"
             );
             Ok(())
         }
@@ -937,8 +931,7 @@ mod mutation {
             let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
             assert!(
                 matches!(result, Err(gix::worktree::remove::Error::Locked { .. })),
-                "should fail because worktree is locked, got {:?}",
-                result
+                "should fail because worktree is locked, got {result:?}"
             );
 
             // But with force level 2 it should succeed
@@ -974,7 +967,7 @@ mod mutation {
                         "lock reason should be in error"
                     );
                 }
-                other => panic!("expected Locked error, got {:?}", other),
+                other => panic!("expected Locked error, got {other:?}"),
             }
             Ok(())
         }
@@ -999,8 +992,7 @@ mod mutation {
             let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
             assert!(
                 matches!(result, Err(gix::worktree::remove::Error::DirtyWorktree { .. })),
-                "should fail because worktree is dirty, got {:?}",
-                result
+                "should fail because worktree is dirty, got {result:?}"
             );
             Ok(())
         }
@@ -1049,8 +1041,7 @@ mod mutation {
             let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
             assert!(
                 matches!(result, Err(gix::worktree::remove::Error::UntrackedFiles { .. })),
-                "should fail because worktree has untracked files, got {:?}",
-                result
+                "should fail because worktree has untracked files, got {result:?}"
             );
             Ok(())
         }
@@ -1101,8 +1092,7 @@ mod mutation {
             let result = repo.worktree_remove(worktree_id.as_bstr(), remove_options);
             assert!(
                 matches!(result, Err(gix::worktree::remove::Error::Locked { .. })),
-                "force level 1 should still fail on locked worktrees, got {:?}",
-                result
+                "force level 1 should still fail on locked worktrees, got {result:?}"
             );
             Ok(())
         }
@@ -1121,8 +1111,7 @@ mod mutation {
             let result = repo.worktree_lock(b"main".as_bstr(), Default::default());
             assert!(
                 matches!(result, Err(gix::worktree::lock::Error::NotFound { .. })),
-                "main worktree should not be lockable (not found in worktrees/), got {:?}",
-                result
+                "main worktree should not be lockable (not found in worktrees/), got {result:?}"
             );
             Ok(())
         }
@@ -1134,8 +1123,7 @@ mod mutation {
             let result = repo.worktree_unlock(b"main".as_bstr());
             assert!(
                 matches!(result, Err(gix::worktree::lock::UnlockError::NotFound { .. })),
-                "main worktree should not be unlockable (not found in worktrees/), got {:?}",
-                result
+                "main worktree should not be unlockable (not found in worktrees/), got {result:?}"
             );
             Ok(())
         }
@@ -1211,8 +1199,7 @@ mod mutation {
             let result = repo.worktree_lock(worktree_id.as_bstr(), Default::default());
             assert!(
                 matches!(result, Err(gix::worktree::lock::Error::AlreadyLocked { .. })),
-                "should fail because already locked, got {:?}",
-                result
+                "should fail because already locked, got {result:?}"
             );
             Ok(())
         }
@@ -1258,8 +1245,7 @@ mod mutation {
             let result = repo.worktree_unlock(worktree_id.as_bstr());
             assert!(
                 matches!(result, Err(gix::worktree::lock::UnlockError::NotLocked { .. })),
-                "should fail because not locked, got {:?}",
-                result
+                "should fail because not locked, got {result:?}"
             );
             Ok(())
         }
@@ -1271,8 +1257,7 @@ mod mutation {
             let result = repo.worktree_lock(b"nonexistent".as_bstr(), Default::default());
             assert!(
                 matches!(result, Err(gix::worktree::lock::Error::NotFound { .. })),
-                "should fail with NotFound, got {:?}",
-                result
+                "should fail with NotFound, got {result:?}"
             );
             Ok(())
         }
@@ -1284,8 +1269,7 @@ mod mutation {
             let result = repo.worktree_unlock(b"nonexistent".as_bstr());
             assert!(
                 matches!(result, Err(gix::worktree::lock::UnlockError::NotFound { .. })),
-                "should fail with NotFound, got {:?}",
-                result
+                "should fail with NotFound, got {result:?}"
             );
             Ok(())
         }
@@ -1335,8 +1319,7 @@ mod mutation {
             let result = wt_repo.worktree_lock(wt_id.as_bstr(), Default::default());
             assert!(
                 matches!(result, Err(gix::worktree::lock::Error::AlreadyLocked { .. })),
-                "should fail because already locked, got {:?}",
-                result
+                "should fail because already locked, got {result:?}"
             );
             Ok(())
         }
@@ -1593,8 +1576,7 @@ mod mutation {
             let gitdir_content = std::fs::read_to_string(&gitdir_path)?;
             assert!(
                 gitdir_content.contains("wt-move-gitdir-new"),
-                "gitdir should point to new location, got: {}",
-                gitdir_content
+                "gitdir should point to new location, got: {gitdir_content}"
             );
             Ok(())
         }
@@ -1618,8 +1600,7 @@ mod mutation {
             let result = repo.worktree_move(worktree_id.as_bstr(), &new_path);
             assert!(
                 matches!(result, Err(gix::worktree::r#move::Error::Locked { .. })),
-                "should fail because worktree is locked, got {:?}",
-                result
+                "should fail because worktree is locked, got {result:?}"
             );
             Ok(())
         }
@@ -1673,8 +1654,7 @@ mod mutation {
             let result = repo.worktree_move(worktree_id.as_bstr(), &existing_path);
             assert!(
                 matches!(result, Err(gix::worktree::r#move::Error::DestinationExists { .. })),
-                "should fail because destination exists, got {:?}",
-                result
+                "should fail because destination exists, got {result:?}"
             );
             Ok(())
         }
@@ -1687,8 +1667,7 @@ mod mutation {
             let result = repo.worktree_move(b"nonexistent".as_bstr(), &new_path);
             assert!(
                 matches!(result, Err(gix::worktree::r#move::Error::NotFound { .. })),
-                "should fail with NotFound, got {:?}",
-                result
+                "should fail with NotFound, got {result:?}"
             );
             Ok(())
         }
@@ -1741,7 +1720,7 @@ mod mutation {
             assert!(!worktree_path.join(".git").exists());
 
             // Repair
-            let repairs = repo.worktree_repair(&[worktree_path.clone()])?;
+            let repairs = repo.worktree_repair(std::slice::from_ref(&worktree_path))?;
 
             assert_eq!(repairs.len(), 1);
             assert!(
@@ -1770,7 +1749,7 @@ mod mutation {
             std::fs::rename(&worktree_path, &new_path)?;
 
             // Repair should fix the gitdir file
-            let repairs = repo.worktree_repair(&[new_path.clone()])?;
+            let repairs = repo.worktree_repair(std::slice::from_ref(&new_path))?;
 
             // Should repair both .git file (now pointing to wrong place) and gitdir
             assert!(!repairs.is_empty(), "should have performed repairs");
@@ -1836,8 +1815,7 @@ mod mutation {
             let result = repo.worktree_repair(&[nonexistent]);
             assert!(
                 matches!(result, Err(gix::worktree::repair::Error::InvalidPath { .. })),
-                "should fail with InvalidPath, got {:?}",
-                result
+                "should fail with InvalidPath, got {result:?}"
             );
             Ok(())
         }

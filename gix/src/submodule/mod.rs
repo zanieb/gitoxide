@@ -240,7 +240,7 @@ impl Submodule<'_> {
             .into_iter()
             .flatten()
             .any(|s| {
-                s.header().subsection_name() == Some(self.name().into())
+                s.header().subsection_name() == Some(self.name())
                     && s.value("url").is_some()
                     && s.meta().source == gix_config::Source::Local
             })

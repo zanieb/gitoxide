@@ -2,7 +2,6 @@ use gix_protocol::push::{Command, Options};
 
 /// Tests for push command types, ported from git push protocol specification
 /// and git/t/t5516-fetch-push.sh patterns.
-
 mod command {
     use super::*;
 
@@ -141,7 +140,7 @@ mod command_format {
         // Simulate formatting multiple commands as sent in push protocol
         let old = id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let new = id("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-        let commands = vec![
+        let commands = [
             Command::new("refs/heads/main", old, new),
             Command::new("refs/heads/develop", old, new),
             Command::new("refs/tags/v1.0", null_id(), new),
@@ -401,7 +400,7 @@ mod error {
 
     #[test]
     fn pack_generation_is_not_spurious() {
-        let err = push::Error::PackGeneration(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "pack error")));
+        let err = push::Error::PackGeneration(Box::new(std::io::Error::other("pack error")));
         assert!(!err.is_spurious(), "pack generation failure is not spurious");
     }
 }

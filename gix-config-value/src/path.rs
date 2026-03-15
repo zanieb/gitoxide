@@ -79,7 +79,7 @@ pub mod interpolate {
                         libc::getpwnam_r(
                             cname.as_ptr(),
                             &mut pwd,
-                            buf.as_mut_ptr() as *mut libc::c_char,
+                            buf.as_mut_ptr().cast::<libc::c_char>(),
                             buf.len(),
                             &mut result,
                         )

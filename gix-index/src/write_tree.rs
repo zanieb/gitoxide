@@ -214,7 +214,7 @@ fn build_tree_hierarchy(state: &State) -> Result<TreeNode, Error> {
     Ok(stack.into_iter().next().expect("root always present"))
 }
 
-/// Split a path like `a/b/c.txt` into (["a", "b"], "c.txt").
+/// Split a path like `a/b/c.txt` into `(["a", "b"], "c.txt")`.
 fn split_path(path: &BStr) -> (SmallVec<[&[u8]; 4]>, &[u8]) {
     let bytes = path.as_bytes();
     if let Some(last_slash) = bytes.iter().rposition(|&b| b == b'/') {

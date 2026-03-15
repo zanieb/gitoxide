@@ -1,3 +1,4 @@
+#[allow(clippy::module_inception)]
 mod signing {
     use gix::repository::signing::Sign;
 
@@ -65,8 +66,7 @@ mod signing {
         let sig_value = gpgsig.unwrap();
         assert!(
             sig_value.starts_with(b"-----BEGIN PGP SIGNATURE-----"),
-            "signature should start with PGP header, got: {:?}",
-            sig_value
+            "signature should start with PGP header, got: {sig_value:?}"
         );
 
         assert_eq!(decoded.message, "signed commit message", "commit message should match");
@@ -177,8 +177,7 @@ mod signing {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("signing failed intentionally"),
-            "error should contain signer's message: {}",
-            err
+            "error should contain signer's message: {err}"
         );
 
         Ok(())
@@ -482,7 +481,7 @@ mod signing {
             "gpg.format=ssh should yield Ssh format"
         );
         assert!(
-            config.key.as_ref().map_or(false, |k| k == "~/.ssh/id_ed25519"),
+            config.key.as_ref().is_some_and(|k| k == "~/.ssh/id_ed25519"),
             "user.signingKey should be read: {:?}",
             config.key
         );
@@ -561,20 +560,17 @@ mod signing {
 
         let config = repo.signing_config()?;
         assert!(
-            config.gpg_program.as_ref().map_or(false, |p| p == "/usr/bin/gpg2"),
+            config.gpg_program.as_ref().is_some_and(|p| p == "/usr/bin/gpg2"),
             "gpg.program should be set: {:?}",
             config.gpg_program
         );
         assert!(
-            config
-                .ssh_program
-                .as_ref()
-                .map_or(false, |p| p == "/usr/bin/ssh-keygen"),
+            config.ssh_program.as_ref().is_some_and(|p| p == "/usr/bin/ssh-keygen"),
             "gpg.ssh.program should be set: {:?}",
             config.ssh_program
         );
         assert!(
-            config.x509_program.as_ref().map_or(false, |p| p == "/usr/bin/gpgsm"),
+            config.x509_program.as_ref().is_some_and(|p| p == "/usr/bin/gpgsm"),
             "gpg.x509.program should be set: {:?}",
             config.x509_program
         );

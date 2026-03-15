@@ -1,4 +1,5 @@
 #[cfg(all(feature = "merge", feature = "worktree-mutation"))]
+#[allow(clippy::module_inception)]
 mod cherry_pick {
     use crate::util::repo_rw;
     use gix::repository::cherry_pick::Options;
@@ -40,7 +41,7 @@ mod cherry_pick {
 
         // The new commit's parent should be the old HEAD.
         let new_commit = repo.find_object(new_commit_id)?.into_commit();
-        let parents: Vec<_> = new_commit.parent_ids().map(|id| id.detach()).collect();
+        let parents: Vec<_> = new_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(parents.len(), 1);
         assert_eq!(parents[0], head_before);
 
@@ -774,7 +775,7 @@ mod cherry_pick_interop {
             "tree should contain feature.txt, got: {paths:?}"
         );
 
-        let parents: Vec<_> = head_commit.parent_ids().map(|id| id.detach()).collect();
+        let parents: Vec<_> = head_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(parents.len(), 1, "cherry-pick should produce a single-parent commit");
 
         Ok(())
@@ -930,7 +931,10 @@ mod cherry_pick_interop {
 
         assert_eq!(
             gix_files,
-            c_git_list.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            c_git_list
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>(),
             "gix and C Git should agree on the tree contents after sequential cherry-pick"
         );
 

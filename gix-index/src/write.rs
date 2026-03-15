@@ -46,7 +46,7 @@ impl Extensions {
 /// The options for use when [writing an index][State::write_to()].
 ///
 /// Note that default options write either index V2 or V3 depending on the content of the entries.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
     /// Configures which extensions to write.
     pub extensions: Extensions,
@@ -69,16 +69,6 @@ pub struct Options {
     /// Set to `true` only if you have reason to believe the tree cache is stale
     /// and you want to omit it rather than write incorrect data.
     pub skip_stale_tree_cache: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Options {
-            extensions: Extensions::default(),
-            skip_hash: false,
-            skip_stale_tree_cache: false,
-        }
-    }
 }
 
 impl State {

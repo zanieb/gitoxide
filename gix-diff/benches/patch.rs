@@ -14,7 +14,7 @@ fn patch_write(c: &mut Criterion) {
     for &num_lines in &[100, 1_000, 10_000] {
         let old = generate_lines(num_lines, "old");
         // Modify ~10% of lines
-        let mut new_lines: Vec<String> = (0..num_lines)
+        let new_lines: Vec<String> = (0..num_lines)
             .map(|i| {
                 if i % 10 == 5 {
                     format!("CHANGED line {i}\n")

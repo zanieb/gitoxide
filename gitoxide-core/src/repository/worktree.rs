@@ -10,7 +10,7 @@ pub fn list(repo: gix::Repository, out: &mut dyn std::io::Write, format: OutputF
 
     if let Some(worktree) = repo.worktree() {
         let locked_info = if worktree.is_locked() {
-            let reason = worktree.lock_reason().map(|r| format!(" ({})", r)).unwrap_or_default();
+            let reason = worktree.lock_reason().map(|r| format!(" ({r})")).unwrap_or_default();
             format!(" locked{reason}")
         } else {
             String::new()
@@ -26,15 +26,14 @@ pub fn list(repo: gix::Repository, out: &mut dyn std::io::Write, format: OutputF
     }
     for proxy in repo.worktrees()? {
         let locked_info = if proxy.is_locked() {
-            let reason = proxy.lock_reason().map(|r| format!(" ({})", r)).unwrap_or_default();
+            let reason = proxy.lock_reason().map(|r| format!(" ({r})")).unwrap_or_default();
             format!(" locked{reason}")
         } else {
             String::new()
         };
         let base_display = proxy
             .base()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "<missing>".to_string());
+            .map_or_else(|_| "<missing>".to_string(), |p| p.display().to_string());
         writeln!(out, "{base_display} [{name}]{locked_info}", name = proxy.id())?;
     }
     Ok(())
@@ -61,7 +60,7 @@ pub fn remove(
 
     repo.worktree_remove(id, options)?;
 
-    writeln!(err, "Removed worktree '{}'", id)?;
+    writeln!(err, "Removed worktree '{id}'")?;
     let _ = out; // currently unused, but available for future output
     Ok(())
 }
@@ -96,9 +95,9 @@ pub fn lock(
     repo.worktree_lock(id, options)?;
 
     if let Some(reason) = &opts.reason {
-        writeln!(err, "Locked worktree '{}' with reason: {}", id, reason)?;
+        writeln!(err, "Locked worktree '{id}' with reason: {reason}")?;
     } else {
-        writeln!(err, "Locked worktree '{}'", id)?;
+        writeln!(err, "Locked worktree '{id}'")?;
     }
     let _ = out;
     Ok(())
@@ -113,7 +112,7 @@ pub fn unlock(
 ) -> anyhow::Result<()> {
     repo.worktree_unlock(id)?;
 
-    writeln!(err, "Unlocked worktree '{}'", id)?;
+    writeln!(err, "Unlocked worktree '{id}'")?;
     let _ = out;
     Ok(())
 }

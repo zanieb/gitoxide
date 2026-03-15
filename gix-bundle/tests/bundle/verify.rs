@@ -154,8 +154,7 @@ fn error_message_includes_oid() {
     let msg = err.to_string();
     assert!(
         msg.contains("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
-        "error message should contain the missing OID, got: {}",
-        msg
+        "error message should contain the missing OID, got: {msg}"
     );
 }
 

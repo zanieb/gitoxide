@@ -510,7 +510,7 @@ impl MergeState {
                 // Return an error rather than silently skipping, as skipping could
                 // corrupt repository state (e.g., missed Reset or Label operations).
                 Err(StepError::ResolvePrefix(
-                    format!("unsupported rebase operation: {:?}", op).into(),
+                    format!("unsupported rebase operation: {op:?}").into(),
                 ))
             }
         }

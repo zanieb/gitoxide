@@ -85,6 +85,7 @@ pub fn file(
 ///
 /// If `progress_counter` is `Some`, it will be incremented (via `fetch_add`) for each
 /// commit traversed. This allows the caller to monitor progress from another thread.
+#[allow(clippy::too_many_arguments)]
 pub fn file_with_progress(
     odb: impl gix_object::Find + gix_object::FindHeader,
     suspect: ObjectId,

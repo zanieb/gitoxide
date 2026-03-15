@@ -200,7 +200,7 @@ pub fn decompress_log_block(raw_block: &[u8]) -> Result<Vec<u8>, Error> {
 ///
 /// The `block_len` in the header is set to the uncompressed total size before compression.
 /// Returns the compressed block (4-byte header + compressed data).
-pub fn compress_log_block(uncompressed_block: &mut Vec<u8>) -> Result<Vec<u8>, Error> {
+pub fn compress_log_block(uncompressed_block: &mut [u8]) -> Result<Vec<u8>, Error> {
     if uncompressed_block.len() < 4 {
         return Err(Error::UnexpectedEof);
     }
@@ -251,7 +251,7 @@ impl Stack {
         let tables: Vec<String> = content
             .lines()
             .filter(|l| !l.is_empty())
-            .map(|l| l.to_owned())
+            .map(std::borrow::ToOwned::to_owned)
             .collect();
         Ok(Stack { path, tables })
     }

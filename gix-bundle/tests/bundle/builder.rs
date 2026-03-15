@@ -136,7 +136,7 @@ fn builder_write_propagates_pack_error() {
 
     let mut buf = Vec::new();
     let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
-        Err(std::io::Error::new(std::io::ErrorKind::Other, "pack generation failed"))
+        Err(std::io::Error::other("pack generation failed"))
     });
 
     assert!(result.is_err(), "pack writer error should propagate");

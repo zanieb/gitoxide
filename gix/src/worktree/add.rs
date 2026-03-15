@@ -94,10 +94,10 @@ impl crate::Repository {
     /// - If the branch is already checked out in another worktree (unless `detach` is true)
     /// - If the repository is bare
     #[cfg(feature = "worktree-mutation")]
-    pub fn worktree_add<'a>(
+    pub fn worktree_add(
         &self,
         path: impl AsRef<Path>,
-        options: Options<'a>,
+        options: Options<'_>,
     ) -> Result<crate::worktree::Proxy<'_>, Error> {
         let path = path.as_ref();
 
@@ -212,8 +212,7 @@ impl crate::Repository {
                     self.head()
                         .ok()
                         .and_then(|mut h| h.try_peel_to_id().ok().flatten())
-                        .map(|id| id.detach())
-                        .unwrap_or_else(|| self.object_hash().null())
+                        .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach)
                 }
             };
 
@@ -283,8 +282,7 @@ impl crate::Repository {
                     .head()
                     .ok()
                     .and_then(|mut h| h.try_peel_to_id().ok().flatten())
-                    .map(|id| id.detach())
-                    .unwrap_or_else(|| self.object_hash().null()),
+                    .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach),
             };
             Ok(HeadTarget::Detached(id))
         } else if let Some(branch) = options.branch {
@@ -305,8 +303,7 @@ impl crate::Repository {
                     .head()
                     .ok()
                     .and_then(|mut h| h.try_peel_to_id().ok().flatten())
-                    .map(|id| id.detach())
-                    .unwrap_or_else(|| self.object_hash().null()),
+                    .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach),
             };
             // We'll update HEAD to symbolic ref after creating the branch
             let _branch_ref = format!("refs/heads/{}", new_branch.to_str_lossy());
@@ -323,8 +320,7 @@ impl crate::Repository {
                             .try_peel_to_id()
                             .ok()
                             .flatten()
-                            .map(|id| id.detach())
-                            .unwrap_or_else(|| self.object_hash().null());
+                            .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach);
                         Ok(HeadTarget::Detached(id))
                     }
                 }

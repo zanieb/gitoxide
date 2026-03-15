@@ -73,14 +73,13 @@ impl crate::Repository {
     /// If `reference` is `Some`, it is used as-is. Otherwise, the value of
     /// `core.notesRef` from the repository config is used, falling back to
     /// `refs/notes/commits` if not configured.
-    fn effective_notes_ref<'a>(&self, reference: Option<&'a str>) -> String {
+    fn effective_notes_ref(&self, reference: Option<&str>) -> String {
         if let Some(r) = reference {
             return r.to_owned();
         }
         self.config_snapshot()
             .string("core.notesRef")
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| gix_note::DEFAULT_REF.to_owned())
+            .map_or_else(|| gix_note::DEFAULT_REF.to_owned(), |v| v.to_string())
     }
 
     /// List all notes from the given notes `reference` (e.g. `refs/notes/commits`).

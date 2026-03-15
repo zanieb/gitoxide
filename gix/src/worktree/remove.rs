@@ -54,6 +54,7 @@ pub enum Error {
     },
 }
 
+#[allow(clippy::ref_option)]
 fn format_lock_reason(reason: &Option<BString>) -> String {
     reason
         .as_ref()

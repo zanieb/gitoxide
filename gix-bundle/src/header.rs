@@ -106,9 +106,8 @@ impl Header {
                 return Err(Error::TooManyEntries { limit: MAX_ENTRIES });
             }
 
-            if line.starts_with('-') {
+            if let Some(rest) = line.strip_prefix('-') {
                 // Prerequisite line: -<hex-oid> [<comment>]
-                let rest = &line[1..];
                 if rest.len() < hex_len {
                     return Err(Error::InvalidPrerequisite {
                         line: BString::from(line.as_bytes()),
@@ -117,7 +116,7 @@ impl Header {
                 let hex = &rest[..hex_len];
                 let id = ObjectId::from_hex(hex.as_bytes()).map_err(|source| Error::ObjectId { source })?;
                 let comment = if rest.len() > hex_len && rest.as_bytes()[hex_len] == b' ' {
-                    Some(BString::from(rest[hex_len + 1..].as_bytes()))
+                    Some(BString::from(&rest.as_bytes()[hex_len + 1..]))
                 } else {
                     None
                 };

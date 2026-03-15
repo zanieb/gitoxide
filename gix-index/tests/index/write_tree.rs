@@ -11,9 +11,7 @@ fn hash_tree(tree: &gix_object::Tree) -> Result<gix_hash::ObjectId, std::io::Err
     let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
     hasher.update(header.as_bytes());
     hasher.update(&buf);
-    hasher
-        .try_finalize()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    hasher.try_finalize().map_err(std::io::Error::other)
 }
 
 /// Test that writing a tree from an index produces the same tree as the original.

@@ -643,9 +643,7 @@ fn add_entry_invalidates_tree_extension() {
         let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
         hasher.update(header.as_bytes());
         hasher.update(&buf);
-        hasher
-            .try_finalize()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        hasher.try_finalize().map_err(std::io::Error::other)
     }
     state.write_tree_to(hash_tree).expect("write_tree_to");
     assert!(
@@ -693,9 +691,7 @@ fn add_entry_invalidates_tree_extension_for_nested_path() {
         let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
         hasher.update(header.as_bytes());
         hasher.update(&buf);
-        hasher
-            .try_finalize()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        hasher.try_finalize().map_err(std::io::Error::other)
     }
     state.write_tree_to(hash_tree).expect("write_tree_to");
     let tree = state.tree().expect("tree ext");
@@ -799,9 +795,7 @@ fn remove_entry_by_path_and_stage_invalidates_tree() {
         let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
         hasher.update(header.as_bytes());
         hasher.update(&buf);
-        hasher
-            .try_finalize()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        hasher.try_finalize().map_err(std::io::Error::other)
     }
     state.write_tree_to(hash_tree).expect("write_tree_to");
     assert!(state.tree().unwrap().num_entries.is_some());
@@ -814,7 +808,7 @@ fn remove_entry_by_path_and_stage_invalidates_tree() {
     assert_eq!(tree.num_entries, None, "root is invalidated on remove");
     let dir_child = tree.children.iter().find(|c| c.name.as_slice() == b"dir");
     assert!(
-        dir_child.map_or(true, |c| c.num_entries.is_none()),
+        dir_child.is_none_or(|c| c.num_entries.is_none()),
         "dir subtree is invalidated"
     );
 }

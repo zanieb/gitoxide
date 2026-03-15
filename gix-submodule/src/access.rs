@@ -132,7 +132,7 @@ impl File {
         // CVE-2025-48384: Reject paths containing carriage return (\r) to prevent
         // differential parsing attacks where a path like "foo\r" and "foo" are treated
         // as different entries by different components, enabling symlink-based exploits.
-        if path_bstr.as_ref().iter().any(|&b| b == b'\r') {
+        if path_bstr.as_ref().contains(&b'\r') {
             return Err(config::path::Error::ContainsCarriageReturn {
                 submodule: name.to_owned(),
                 actual: path_bstr.into_owned(),

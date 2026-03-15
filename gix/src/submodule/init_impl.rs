@@ -45,7 +45,7 @@ impl Submodule<'_> {
             .sections_by_name("submodule")
             .into_iter()
             .flatten()
-            .any(|s| s.header().subsection_name() == Some(name.into()) && s.value("url").is_some());
+            .any(|s| s.header().subsection_name() == Some(name) && s.value("url").is_some());
         if !force && already_initialized {
             return Ok(());
         }
@@ -66,7 +66,10 @@ impl Submodule<'_> {
                     .repo
                     .find_remote("origin")
                     .ok()
-                    .and_then(|r| r.url(crate::remote::Direction::Fetch).map(|u| u.to_owned()))
+                    .and_then(|r| {
+                        r.url(crate::remote::Direction::Fetch)
+                            .map(std::borrow::ToOwned::to_owned)
+                    })
                     .and_then(|base_url| {
                         let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref()));
                         let candidate = base_path.join(&rel_path);
@@ -82,7 +85,7 @@ impl Submodule<'_> {
                     let candidate = worktree.join(&rel_path);
                     gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS).unwrap_or(candidate)
                 });
-                crate::bstr::BString::from(gix_path::into_bstr(resolved).into_owned())
+                gix_path::into_bstr(resolved).into_owned()
             } else {
                 raw_url.to_bstring()
             }
@@ -122,7 +125,7 @@ impl Submodule<'_> {
                 .sections_by_name("submodule")
                 .into_iter()
                 .flatten()
-                .any(|s| s.header().subsection_name() == Some(name.into()) && s.value("update").is_some());
+                .any(|s| s.header().subsection_name() == Some(name) && s.value("update").is_some());
             if force || !has_update {
                 let mut section = local_config
                     .section_mut("submodule", Some(name))

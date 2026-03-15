@@ -12,6 +12,7 @@
 /// Options for controlling a submodule update operation.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+#[derive(Default)]
 pub struct Options {
     /// If `true`, initialize the submodule (write url and update strategy to `.git/config`)
     /// before updating. Equivalent to `git submodule update --init`.
@@ -25,15 +26,6 @@ impl Options {
     /// Create new options with the given settings.
     pub fn new(init: bool, recursive: bool) -> Self {
         Options { init, recursive }
-    }
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Options {
-            init: false,
-            recursive: false,
-        }
     }
 }
 

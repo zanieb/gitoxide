@@ -165,10 +165,8 @@ where
 {
     // Try direct match first (no fanout or final level).
     for entry in &tree.entries {
-        if entry.filename.as_ref() as &[u8] == remaining_hex {
-            if entry.mode.is_blob() {
-                return Ok(Some(entry.oid));
-            }
+        if entry.filename.as_ref() as &[u8] == remaining_hex && entry.mode.is_blob() {
+            return Ok(Some(entry.oid));
         }
     }
 

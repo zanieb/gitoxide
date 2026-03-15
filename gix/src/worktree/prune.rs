@@ -118,7 +118,7 @@ impl crate::Repository {
         }
 
         // Clean up empty worktrees directory if not a dry run
-        if !options.dry_run && pruned.len() > 0 {
+        if !options.dry_run && !pruned.is_empty() {
             let _ = std::fs::remove_dir(&worktrees_dir);
         }
 

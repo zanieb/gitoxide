@@ -1,4 +1,5 @@
 #[cfg(feature = "worktree-mutation")]
+#[allow(clippy::module_inception)]
 mod reset {
     use crate::util::repo_rw;
     use gix::repository::reset::ResetMode;
@@ -206,8 +207,7 @@ mod reset {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("soft reset in the middle of a merge"),
-            "error message should mention merge: {}",
-            err
+            "error message should mention merge: {err}"
         );
 
         Ok(())
@@ -347,7 +347,7 @@ mod reset {
         let first_entry = index
             .entries()
             .iter()
-            .find(|e| e.path(&index).to_string() == "first")
+            .find(|e| *e.path(&index) == "first")
             .expect("first should still be in the index");
 
         // Read c1's tree to get the expected blob id for "first"
@@ -366,7 +366,7 @@ mod reset {
         );
 
         // "second" should still be in the index (not affected)
-        let second_exists = index.entries().iter().any(|e| e.path(&index).to_string() == "second");
+        let second_exists = index.entries().iter().any(|e| *e.path(&index) == "second");
         assert!(second_exists, "'second' should still be in the index");
 
         // Worktree should be unchanged
@@ -886,7 +886,7 @@ mod reset {
         let head = repo.head_id()?.detach();
 
         let git_dir = repo.path();
-        std::fs::write(git_dir.join("MERGE_HEAD"), format!("{}\n", head))?;
+        std::fs::write(git_dir.join("MERGE_HEAD"), format!("{head}\n"))?;
         std::fs::write(git_dir.join("MERGE_MSG"), "merge message\n")?;
 
         repo.reset(head, ResetMode::Hard)?;

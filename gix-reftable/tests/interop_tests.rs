@@ -192,7 +192,7 @@ fn read_c_git_produced_reftable() {
 
     // HEAD should be a symref to refs/heads/main
     assert!(
-        all_refs.get("HEAD").map_or(false, |v| v.contains("symref")),
+        all_refs.get("HEAD").is_some_and(|v| v.contains("symref")),
         "HEAD should be a symbolic ref, got: {:?}",
         all_refs.get("HEAD")
     );

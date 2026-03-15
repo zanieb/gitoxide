@@ -30,15 +30,13 @@ fn write_v2_header_format() {
     // First line must be the v2 signature
     assert!(
         output.starts_with("# v2 git bundle\n"),
-        "output should start with v2 signature, got: {:?}",
-        output
+        "output should start with v2 signature, got: {output:?}"
     );
 
     // Must end with blank line (double newline at end)
     assert!(
         output.ends_with("\n\n"),
-        "output should end with blank line, got: {:?}",
-        output
+        "output should end with blank line, got: {output:?}"
     );
 
     // Check ref line format: "<hex> <refname>\n"
@@ -262,8 +260,6 @@ fn v3_without_capabilities_no_extra_blank_line() {
     // Actually the final \n\n would show as one empty string at end
     assert!(
         blank_count <= 1,
-        "v3 without capabilities should not have extra blank lines, got {} in: {:?}",
-        blank_count,
-        output
+        "v3 without capabilities should not have extra blank lines, got {blank_count} in: {output:?}"
     );
 }
