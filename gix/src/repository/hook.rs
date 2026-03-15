@@ -97,13 +97,23 @@ impl Repository {
             std::process::Stdio::null()
         };
 
-        let cmd = gix_command::prepare(prepared.path.as_os_str())
+        let mut cmd: std::process::Command = gix_command::prepare(prepared.path.as_os_str())
             .command_may_be_shell_script()
             .with_context(ctx)
             .stdin(stdin_mode)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .args(args.iter().copied());
+            .args(args.iter().copied())
+            .into();
+
+        // Git runs hooks with the working directory set to the worktree root (or the git
+        // directory for bare repositories).  Match this behavior so that hooks relying on
+        // relative paths work correctly.
+        if let Some(workdir) = self.workdir() {
+            cmd.current_dir(workdir);
+        } else {
+            cmd.current_dir(self.git_dir());
+        }
 
         let mut child = cmd.spawn().map_err(|e| hook::run::Error::Spawn {
             path: prepared.path.clone(),

@@ -26,7 +26,7 @@ pub mod update;
 
 mod init_impl;
 
-#[cfg(feature = "blocking-network-client")]
+#[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
 mod update_impl;
 
 pub(crate) mod git_dir_layout;
@@ -65,7 +65,7 @@ impl From<SymlinkInPathError> for init::Error {
     }
 }
 
-#[cfg(feature = "blocking-network-client")]
+#[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
 impl From<SymlinkInPathError> for update::Error {
     fn from(e: SymlinkInPathError) -> Self {
         update::Error::SymlinkInPath {
