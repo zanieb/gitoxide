@@ -40,7 +40,7 @@ proptest! {
             Some(t) => t,
             None => {
                 return Err(proptest::test_runner::TestCaseError::fail(
-                    format!("parse_header failed for: {:?}", formatted)
+                    format!("parse_header failed for: {formatted:?}")
                 ));
             }
         };
@@ -61,7 +61,7 @@ proptest! {
         // First part must be a valid integer
         let _seconds: i64 = parts[0].parse()
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("seconds part not a valid integer: {}", e)
+                format!("seconds part not a valid integer: {e}")
             ))?;
 
         // Second part must be +HHMM or -HHMM (5 chars)
@@ -73,11 +73,11 @@ proptest! {
 
         let hh: u32 = offset_str[1..3].parse()
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("hours not valid: {}", e)
+                format!("hours not valid: {e}")
             ))?;
         let mm: u32 = offset_str[3..5].parse()
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("minutes not valid: {}", e)
+                format!("minutes not valid: {e}")
             ))?;
 
         prop_assert!(hh <= 99, "hours must be <= 99, got {}", hh);

@@ -89,7 +89,7 @@ impl crate::Repository {
                 continue;
             }
             let path = entry.path(old_index);
-            let path_bytes: &[u8] = &**path;
+            let path_bytes: &[u8] = path;
             if new_paths.contains(path_bytes) {
                 continue;
             }

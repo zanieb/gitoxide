@@ -1,4 +1,5 @@
 #[cfg(feature = "worktree-mutation")]
+#[allow(clippy::module_inception)]
 mod stash {
     use crate::util::repo_rw;
 
@@ -92,7 +93,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_before);
+                let p: &[u8] = e.path(&index_before);
                 p == b"file.txt"
             })
             .expect("file.txt in index");
@@ -110,7 +111,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_after);
+                let p: &[u8] = e.path(&index_after);
                 p == b"file.txt"
             })
             .expect("file.txt in index after save");
@@ -183,13 +184,13 @@ mod stash {
 
         // The stash commit should have 2 parents: HEAD and the index commit.
         let stash_commit = repo.find_object(stash_id)?.into_commit();
-        let parent_ids: Vec<_> = stash_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(parent_ids.len(), 2, "stash commit should have 2 parents");
         assert_eq!(parent_ids[0], head_id, "first parent should be HEAD");
 
         // The index commit (second parent) should have HEAD as its parent.
         let index_commit = repo.find_object(parent_ids[1])?.into_commit();
-        let index_parent_ids: Vec<_> = index_commit.parent_ids().map(|id| id.detach()).collect();
+        let index_parent_ids: Vec<_> = index_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(index_parent_ids.len(), 1, "index commit should have 1 parent");
         assert_eq!(index_parent_ids[0], head_id, "index commit parent should be HEAD");
 
@@ -225,7 +226,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_after);
+                let p: &[u8] = e.path(&index_after);
                 p == b"file.txt"
             })
             .expect("file.txt in index after apply");
@@ -423,7 +424,7 @@ mod stash {
         let new_blob_id = repo.write_blob("second modification\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"file.txt" {
                 entry.id = new_blob_id.detach();
                 break;
@@ -479,7 +480,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_before);
+                let p: &[u8] = e.path(&index_before);
                 p == b"file.txt"
             })
             .expect("file.txt in index")
@@ -499,7 +500,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_after);
+                let p: &[u8] = e.path(&index_after);
                 p == b"file.txt"
             })
             .expect("file.txt in index after keep-index save");
@@ -534,7 +535,7 @@ mod stash {
 
         // The stash commit should have 3 parents (HEAD, index, untracked).
         let stash_commit = repo.find_object(stash_id)?.into_commit();
-        let parent_ids: Vec<_> = stash_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(
             parent_ids.len(),
             3,
@@ -546,7 +547,7 @@ mod stash {
         let untracked_tree_id = untracked_commit.tree_id().expect("has tree");
 
         // The untracked commit should have no parents (it's a standalone commit).
-        let untracked_parent_ids: Vec<_> = untracked_commit.parent_ids().map(|id| id.detach()).collect();
+        let untracked_parent_ids: Vec<_> = untracked_commit.parent_ids().map(gix::Id::detach).collect();
         assert!(
             untracked_parent_ids.is_empty(),
             "untracked commit should have no parents"
@@ -595,7 +596,7 @@ mod stash {
 
         // Even with no untracked files, should have 3 parents (empty tree for 3rd parent).
         let stash_commit = repo.find_object(stash_id)?.into_commit();
-        let parent_ids: Vec<_> = stash_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(
             parent_ids.len(),
             3,
@@ -630,7 +631,7 @@ mod stash {
         let blob_id = repo.write_blob("second change\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"file.txt" {
                 entry.id = blob_id.detach();
                 break;
@@ -646,7 +647,7 @@ mod stash {
         let blob_id = repo.write_blob("third change\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"file.txt" {
                 entry.id = blob_id.detach();
                 break;
@@ -714,7 +715,7 @@ mod stash {
         index.write(Default::default())?;
 
         // Create the commit.
-        let new_tree_outcome = index.write_tree_to(|tree| repo.write_object(tree).map(|id| id.detach()))?;
+        let new_tree_outcome = index.write_tree_to(|tree| repo.write_object(tree).map(gix::Id::detach))?;
         let committer_ref = repo.committer().expect("has committer").expect("valid");
         let committer: gix_actor::Signature = committer_ref.into();
         let head_id = repo.head_id()?.detach();
@@ -758,7 +759,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_after);
+                let p: &[u8] = e.path(&index_after);
                 p == b"file.txt"
             })
             .expect("file.txt in index after apply");
@@ -774,7 +775,7 @@ mod stash {
 
         // other.txt (from the new commit) should still be in the index.
         let other_entry = index_after.entries().iter().find(|e| {
-            let p: &[u8] = &**e.path(&index_after);
+            let p: &[u8] = e.path(&index_after);
             p == b"other.txt"
         });
         assert!(
@@ -827,7 +828,7 @@ mod stash {
         // After stash, the index should no longer contain newfile.txt (reset to HEAD).
         let index_after = repo.open_index()?;
         let has_newfile = index_after.entries().iter().any(|e| {
-            let p: &[u8] = &**e.path(&index_after);
+            let p: &[u8] = e.path(&index_after);
             p == b"newfile.txt"
         });
         assert!(
@@ -852,7 +853,7 @@ mod stash {
         // After apply, newfile.txt should be back in the index.
         let index_restored = repo.open_index()?;
         let restored_entry = index_restored.entries().iter().find(|e| {
-            let p: &[u8] = &**e.path(&index_restored);
+            let p: &[u8] = e.path(&index_restored);
             p == b"newfile.txt"
         });
         assert!(
@@ -902,7 +903,7 @@ mod stash {
 
         // Get the untracked commit (3rd parent).
         let stash_commit = repo.find_object(stash_id)?.into_commit();
-        let parent_ids: Vec<_> = stash_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(parent_ids.len(), 3, "stash with untracked files should have 3 parents");
 
         let untracked_commit = repo.find_object(parent_ids[2])?.into_commit();
@@ -987,7 +988,7 @@ mod stash {
         let blob_id = repo.write_blob("conflicting change\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"file.txt" {
                 entry.id = blob_id.detach();
                 break;
@@ -1037,7 +1038,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_before);
+                let p: &[u8] = e.path(&index_before);
                 p == b"file.txt"
             })
             .expect("file.txt in index")
@@ -1055,7 +1056,7 @@ mod stash {
 
         // Stash commit should have 3 parents.
         let stash_commit = repo.find_object(stash_id)?.into_commit();
-        let parent_ids: Vec<_> = stash_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(parent_ids.len(), 3, "combined should have 3 parents");
 
         // Index should retain staged changes (keep_index).
@@ -1064,7 +1065,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_after);
+                let p: &[u8] = e.path(&index_after);
                 p == b"file.txt"
             })
             .expect("file.txt in index");
@@ -1140,7 +1141,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_after);
+                let p: &[u8] = e.path(&index_after);
                 p == b"first"
             })
             .expect("first in index after apply");
@@ -1167,7 +1168,7 @@ mod stash {
         let blob_id = repo.write_blob("second change\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"file.txt" {
                 entry.id = blob_id.detach();
                 break;
@@ -1337,7 +1338,7 @@ mod stash {
         // After save, binary.bin should not be in index (reset to HEAD).
         let index_after = repo.open_index()?;
         let has_binary = index_after.entries().iter().any(|e| {
-            let p: &[u8] = &**e.path(&index_after);
+            let p: &[u8] = e.path(&index_after);
             p == b"binary.bin"
         });
         assert!(
@@ -1352,7 +1353,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_restored);
+                let p: &[u8] = e.path(&index_restored);
                 p == b"binary.bin"
             })
             .expect("binary.bin should be restored after apply");
@@ -1389,7 +1390,7 @@ mod stash {
             .entries()
             .iter()
             .find(|e| {
-                let p: &[u8] = &**e.path(&index_after);
+                let p: &[u8] = e.path(&index_after);
                 p == b"file.txt"
             })
             .expect("file.txt in index");
@@ -1517,7 +1518,7 @@ mod stash {
 
         // Verify the untracked commit tree contains both files.
         let stash_commit = repo.find_object(stash_id)?.into_commit();
-        let parent_ids: Vec<_> = stash_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
         assert_eq!(parent_ids.len(), 3, "should have 3 parents with untracked");
 
         let untracked_commit = repo.find_object(parent_ids[2])?.into_commit();
@@ -1530,7 +1531,7 @@ mod stash {
             .entries()
             .iter()
             .map(|e| {
-                let p: &[u8] = &**e.path(&untracked_index);
+                let p: &[u8] = e.path(&untracked_index);
                 String::from_utf8_lossy(p).to_string()
             })
             .collect();
@@ -1575,7 +1576,7 @@ mod stash {
         let blob2 = repo.write_blob("changed second\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"first" {
                 entry.id = blob1.detach();
             } else if p == b"second" {
@@ -1664,7 +1665,7 @@ mod stash {
         let blob_id = repo.write_blob("second drop change\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"file.txt" {
                 entry.id = blob_id.detach();
                 break;
@@ -1818,7 +1819,7 @@ mod stash {
             let blob_id = repo.write_blob(format!("{label} change\n").as_bytes())?;
             let mut index = repo.open_index()?;
             for (entry, entry_path) in index.entries_mut_with_paths() {
-                let p: &[u8] = &**entry_path;
+                let p: &[u8] = entry_path;
                 if p == b"file.txt" {
                     entry.id = blob_id.detach();
                     break;
@@ -1860,7 +1861,7 @@ mod stash {
         let blob_id = repo.write_blob("conflict\n")?;
         let mut index = repo.open_index()?;
         for (entry, entry_path) in index.entries_mut_with_paths() {
-            let p: &[u8] = &**entry_path;
+            let p: &[u8] = entry_path;
             if p == b"file.txt" {
                 entry.id = blob_id.detach();
                 break;

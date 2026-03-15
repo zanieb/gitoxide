@@ -55,8 +55,8 @@ mod init {
 
         // Verify the custom url is set
         let snap = repo.config_snapshot();
-        let url_before = snap.string("submodule.submodule.url").expect("url set").to_owned();
-        assert!(url_before.as_ref().starts_with(b"https://custom.example.com"));
+        let url_before = snap.string("submodule.submodule.url").expect("url set").into_owned();
+        assert!(url_before.starts_with(b"https://custom.example.com"));
 
         // Init without force should be a no-op
         sm.init(false)?;
@@ -65,8 +65,8 @@ mod init {
         let snap2 = repo2.config_snapshot();
         let url_after = snap2.string("submodule.submodule.url").expect("url still set");
         assert_eq!(
-            url_after.as_ref(),
-            url_before.as_ref(),
+            url_after.as_ref() as &[u8],
+            <gix::bstr::BString as AsRef<[u8]>>::as_ref(&url_before),
             "init without force should not overwrite"
         );
         Ok(())

@@ -1,4 +1,5 @@
 use gix_diff::blob::patch::{self, FileChange, Options};
+use std::fmt::Write;
 use std::path::Path;
 
 /// Normalize a patch string so that the `index` line is comparable between
@@ -18,7 +19,7 @@ fn normalize_index_line(patch: &str) -> String {
                     // Check if there's a mode after the new hash
                     if let Some(space_pos) = after_hashes.find(' ') {
                         let mode = &after_hashes[space_pos..];
-                        result.push_str(&format!("index NORMALIZED..NORMALIZED{mode}\n"));
+                        writeln!(result, "index NORMALIZED..NORMALIZED{mode}").unwrap();
                     } else {
                         result.push_str("index NORMALIZED..NORMALIZED\n");
                     }

@@ -7,7 +7,6 @@ use gix_protocol::push::response::{parse_v1, StatusV1, UnpackStatus};
 /// - Failed unpack with error reason
 /// - Mixed ok/ng responses
 /// - Edge cases: empty response, missing unpack line, empty ref names
-
 mod parse_v1_unpack_status {
     use super::*;
 
@@ -31,7 +30,7 @@ mod parse_v1_unpack_status {
         assert_eq!(refs[0].ref_name(), "refs/heads/main");
         assert_eq!(refs[1].ref_name(), "refs/heads/develop");
         assert_eq!(refs[2].ref_name(), "refs/heads/feature");
-        assert!(refs.iter().all(|r| r.is_ok()));
+        assert!(refs.iter().all(gix_protocol::push::response::StatusV1::is_ok));
     }
 
     #[test]
@@ -350,7 +349,7 @@ mod parse_v1_real_server_patterns {
         let (status, refs) = parse_v1(&response).expect("valid response");
         assert!(status.is_ok());
         assert_eq!(refs.len(), 50);
-        assert!(refs.iter().all(|r| r.is_ok()));
+        assert!(refs.iter().all(gix_protocol::push::response::StatusV1::is_ok));
     }
 
     #[test]

@@ -90,7 +90,7 @@ fn c_git_bundle_header_readable_by_gix() -> gix_testtools::Result {
     // Should have the main ref
     assert!(!parsed.refs.is_empty(), "bundle should have at least one ref");
 
-    let main_ref = parsed.refs.iter().find(|r| r.name == BString::from("refs/heads/main"));
+    let main_ref = parsed.refs.iter().find(|r| r.name == "refs/heads/main");
     assert!(main_ref.is_some(), "bundle should contain refs/heads/main");
 
     let main_ref = main_ref.expect("already asserted");
@@ -144,7 +144,7 @@ fn c_git_incremental_bundle_readable_by_gix() -> gix_testtools::Result {
     let head_ref = parsed
         .refs
         .iter()
-        .find(|r| r.name == BString::from("refs/heads/main") || r.name == BString::from("HEAD"));
+        .find(|r| r.name == "refs/heads/main" || r.name == "HEAD");
     assert!(head_ref.is_some(), "bundle should contain HEAD or main ref");
 
     Ok(())
@@ -168,8 +168,8 @@ fn c_git_bundle_with_tags_readable_by_gix() -> gix_testtools::Result {
     let (parsed, _reader) = header::from_path(&bundle_path, gix_hash::Kind::Sha1)?;
 
     // Should have both main and tag refs
-    let has_main = parsed.refs.iter().any(|r| r.name == BString::from("refs/heads/main"));
-    let has_tag = parsed.refs.iter().any(|r| r.name == BString::from("refs/tags/v1.0"));
+    let has_main = parsed.refs.iter().any(|r| r.name == "refs/heads/main");
+    let has_tag = parsed.refs.iter().any(|r| r.name == "refs/tags/v1.0");
 
     assert!(has_main, "bundle should contain refs/heads/main");
     assert!(has_tag, "bundle should contain refs/tags/v1.0");

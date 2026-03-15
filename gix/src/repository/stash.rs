@@ -280,7 +280,7 @@ impl Repository {
             Ok(idx) => idx,
             Err(_) => self.index_from_tree(&head_tree_id)?,
         };
-        let outcome = index.write_tree_to(|tree| self.write_object(tree).map(|id| id.detach()))?;
+        let outcome = index.write_tree_to(|tree| self.write_object(tree).map(super::super::types::Id::detach))?;
         let index_tree_id = outcome.tree_id;
 
         // Build a worktree tree that reflects the actual file contents on disk.
@@ -309,8 +309,7 @@ impl Repository {
             .head_name()
             .ok()
             .flatten()
-            .map(|n| n.shorten().to_string())
-            .unwrap_or_else(|| "(no branch)".to_string());
+            .map_or_else(|| "(no branch)".to_string(), |n| n.shorten().to_string());
 
         let head_id_hex = head_id.to_string();
         let head_id_short = &head_id_hex[..7.min(head_id_hex.len())];
@@ -324,7 +323,7 @@ impl Repository {
         let reflog_message = if let Some(msg) = options.message {
             // Sanitize newlines in the reflog message to match C Git/libgit2 behavior.
             // Reflog entries are line-oriented, so newlines must be collapsed to spaces.
-            let sanitized_msg = msg.replace('\n', " ").replace('\r', " ");
+            let sanitized_msg = msg.replace(['\n', '\r'], " ");
             format!("On {branch_name}: {sanitized_msg}")
         } else {
             format!("WIP on {branch_name}: {head_id_short} {head_msg_first_line}")
@@ -397,8 +396,9 @@ impl Repository {
             .try_find_reference("refs/stash")
             .ok()
             .flatten()
-            .map(|r| PreviousValue::MustExistAndMatch(r.inner.target.clone()))
-            .unwrap_or(PreviousValue::Any);
+            .map_or(PreviousValue::Any, |r| {
+                PreviousValue::MustExistAndMatch(r.inner.target.clone())
+            });
 
         self.edit_reference(RefEdit {
             change: Change::Update {
@@ -525,12 +525,12 @@ impl Repository {
             match parent_index.entry_by_path_and_stage(path, unconflicted) {
                 Some(parent_entry) => {
                     if stash_entry.id != parent_entry.id || stash_entry.mode != parent_entry.mode {
-                        let path_bytes: &[u8] = &**path;
+                        let path_bytes: &[u8] = path;
                         changed.push((path_bytes.to_vec(), stash_entry.id, stash_entry.mode));
                     }
                 }
                 None => {
-                    let path_bytes: &[u8] = &**path;
+                    let path_bytes: &[u8] = path;
                     changed.push((path_bytes.to_vec(), stash_entry.id, stash_entry.mode));
                 }
             }
@@ -539,7 +539,7 @@ impl Repository {
         for parent_entry in parent_index.entries() {
             let path = parent_entry.path(&parent_index);
             if stash_index.entry_by_path_and_stage(path, unconflicted).is_none() {
-                let path_bytes: &[u8] = &**path;
+                let path_bytes: &[u8] = path;
                 deleted.push(path_bytes.to_vec());
             }
         }
@@ -557,7 +557,7 @@ impl Repository {
                 .index_from_tree(&untracked_tree_id)
                 .map_err(ApplyError::IndexFromTree)?;
             for untracked_entry in untracked_index.entries() {
-                let path: &[u8] = &**untracked_entry.path(&untracked_index);
+                let path: &[u8] = untracked_entry.path(&untracked_index);
                 untracked_files.push((path.to_vec(), untracked_entry.id));
             }
         }
@@ -700,7 +700,7 @@ impl Repository {
         // Remove deleted entries.
         if !deleted.is_empty() {
             current_index.remove_entries(|_, path, _entry| {
-                let path_bytes: &[u8] = &**path;
+                let path_bytes: &[u8] = path;
                 deleted.iter().any(|dp| dp.as_slice() == path_bytes)
             });
         }
@@ -869,7 +869,7 @@ impl Repository {
             .entries()
             .iter()
             .map(|e| {
-                let path: &[u8] = &**e.path(index);
+                let path: &[u8] = e.path(index);
                 path.to_vec()
             })
             .collect();
@@ -995,13 +995,11 @@ impl Repository {
                     excludes.as_deref_mut(),
                     depth + 1,
                 )?;
-            } else if file_type.is_file() {
-                if !indexed_paths.contains(&relative_paths[i]) {
-                    // Write blob to ODB immediately to avoid holding file contents in memory.
-                    let content = std::fs::read(&path).map_err(SaveError::ReadWorktreeFile)?;
-                    let blob_id = self.write_blob(&content)?.detach();
-                    out.push((relative_paths[i].clone(), blob_id));
-                }
+            } else if file_type.is_file() && !indexed_paths.contains(&relative_paths[i]) {
+                // Write blob to ODB immediately to avoid holding file contents in memory.
+                let content = std::fs::read(&path).map_err(SaveError::ReadWorktreeFile)?;
+                let blob_id = self.write_blob(&content)?.detach();
+                out.push((relative_paths[i].clone(), blob_id));
             }
         }
         Ok(())
@@ -1113,13 +1111,8 @@ impl Repository {
                 Err(e) => return Err(SaveError::ReadWorktreeFile(e)),
             };
 
-            let fs_stat = match gix_index::entry::Stat::from_fs(&fs_meta) {
-                Ok(s) => s,
-                Err(_) => {
-                    // If stat conversion fails (e.g. time before epoch), fall back to reading.
-                    gix_index::entry::Stat::default()
-                }
-            };
+            // If stat conversion fails (e.g. time before epoch), fall back to default.
+            let fs_stat = gix_index::entry::Stat::from_fs(&fs_meta).unwrap_or_default();
 
             if entry.stat.matches(&fs_stat, stat_options) {
                 // Stat matches the index entry -- file is unchanged, skip it.
@@ -1136,7 +1129,7 @@ impl Repository {
             let worktree_oid = gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)?;
             if worktree_oid != entry.id {
                 let blob_id = self.write_blob(&content)?;
-                let path_bytes: &[u8] = &**path;
+                let path_bytes: &[u8] = path;
                 worktree_overrides.insert(path_bytes.to_vec(), blob_id.detach());
             }
         }
@@ -1152,7 +1145,7 @@ impl Repository {
             let mut unconflicted_paths: HashSet<Vec<u8>> = HashSet::new();
             for entry in index.entries() {
                 let path = entry.path(index);
-                let path_bytes: Vec<u8> = (&**path).to_vec();
+                let path_bytes: Vec<u8> = path.to_vec();
                 if entry.stage() == gix_index::entry::Stage::Unconflicted {
                     unconflicted_paths.insert(path_bytes);
                 } else {
@@ -1185,13 +1178,14 @@ impl Repository {
         // Build a modified index with the worktree blobs, then write it as a tree.
         let mut worktree_index = self.index_from_tree(&index_tree_id)?;
         for (entry, entry_path) in worktree_index.entries_mut_with_paths() {
-            let path_bytes: &[u8] = &**entry_path;
+            let path_bytes: &[u8] = entry_path;
             if let Some(&new_oid) = worktree_overrides.get(path_bytes) {
                 entry.id = new_oid;
             }
         }
 
-        let outcome = worktree_index.write_tree_to(|tree| self.write_object(tree).map(|id| id.detach()))?;
+        let outcome =
+            worktree_index.write_tree_to(|tree| self.write_object(tree).map(super::super::types::Id::detach))?;
 
         Ok(outcome.tree_id)
     }

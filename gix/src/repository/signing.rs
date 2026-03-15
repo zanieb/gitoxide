@@ -87,9 +87,10 @@ impl Sign for GpgSign {
 
         // Write data and drop stdin so the child process sees EOF.
         {
-            let mut stdin = child.stdin.take().ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::Other, "failed to open stdin for gpg process")
-            })?;
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| std::io::Error::other("failed to open stdin for gpg process"))?;
             stdin.write_all(data)?;
         }
         let output = child.wait_with_output()?;
@@ -168,7 +169,7 @@ impl Sign for SshSign {
         } else {
             key_file_path = gix_path::from_bstring(self.signing_key.clone());
             _key_file_guard = None;
-        };
+        }
 
         let program = gix_path::from_bstring(self.program.clone());
         let mut cmd = Command::new(program.as_os_str());
@@ -231,7 +232,7 @@ impl crate::Repository {
     pub fn signing_config(&self) -> Result<SigningConfig, Error> {
         let config = &self.config.resolved;
 
-        let key = config.string("user.signingKey").map(|v| v.into_owned());
+        let key = config.string("user.signingKey").map(std::borrow::Cow::into_owned);
 
         let format = match config.string("gpg.format") {
             Some(v) => match &**v {
@@ -246,11 +247,11 @@ impl crate::Repository {
         let gpg_program = config
             .string("gpg.program")
             .or_else(|| config.string("gpg.openpgp.program"))
-            .map(|v| v.into_owned());
+            .map(std::borrow::Cow::into_owned);
 
-        let ssh_program = config.string("gpg.ssh.program").map(|v| v.into_owned());
+        let ssh_program = config.string("gpg.ssh.program").map(std::borrow::Cow::into_owned);
 
-        let x509_program = config.string("gpg.x509.program").map(|v| v.into_owned());
+        let x509_program = config.string("gpg.x509.program").map(std::borrow::Cow::into_owned);
 
         Ok(SigningConfig {
             key,
@@ -288,6 +289,7 @@ impl crate::Repository {
     /// Create a signed commit with explicitly specified `committer` and `author`.
     ///
     /// See [`commit_signed()`](Self::commit_signed()) for details.
+    #[allow(clippy::too_many_arguments)]
     pub fn commit_signed_as<'a, 'c, Name, E>(
         &self,
         committer: impl Into<gix_actor::SignatureRef<'c>>,
@@ -378,6 +380,7 @@ impl crate::Repository {
     ///
     /// This is similar to [`tag()`](Self::tag()), but the tag object is first serialized,
     /// then signed by the `signer`, and stored with the signature appended.
+    #[allow(clippy::too_many_arguments)]
     pub fn tag_signed(
         &self,
         name: impl AsRef<str>,
@@ -417,8 +420,7 @@ impl crate::Repository {
         };
 
         let tag_id = self.write_object(&signed_tag)?;
-        Ok(self
-            .tag_reference(name, tag_id, constraint)
-            .map_err(Error::ReferenceEdit)?)
+        self.tag_reference(name, tag_id, constraint)
+            .map_err(Error::ReferenceEdit)
     }
 }

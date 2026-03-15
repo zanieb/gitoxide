@@ -774,7 +774,7 @@ mod tests {
     fn parse_ref_deletion_record() {
         let mut data = Vec::new();
         write_varint(0, &mut data); // prefix_len
-        let suffix_and_type: u64 = (15 << 3) | 0; // suffix_len=15, type=0 (deletion)
+        let suffix_and_type: u64 = 15 << 3; // suffix_len=15, type=0 (deletion)
         write_varint(suffix_and_type, &mut data);
         data.extend_from_slice(b"refs/heads/main"); // suffix
         write_varint(0, &mut data); // update_index_delta

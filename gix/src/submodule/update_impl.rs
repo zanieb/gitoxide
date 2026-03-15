@@ -58,8 +58,7 @@ impl Submodule<'_> {
                 .into_iter()
                 .flatten()
                 .filter(|s| {
-                    s.header().subsection_name() == Some(self.name().into())
-                        && s.meta().source == gix_config::Source::Local
+                    s.header().subsection_name() == Some(self.name()) && s.meta().source == gix_config::Source::Local
                 })
                 .find_map(|s| s.value("update"))
                 .and_then(|v| gix_submodule::config::Update::try_from(v.as_ref()).ok());
@@ -121,7 +120,10 @@ impl Submodule<'_> {
                     .repo
                     .find_remote("origin")
                     .ok()
-                    .and_then(|r| r.url(crate::remote::Direction::Fetch).map(|u| u.to_owned()))
+                    .and_then(|r| {
+                        r.url(crate::remote::Direction::Fetch)
+                            .map(std::borrow::ToOwned::to_owned)
+                    })
                     .and_then(|base_url| {
                         let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref()));
                         let candidate = base_path.join(&url_path);
@@ -308,7 +310,7 @@ fn checkout_to_commit(
         email: b"gitoxide@localhost".as_bstr(),
         time: &fallback_time_str,
     };
-    let committer = repo.committer().and_then(|c| c.ok()).unwrap_or(fallback);
+    let committer = repo.committer().and_then(std::result::Result::ok).unwrap_or(fallback);
     repo.edit_references_as(
         Some(RefEdit {
             change: Change::Update {

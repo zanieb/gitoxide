@@ -49,7 +49,7 @@ mod read_write {
         assert_eq!(read_back.head_name, state.head_name);
         assert_eq!(read_back.onto, state.onto);
         assert_eq!(read_back.orig_head, state.orig_head);
-        assert_eq!(read_back.interactive, true);
+        assert!(read_back.interactive);
         assert_eq!(read_back.todo.operations.len(), 2);
         assert_eq!(read_back.done.operations.len(), 0);
         assert_eq!(read_back.current_step, 1);
@@ -157,7 +157,7 @@ mod read_write {
         state.write_to(&rebase_dir).unwrap();
         let read_back = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
 
-        assert_eq!(read_back.interactive, false, "non-interactive should be preserved");
+        assert!(!read_back.interactive, "non-interactive should be preserved");
     }
 
     #[test]
@@ -545,15 +545,12 @@ mod state_files {
 
         // Without 'interactive' file
         let state = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
-        assert_eq!(
-            state.interactive, false,
-            "should not be interactive when file is absent"
-        );
+        assert!(!state.interactive, "should not be interactive when file is absent");
 
         // With 'interactive' file (can be empty, just needs to exist)
         std::fs::write(rebase_dir.join("interactive"), b"").unwrap();
         let state = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
-        assert_eq!(state.interactive, true, "should be interactive when file exists");
+        assert!(state.interactive, "should be interactive when file exists");
     }
 
     #[test]
@@ -696,14 +693,14 @@ mod driver {
         ) -> Result<CherryPickOutcome, CherryPickError> {
             self.cherry_pick_calls
                 .borrow_mut()
-                .push((commit_id, message.map(|m| m.to_vec())));
+                .push((commit_id, message.map(<[u8]>::to_vec)));
             if self.conflict_on.borrow().contains(&commit_id) {
                 return Err(CherryPickError::Conflict { commit_id });
             }
             if self.fail_on.borrow().contains(&commit_id) {
                 return Err(CherryPickError::Other {
                     message: format!("simulated failure for {commit_id}"),
-                    source: format!("simulated failure").into(),
+                    source: "simulated failure".to_string().into(),
                 });
             }
             let new_id = self.next_fake_commit_id();
@@ -1960,7 +1957,7 @@ mod driver {
                     "original_message should be the commit's message"
                 );
             }
-            other => panic!("expected Paused, got {:?}", other),
+            other => panic!("expected Paused, got {other:?}"),
         }
     }
 
@@ -1988,7 +1985,7 @@ mod driver {
                 assert!(commit_id.is_some());
                 assert!(original_message.is_none(), "edit should not include original_message");
             }
-            other => panic!("expected Paused, got {:?}", other),
+            other => panic!("expected Paused, got {other:?}"),
         }
     }
 

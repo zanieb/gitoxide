@@ -1,6 +1,7 @@
 /// Integration tests for git notes (read-only API).
 ///
 /// Tests cover: notes_list, note_find, note_read across default and custom refs.
+#[allow(clippy::module_inception)]
 mod note {
     fn repo_with_notes() -> crate::Result<gix::Repository> {
         crate::named_repo("make_note_repo.sh")

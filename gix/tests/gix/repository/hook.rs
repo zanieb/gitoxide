@@ -87,7 +87,7 @@ mod run {
             outcome
                 .stdout
                 .as_ref()
-                .map_or(false, |s| s.starts_with(b"pre-commit ran")),
+                .is_some_and(|s| s.starts_with(b"pre-commit ran")),
             "should capture stdout: {:?}",
             outcome.stdout.as_deref().map(String::from_utf8_lossy)
         );
@@ -248,7 +248,7 @@ mod run_prepared {
             outcome
                 .stdout
                 .as_ref()
-                .map_or(false, |s| s.starts_with(b"pre-commit ran")),
+                .is_some_and(|s| s.starts_with(b"pre-commit ran")),
             "should capture stdout"
         );
         Ok(())
@@ -267,7 +267,7 @@ mod run_prepared {
         // We're verifying the stderr capture path works without error.
         // An empty stderr becomes None per the implementation.
         assert!(
-            outcome.stderr.is_none() || outcome.stderr.as_ref().map_or(false, |s| !s.is_empty()),
+            outcome.stderr.is_none() || outcome.stderr.as_ref().is_some_and(|s| !s.is_empty()),
             "stderr should be None when empty or contain data"
         );
         Ok(())

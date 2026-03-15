@@ -8,11 +8,8 @@ use proptest::prelude::*;
 
 /// Generate a valid 40-character lowercase hex string (SHA1).
 fn arb_hex_sha1() -> impl Strategy<Value = String> {
-    proptest::collection::vec(
-        proptest::sample::select(b"0123456789abcdef".iter().copied().collect::<Vec<u8>>()),
-        40..=40,
-    )
-    .prop_map(|bytes| String::from_utf8(bytes).expect("hex is ASCII"))
+    proptest::collection::vec(proptest::sample::select(b"0123456789abcdef".to_vec()), 40..=40)
+        .prop_map(|bytes| String::from_utf8(bytes).expect("hex is ASCII"))
 }
 
 /// Generate a valid signature line like "Name <email> 1234567890 +0100".
@@ -62,13 +59,13 @@ proptest! {
     fn commit_parse_write_roundtrip(commit_bytes in arb_commit_bytes()) {
         let parsed = CommitRef::from_bytes(&commit_bytes)
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("parse failed: {}", e)
+                format!("parse failed: {e}")
             ))?;
 
         let mut written = Vec::new();
         parsed.write_to(&mut written)
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("write failed: {}", e)
+                format!("write failed: {e}")
             ))?;
 
         prop_assert_eq!(
@@ -84,18 +81,18 @@ proptest! {
     fn commit_owned_roundtrip(commit_bytes in arb_commit_bytes()) {
         let parsed = CommitRef::from_bytes(&commit_bytes)
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("parse failed: {}", e)
+                format!("parse failed: {e}")
             ))?;
 
         let owned = parsed.into_owned()
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("into_owned failed: {}", e)
+                format!("into_owned failed: {e}")
             ))?;
 
         let mut written = Vec::new();
         owned.write_to(&mut written)
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
-                format!("write failed: {}", e)
+                format!("write failed: {e}")
             ))?;
 
         prop_assert_eq!(

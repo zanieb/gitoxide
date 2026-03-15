@@ -20,8 +20,8 @@ use gix_reftable::{
 /// Create a deterministic hash from an integer, matching C Git's set_hash.
 fn make_hash(j: u8) -> [u8; 20] {
     let mut h = [0u8; 20];
-    for i in 0..20 {
-        h[i] = (j >> (i % 8)) & 0xff;
+    for (i, byte) in h.iter_mut().enumerate() {
+        *byte = j >> (i % 8);
     }
     h
 }

@@ -33,7 +33,7 @@ proptest! {
         let url_str = format!("ssh://{host}/repo.git");
         if let Ok(url) = gix_url::parse(url_str.as_bytes().as_bstr()) {
             if let Some(safe_host) = url.host_argument_safe() {
-                prop_assert!(!safe_host.starts_with("-"),
+                prop_assert!(!safe_host.starts_with('-'),
                     "host_argument_safe returned host starting with dash: {safe_host}");
             }
         }

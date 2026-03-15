@@ -188,7 +188,7 @@ impl Repository {
             .find_object(pick_id)?
             .try_into_commit()
             .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: pick_id }))?;
-        let parent_ids: Vec<_> = pick_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = pick_commit.parent_ids().map(super::super::types::Id::detach).collect();
 
         // Resolve ancestor tree (handles root, merge, and normal commits).
         let parent_tree_id = self.resolve_parent_tree_id(pick_id, &parent_ids, options.mainline)?;
@@ -301,7 +301,10 @@ impl Repository {
             .find_object(revert_id)?
             .try_into_commit()
             .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: revert_id }))?;
-        let parent_ids: Vec<_> = revert_commit.parent_ids().map(|id| id.detach()).collect();
+        let parent_ids: Vec<_> = revert_commit
+            .parent_ids()
+            .map(super::super::types::Id::detach)
+            .collect();
 
         // Resolve ancestor tree (handles merge and normal commits).
         // For revert, we swap: ancestor = commit tree, theirs = parent tree.
@@ -321,8 +324,7 @@ impl Repository {
         let first_line = orig_message
             .iter()
             .position(|&b| b == b'\n')
-            .map(|pos| &orig_message[..pos])
-            .unwrap_or(orig_message);
+            .map_or(orig_message, |pos| &orig_message[..pos]);
         let first_line = String::from_utf8_lossy(first_line);
         let message = format!("Revert \"{first_line}\"\n\nThis reverts commit {revert_id}.\n");
 

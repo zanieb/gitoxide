@@ -203,18 +203,18 @@ impl crate::Repository {
                 .entries()
                 .iter()
                 .filter(|e| {
-                    let path: &[u8] = &**e.path(&target_index);
+                    let path: &[u8] = e.path(&target_index);
                     reset_paths.contains(path)
                 })
                 .map(|e| {
-                    let path: &[u8] = &**e.path(&target_index);
+                    let path: &[u8] = e.path(&target_index);
                     (path.to_vec(), (e.id, e.mode))
                 })
                 .collect();
 
         // Update matching entries in the current index.
         for (entry, path) in index.entries_mut_with_paths() {
-            let path_bytes: &[u8] = &**path;
+            let path_bytes: &[u8] = path;
             if !reset_paths.contains(path_bytes) {
                 continue;
             }
@@ -245,7 +245,10 @@ impl crate::Repository {
         use crate::bstr::BString;
 
         // Read current HEAD id for ORIG_HEAD
-        let prev_head_id = self.head().ok().and_then(|h| h.id().map(|id| id.detach()));
+        let prev_head_id = self
+            .head()
+            .ok()
+            .and_then(|h| h.id().map(super::super::types::Id::detach));
 
         // Set ORIG_HEAD to the old HEAD
         if let Some(prev_id) = prev_head_id {
@@ -253,8 +256,9 @@ impl crate::Repository {
                 .try_find_reference("ORIG_HEAD")
                 .ok()
                 .flatten()
-                .map(|r| PreviousValue::MustExistAndMatch(r.inner.target.clone()))
-                .unwrap_or(PreviousValue::Any);
+                .map_or(PreviousValue::Any, |r| {
+                    PreviousValue::MustExistAndMatch(r.inner.target.clone())
+                });
             self.edit_reference(RefEdit {
                 change: Change::Update {
                     log: LogChange {

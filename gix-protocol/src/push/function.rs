@@ -27,6 +27,7 @@ use crate::transport::client::blocking_io::{ExtendedBufRead, HandleProgress, Tra
 /// `Context` provides the transport and handshake info, similar to [`fetch::Context`](crate::fetch::Context).
 ///
 /// **Note that the interaction will never be ended**, even on error or failure, leaving it up to the caller to do that.
+#[allow(clippy::too_many_arguments)]
 #[maybe_async::maybe_async]
 pub async fn push<P, T, E>(
     commands: &[Command],
@@ -74,7 +75,7 @@ where
     }
 
     // Check if any command is a delete and requires delete-refs capability.
-    let has_deletes = commands.iter().any(|c| c.is_delete());
+    let has_deletes = commands.iter().any(super::types::Command::is_delete);
     if has_deletes && !has_delete_refs {
         return Err(Error::MissingServerCapability {
             feature: "delete-refs",

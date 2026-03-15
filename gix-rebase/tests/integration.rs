@@ -125,7 +125,7 @@ impl Driver for GitCliDriver {
             }
             return Err(CherryPickError::Other {
                 message: format!("cherry-pick failed: {stderr}"),
-                source: format!("cherry-pick failed").into(),
+                source: "cherry-pick failed".to_string().into(),
             });
         }
 
@@ -170,7 +170,7 @@ impl Driver for GitCliDriver {
             let stderr = String::from_utf8_lossy(&commit_output.stderr);
             return Err(CherryPickError::Other {
                 message: format!("commit failed: {stderr}"),
-                source: format!("commit failed").into(),
+                source: "commit failed".to_string().into(),
             });
         }
 

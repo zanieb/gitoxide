@@ -188,8 +188,8 @@ fn ref_record_roundtrip_all_types() {
     // Helper to create a deterministic hash from an integer
     fn make_hash(j: u8) -> [u8; 20] {
         let mut h = [0u8; 20];
-        for i in 0..20 {
-            h[i] = (j >> (i % 8)) & 0xff;
+        for (i, byte) in h.iter_mut().enumerate() {
+            *byte = j >> (i % 8);
         }
         h
     }
@@ -511,8 +511,8 @@ fn log_record_roundtrip_construction() {
 
     fn make_hash(j: u8) -> [u8; 20] {
         let mut h = [0u8; 20];
-        for i in 0..20 {
-            h[i] = (j >> (i % 8)) & 0xff;
+        for (i, byte) in h.iter_mut().enumerate() {
+            *byte = j >> (i % 8);
         }
         h
     }
@@ -797,8 +797,8 @@ fn ref_record_roundtrip_all_types_nonzero_min() {
 
     fn make_hash(j: u8) -> [u8; 20] {
         let mut h = [0u8; 20];
-        for i in 0..20 {
-            h[i] = (j >> (i % 8)) & 0xff;
+        for (i, byte) in h.iter_mut().enumerate() {
+            *byte = j >> (i % 8);
         }
         h
     }
@@ -942,7 +942,7 @@ fn ref_record_prefix_len_exceeds_prefix() {
 
     let mut data = Vec::new();
     write_varint(20, &mut data); // prefix_len = 20, but prefix is only 5 bytes
-    let suffix_and_type: u64 = (3 << 3) | 0; // suffix_len=3, type=deletion
+    let suffix_and_type: u64 = 3 << 3; // suffix_len=3, type=deletion
     write_varint(suffix_and_type, &mut data);
     data.extend_from_slice(b"abc"); // suffix
     write_varint(0, &mut data); // update_index_delta

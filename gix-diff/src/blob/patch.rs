@@ -120,6 +120,7 @@ pub enum Error {
 /// * `old_path` / `new_path` - the file paths (usually the same unless renamed).
 /// * `old_content` / `new_content` - the full file contents (as bytes).
 /// * `options` - controls context lines and path prefixes.
+#[allow(clippy::too_many_arguments)]
 pub fn write(
     out: &mut dyn Write,
     old_id: Option<&str>,
@@ -931,15 +932,16 @@ fn second() {
                 "fn this_is_a_very_long_function_name_that_exceeds_eighty_characters_for_sure_yes_really(x: i32) {";
             assert!(long_func.len() > 80, "test setup: line must be > 80 chars");
 
+            use std::fmt::Write;
             let mut old_content = format!("{long_func}\n");
             for i in 0..8 {
-                old_content.push_str(&format!("    let v{i} = {i};\n"));
+                writeln!(old_content, "    let v{i} = {i};").unwrap();
             }
             old_content.push_str("    let result = 0;\n}\n");
 
             let mut new_content = format!("{long_func}\n");
             for i in 0..8 {
-                new_content.push_str(&format!("    let v{i} = {i};\n"));
+                writeln!(new_content, "    let v{i} = {i};").unwrap();
             }
             new_content.push_str("    let result = 42;\n}\n");
 

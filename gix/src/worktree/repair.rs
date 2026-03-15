@@ -242,9 +242,10 @@ impl crate::Repository {
                 let expected_dot_git = PathBuf::from(content.trim());
                 // Check if this gitdir points to our worktree
                 if expected_dot_git == worktree_dot_git
-                    || expected_dot_git.canonicalize().ok().map_or(false, |p| {
-                        worktree_dot_git.canonicalize().ok().map_or(false, |w| p == w)
-                    })
+                    || expected_dot_git
+                        .canonicalize()
+                        .ok()
+                        .is_some_and(|p| worktree_dot_git.canonicalize().ok().is_some_and(|w| p == w))
                 {
                     return Ok(admin_dir);
                 }
