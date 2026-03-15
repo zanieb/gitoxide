@@ -138,7 +138,7 @@ pub mod init {
 }
 
 ///
-#[cfg(feature = "blocking-network-client")]
+#[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
 pub mod update {
     /// The error returned by [`Submodule::update()`](crate::Submodule::update()).
     #[derive(Debug, thiserror::Error)]

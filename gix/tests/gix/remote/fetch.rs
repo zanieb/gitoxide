@@ -229,6 +229,124 @@ mod blocking_and_async_io {
 
     #[test]
     #[cfg(feature = "blocking-network-client")]
+    fn negative_refspecs_exclude_refs_during_fetch() -> crate::Result<()> {
+        use gix::{config::tree::User, interrupt::IS_INTERRUPTED};
+        use gix_testtools::tempfile;
+
+        // Create a bare remote repo with two branches.
+        let remote_dir = tempfile::tempdir()?;
+        let mut remote_repo = gix::init_bare(remote_dir.path())?;
+        {
+            let mut config = remote_repo.config_snapshot_mut();
+            config.set_value(&User::NAME, "author")?;
+            config.set_value(&User::EMAIL, "email@example.com")?;
+        }
+        // Create initial commit on main.
+        {
+            let name = remote_repo.head_name()?.expect("branch available");
+            remote_repo.commit(
+                name.as_bstr(),
+                "initial",
+                gix::hash::ObjectId::empty_tree(remote_repo.object_hash()),
+                None::<gix::ObjectId>,
+            )?;
+        }
+        // Create a second branch "excluded-branch".
+        {
+            let head_id = remote_repo.head()?.id().expect("have commit").detach();
+            remote_repo.reference(
+                "refs/heads/excluded-branch",
+                head_id,
+                gix::refs::transaction::PreviousValue::MustNotExist,
+                "create excluded branch",
+            )?;
+        }
+        // Create a third branch "included-branch".
+        {
+            let head_id = remote_repo.head()?.id().expect("have commit").detach();
+            remote_repo.reference(
+                "refs/heads/included-branch",
+                head_id,
+                gix::refs::transaction::PreviousValue::MustNotExist,
+                "create included branch",
+            )?;
+        }
+
+        // Clone into a local repo.
+        let local_dir = tempfile::tempdir()?;
+        let (local_repo, _) = gix::clone::PrepareFetch::new(
+            remote_repo.path(),
+            local_dir.path(),
+            gix::create::Kind::Bare,
+            Default::default(),
+            gix::open::Options::isolated(),
+        )?
+        .fetch_only(gix::progress::Discard, &IS_INTERRUPTED)?;
+
+        // Verify all 3 branches were fetched initially.
+        assert!(
+            local_repo.find_reference("refs/remotes/origin/excluded-branch").is_ok(),
+            "excluded-branch should exist after initial clone"
+        );
+        assert!(
+            local_repo.find_reference("refs/remotes/origin/included-branch").is_ok(),
+            "included-branch should exist after initial clone"
+        );
+
+        // Now fetch with a negative refspec excluding "excluded-branch".
+        // The remote's configured fetch refspec is +refs/heads/*:refs/remotes/origin/*
+        // We add ^refs/heads/excluded-branch as an extra negative refspec.
+        let neg_spec = gix::refspec::parse(
+            "^refs/heads/excluded-branch".into(),
+            gix::refspec::parse::Operation::Fetch,
+        )?
+        .to_owned();
+
+        let remote = local_repo.find_remote("origin")?.with_fetch_tags(fetch::Tags::None);
+        let outcome = remote
+            .connect(Fetch)?
+            .prepare_fetch(
+                gix::progress::Discard,
+                gix::remote::ref_map::Options {
+                    extra_refspecs: vec![neg_spec],
+                    ..Default::default()
+                },
+            )?
+            .receive(gix::progress::Discard, &AtomicBool::default())?;
+
+        // Verify "excluded-branch" was NOT in the mappings.
+        let excluded_was_mapped = outcome.ref_map.mappings.iter().any(|m| {
+            m.local
+                .as_ref()
+                .is_some_and(|l| l.to_string().contains("excluded-branch"))
+        });
+        assert!(
+            !excluded_was_mapped,
+            "excluded-branch should not appear in fetch mappings when excluded by negative refspec"
+        );
+
+        // Verify "included-branch" WAS in the mappings.
+        let included_was_mapped = outcome.ref_map.mappings.iter().any(|m| {
+            m.local
+                .as_ref()
+                .is_some_and(|l| l.to_string().contains("included-branch"))
+        });
+        assert!(included_was_mapped, "included-branch should still be in fetch mappings");
+
+        // Verify "main" was also in the mappings.
+        let main_was_mapped = outcome.ref_map.mappings.iter().any(|m| {
+            m.local.as_ref().is_some_and(|l| {
+                let s = l.to_string();
+                s.contains("main") || s.contains("master")
+            })
+        });
+        assert!(main_was_mapped, "main/master should still be in fetch mappings");
+
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "blocking-network-client")]
     fn fetch_with_alternates_adds_tips_from_alternates() -> crate::Result<()> {
         let tmp = gix_testtools::tempfile::TempDir::new()?;
         let remote_repo = remote::repo("base");

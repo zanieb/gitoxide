@@ -80,6 +80,7 @@ where
             ref_map,
             dry_run: false,
             atomic: false,
+            expected_old_ids: None,
         })
     }
 
@@ -165,6 +166,11 @@ where
     ref_map: RefMap,
     dry_run: bool,
     atomic: bool,
+    /// Optional force-with-lease overrides: map from remote ref name to expected old OID.
+    /// When set, the push will use these values for compare-and-swap instead of the
+    /// remote's reported ref values. If the remote's actual value differs from the
+    /// expected value, the push for that ref will be rejected.
+    pub(crate) expected_old_ids: Option<std::collections::HashMap<crate::bstr::BString, gix_hash::ObjectId>>,
 }
 
 impl<T> PreparePush<'_, '_, T>
@@ -192,6 +198,22 @@ where
     /// Only available if the server advertises `atomic` capability.
     pub fn with_atomic(mut self, enabled: bool) -> Self {
         self.atomic = enabled;
+        self
+    }
+
+    /// Set expected old OID values for force-with-lease semantics.
+    ///
+    /// The map keys are fully-qualified remote ref names (e.g., `refs/heads/main`),
+    /// and values are the expected current OID on the remote. If the remote's
+    /// actual ref value differs from the expected value, that ref update will
+    /// be rejected locally (the push command won't be sent for that ref).
+    ///
+    /// A null OID value means the ref is expected to not exist on the remote.
+    pub fn with_expected_old_ids(
+        mut self,
+        expected: std::collections::HashMap<crate::bstr::BString, gix_hash::ObjectId>,
+    ) -> Self {
+        self.expected_old_ids = Some(expected);
         self
     }
 }
