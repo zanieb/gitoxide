@@ -52,5 +52,5 @@ pub struct Outcome {
 }
 
 /// Re-export the error type when the feature is available.
-#[cfg(feature = "blocking-network-client")]
+#[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
 pub use super::errors::update::Error;
