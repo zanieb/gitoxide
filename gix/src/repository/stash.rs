@@ -401,10 +401,9 @@ impl Repository {
         };
         let stash_commit_id = self.write_object(&stash_commit)?;
 
-        // Update refs/stash with a reflog entry.
-        // TODO(CODE-REVIEW#27): This reflog manipulation does not hold a lock across
-        // the read-modify-write of refs/stash. Concurrent stash operations could race.
-        // Consider using a ref transaction with proper locking semantics.
+        // Update refs/stash with a reflog entry. The expected previous value is
+        // checked by the reference transaction so a concurrent stash update fails
+        // instead of being overwritten.
         use gix_ref::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
 
         let prev_value = self
