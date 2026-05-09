@@ -18,6 +18,8 @@ pub enum Extensions {
     Given {
         /// Write the tree-cache extension, if present.
         tree_cache: bool,
+        /// Write the resolve-undo extension, if present.
+        resolve_undo: bool,
         /// Write the end-of-index-entry extension.
         end_of_index_entry: bool,
     },
@@ -33,9 +35,11 @@ impl Extensions {
             Extensions::All => Some(signature),
             Extensions::Given {
                 tree_cache,
+                resolve_undo,
                 end_of_index_entry,
             } => match signature {
                 extension::tree::SIGNATURE => tree_cache,
+                extension::resolve_undo::SIGNATURE => resolve_undo,
                 extension::end_of_index_entry::SIGNATURE => end_of_index_entry,
                 _ => &false,
             }
@@ -138,6 +142,15 @@ impl State {
                 extensions
                     .should_write(extension::tree::SIGNATURE)
                     .and_then(|signature| self.tree().map(|tree| tree.write_to(write).map(|_| signature)))
+            },
+            &|write| {
+                extensions
+                    .should_write(extension::resolve_undo::SIGNATURE)
+                    .and_then(|signature| {
+                        self.resolve_undo().map(|resolve_undo| {
+                            extension::resolve_undo::write_to(resolve_undo, write).map(|_| signature)
+                        })
+                    })
             },
             &|write| {
                 self.is_sparse()
