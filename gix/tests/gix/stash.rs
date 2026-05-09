@@ -1270,23 +1270,46 @@ mod stash {
         let restored = std::fs::read_to_string(workdir.join("file.txt"))?;
         assert_eq!(restored.trim(), "hello", "restored file should match HEAD content");
 
-        // The stash commit tree should capture the staged (modified) content,
-        // since the index had "modified" even though the worktree file was deleted.
+        // The stash commit tree captures the worktree state, where the file was deleted.
+        // The index parent keeps the staged "modified" content separately.
         let stash_commit = repo.find_object(stash_id)?.try_into_commit().expect("commit");
         let stash_tree_id = stash_commit.tree_id().expect("has tree");
         let stash_tree = repo.find_object(stash_tree_id)?.try_into_tree().expect("tree");
         let stash_tree_decoded = stash_tree.decode().expect("decoded");
-        let entry = stash_tree_decoded
+        let stash_entry = stash_tree_decoded
+            .entries
+            .iter()
+            .find(|e| e.filename == "file.txt".as_bytes());
+        assert!(
+            stash_entry.is_none(),
+            "stash tree should record the worktree deletion, not the index version"
+        );
+
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
+        let index_commit = repo
+            .find_object(parent_ids[1])?
+            .try_into_commit()
+            .expect("index commit");
+        let index_tree = repo
+            .find_object(index_commit.tree_id().expect("index tree"))?
+            .try_into_tree()
+            .expect("tree");
+        let index_tree_decoded = index_tree.decode().expect("decoded");
+        let index_entry = index_tree_decoded
             .entries
             .iter()
             .find(|e| e.filename == "file.txt".as_bytes())
-            .expect("file.txt in stash tree");
-        let blob = repo.find_object(entry.oid)?;
-        // The worktree file was deleted, so build_worktree_tree would not find it on disk
-        // and should fall through to the index version ("modified").
+            .expect("file.txt in index parent");
+        let index_blob = repo.find_object(index_entry.oid)?;
         assert_eq!(
-            blob.data, b"modified\n",
-            "stash tree should capture the index version when worktree file is deleted"
+            index_blob.data, b"modified\n",
+            "index parent should preserve the staged version"
+        );
+
+        repo.stash_apply(0)?;
+        assert!(
+            !workdir.join("file.txt").exists(),
+            "stash apply should restore the deleted worktree file as deleted"
         );
 
         Ok(())
