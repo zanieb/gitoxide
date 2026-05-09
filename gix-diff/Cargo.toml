@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 description = "Calculate differences between various git objects"
 authors = ["Sebastian Thiel <sebastian.thiel@icloud.com>"]
 edition = "2024"
-include = ["/src/**/*", "/LICENSE-*"]
+include = ["/src/**/*", "/examples/**/*", "/LICENSE-*"]
 rust-version = "1.85"
 
 [features]
