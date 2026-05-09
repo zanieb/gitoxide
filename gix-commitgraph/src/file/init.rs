@@ -6,7 +6,8 @@ use crate::{
     File,
     file::{
         BASE_GRAPHS_LIST_CHUNK_ID, COMMIT_DATA_CHUNK_ID, COMMIT_DATA_ENTRY_SIZE_SANS_HASH,
-        EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN, HEADER_LEN, OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
+        EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN, GENERATION_DATA_CHUNK_ID, GENERATION_DATA_OVERFLOW_CHUNK_ID,
+        GENERATION_DATA_OVERFLOW_MASK, HEADER_LEN, OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
     },
 };
 
@@ -129,6 +130,56 @@ impl File {
             .or_raise(|| message("Error getting offset for OID lookup chunk"))?;
 
         let extra_edges_list_range = chunks.usize_offset_by_id(EXTENDED_EDGES_LIST_CHUNK_ID).ok();
+        let generation_data_range = chunks
+            .validated_usize_offset_by_id(GENERATION_DATA_CHUNK_ID, |chunk_range| {
+                let expected_size = usize::try_from(commit_data_count).expect("commit count fits usize") * 4;
+                if chunk_range.len() != expected_size {
+                    return Err(message!(
+                        "Commit-graph chunk {GENERATION_DATA_CHUNK_ID:?} has invalid size: expected chunk length {expected_size}, got {}",
+                        chunk_range.len()
+                    )
+                    .raise());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        let generation_data_overflow_range = chunks
+            .validated_usize_offset_by_id(GENERATION_DATA_OVERFLOW_CHUNK_ID, |chunk_range| {
+                if chunk_range.len() % 8 != 0 {
+                    return Err(message!(
+                        "Commit-graph chunk {GENERATION_DATA_OVERFLOW_CHUNK_ID:?} has invalid size: chunk size {} is not a multiple of 8",
+                        chunk_range.len()
+                    )
+                    .raise());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        if generation_data_overflow_range.is_some() && generation_data_range.is_none() {
+            return Err(message!(
+                "Chunk named {GENERATION_DATA_OVERFLOW_CHUNK_ID:?} requires {GENERATION_DATA_CHUNK_ID:?}"
+            )
+            .raise());
+        }
+        if let Some(range) = &generation_data_range {
+            let overflow_entries = generation_data_overflow_range
+                .as_ref()
+                .map(|range| range.len() / 8)
+                .unwrap_or_default();
+            for raw_offset in data[range.clone()].chunks_exact(4).map(read_u32) {
+                if raw_offset & GENERATION_DATA_OVERFLOW_MASK != 0 {
+                    let overflow_index = (raw_offset & !GENERATION_DATA_OVERFLOW_MASK) as usize;
+                    if overflow_index >= overflow_entries {
+                        return Err(message!(
+                            "Commit-graph chunk {GENERATION_DATA_CHUNK_ID:?} references corrected-date overflow index {overflow_index}, but {GENERATION_DATA_OVERFLOW_CHUNK_ID:?} has {overflow_entries} entries"
+                        )
+                        .raise());
+                    }
+                }
+            }
+        }
 
         let trailer = &data[chunks.highest_offset() as usize..];
         if trailer.len() != object_hash.len_in_bytes() {
@@ -166,6 +217,8 @@ impl File {
             data,
             extra_edges_list_range,
             fan,
+            generation_data_range,
+            generation_data_overflow_range,
             oid_lookup_offset,
             path,
             hash_len: object_hash.len_in_bytes(),
@@ -192,6 +245,10 @@ impl TryFrom<&Path> for File {
 }
 
 // Copied from gix-odb/pack/index/init.rs
+fn read_u32(d: &[u8]) -> u32 {
+    u32::from_be_bytes(d.try_into().unwrap())
+}
+
 fn read_fan(d: &[u8]) -> ([u32; FAN_LEN], usize) {
     assert!(d.len() >= FAN_LEN * 4);
 

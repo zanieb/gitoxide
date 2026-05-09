@@ -52,6 +52,16 @@ impl<'a> Commit<'a> {
         self.commit_timestamp
     }
 
+    /// Returns the corrected committer timestamp of this commit if generation data is available.
+    ///
+    /// Corrected commit dates are generation number v2. They are at least the committer timestamp and at least one
+    /// greater than every parent's corrected commit date.
+    pub fn corrected_committer_timestamp(&self) -> Option<u64> {
+        self.file
+            .corrected_commit_date_offset(self.pos)
+            .and_then(|offset| self.commit_timestamp.checked_add(offset))
+    }
+
     /// Returns the generation number of this commit.
     ///
     /// Commits without parents have generation number 1. Commits with parents have a generation

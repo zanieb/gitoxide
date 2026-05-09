@@ -29,6 +29,8 @@ pub struct File {
     data: memmap2::Mmap,
     extra_edges_list_range: Option<std::ops::Range<usize>>,
     fan: [u32; file::FAN_LEN],
+    generation_data_range: Option<std::ops::Range<usize>>,
+    generation_data_overflow_range: Option<std::ops::Range<usize>>,
     oid_lookup_offset: usize,
     path: std::path::PathBuf,
     hash_len: usize,
