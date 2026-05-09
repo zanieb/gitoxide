@@ -7,7 +7,7 @@
 use bstr::BString;
 use gix_hash::ObjectId;
 use gix_reftable::block::{parse_block_header, read_ref_records};
-use gix_reftable::write::{serialize_ref_record, write_ref_block, Options};
+use gix_reftable::write::{serialize_ref_record, write_ref_block, write_ref_blocks_at, Options};
 use gix_reftable::{
     parse_footer, parse_header, serialize_footer, serialize_header, BlockType, Error, Footer, Header, RefRecord,
     RefRecordValue, Version,
@@ -662,9 +662,6 @@ fn block_restart_offsets_are_absolute() {
 
 /// Multiple blocks: when records don't fit in one block, they should
 /// be split across multiple blocks.
-///
-/// The current API doesn't support multi-block writes directly, so this
-/// test verifies that a single block can hold a reasonable number of records.
 #[test]
 fn block_capacity_limit() {
     let hash_size = 20;
@@ -679,16 +676,25 @@ fn block_capacity_limit() {
         })
         .collect();
 
-    // With block_size=256 and 100 records, not all will fit.
-    // The current API writes all records regardless - it doesn't enforce
-    // block size limits. This is a known limitation.
-    let block =
-        write_ref_block(&records, min_update_index, hash_size, 0).expect("should write block in unaligned mode");
+    let single_block_error =
+        write_ref_block(&records, min_update_index, hash_size, 256).expect_err("single block should not overflow");
+    assert!(matches!(single_block_error, Error::BlockTooLarge { .. }));
 
-    // At least verify we can read them back
-    let parsed = read_ref_records(&block, hash_size, min_update_index).expect("should read records");
+    let blocks =
+        write_ref_blocks_at(&records, min_update_index, hash_size, 256, 0).expect("records should split across blocks");
+
+    assert!(blocks.len() > 1, "records should require multiple blocks");
+    for block in &blocks {
+        assert_eq!(block.len(), 256, "aligned block should match requested size");
+    }
+
+    let mut parsed = Vec::new();
+    for block in &blocks {
+        parsed.extend(read_ref_records(block, hash_size, min_update_index).expect("should read block records"));
+    }
 
     assert_eq!(parsed.len(), 100);
+    assert_eq!(parsed, records);
 }
 
 // ---------------------------------------------------------------------------

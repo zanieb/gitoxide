@@ -212,6 +212,8 @@ pub enum Error {
     UnsupportedVersion { version: u8 },
     #[error("block size {size} is too small (minimum {MIN_BLOCK_SIZE})")]
     BlockSizeTooSmall { size: u32 },
+    #[error("block length {block_len} exceeds maximum block payload length {max_len}")]
+    BlockTooLarge { block_len: usize, max_len: usize },
     #[error("I/O error")]
     Io(#[from] std::io::Error),
     #[error("invalid block type: {byte:#x}")]
