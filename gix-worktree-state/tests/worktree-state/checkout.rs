@@ -35,12 +35,18 @@ fn assure_is_empty(dir: impl AsRef<Path>) -> std::io::Result<()> {
 fn submodules_are_instantiated_as_directories() -> crate::Result {
     let mut opts = opts_from_probe();
     opts.overwrite_existing = false;
-    let (_source_tree, destination, _index, _outcome) = checkout_index_in_tmp_dir(opts.clone(), "make_mixed", None)?;
+    let (_source_tree, destination, index, outcome) = checkout_index_in_tmp_dir(opts.clone(), "make_mixed", None)?;
+
+    assert_eq!(outcome.collisions, Vec::new());
+    assert_eq!(outcome.errors.len(), 0);
 
     for path in ["m1", "modules/m1"] {
         let sm = destination.path().join(path);
         assert!(sm.is_dir());
-        assure_is_empty(sm)?;
+        assure_is_empty(&sm)?;
+        let entry = index.entry_by_path(path.into()).expect("submodule entry");
+        let stat = gix_index::entry::Stat::from_fs(&gix_index::fs::Metadata::from_path_no_follow(&sm)?)?;
+        assert_eq!(entry.stat, stat);
     }
 
     Ok(())

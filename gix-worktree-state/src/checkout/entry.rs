@@ -178,15 +178,24 @@ where
             0
         }
         gix_index::entry::Mode::COMMIT => {
-            gix_features::trace::warn!(
-                "Skipped submodule at '{entry_path}' ({id}) as it cannot yet be handled",
-                id = entry.id
-            );
+            try_op_or_unlink(dest, overwrite_existing, create_or_reuse_directory)?;
+            entry.stat = Stat::from_fs(&gix_index::fs::Metadata::from_path_no_follow(dest)?)?;
             0
         }
         _ => unreachable!(),
     };
     Ok(Outcome::Written { bytes: object_size })
+}
+
+fn create_or_reuse_directory(path: &Path) -> std::io::Result<()> {
+    match std::fs::create_dir(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => match path.symlink_metadata() {
+            Ok(meta) if meta.is_dir() => Ok(()),
+            _ => Err(err),
+        },
+        Err(err) => Err(err),
+    }
 }
 
 /// Note that this works only because we assume to not race ourselves when symlinks are involved, and we do this by
