@@ -7,7 +7,8 @@ use crate::{
     File,
     file::{
         BASE_GRAPHS_LIST_CHUNK_ID, COMMIT_DATA_CHUNK_ID, COMMIT_DATA_ENTRY_SIZE_SANS_HASH,
-        EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN, HEADER_LEN, OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
+        EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN, GENERATION_DATA_CHUNK_ID, GENERATION_DATA_OVERFLOW_CHUNK_ID,
+        GENERATION_DATA_OVERFLOW_MASK, HEADER_LEN, OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
     },
 };
 
@@ -175,6 +176,8 @@ impl File {
             data,
             extra_edges_list_range,
             fan,
+            generation_data_range,
+            generation_data_overflow_range,
             oid_lookup_offset,
             path,
             hash_len: object_hash.len_in_bytes(),
@@ -216,6 +219,10 @@ impl TryFrom<&Path> for File {
 }
 
 // Copied from gix-odb/pack/index/init.rs
+fn read_u32(d: &[u8]) -> u32 {
+    u32::from_be_bytes(d.try_into().unwrap())
+}
+
 fn read_fan(d: &[u8]) -> ([u32; FAN_LEN], usize) {
     assert!(d.len() >= FAN_LEN * 4);
 

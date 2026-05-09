@@ -10,6 +10,30 @@ fn single_parent() {
 }
 
 #[test]
+fn corrected_commit_dates_are_available() {
+    let (cg, refs) = graph_and_expected("corrected_commit_dates.sh", &["parent", "child"]);
+    check_common(&cg, &refs);
+
+    let parent = cg.commit_at(refs["parent"].pos());
+    let child = cg.commit_at(refs["child"].pos());
+    assert_eq!(
+        parent.corrected_committer_timestamp(),
+        Some(parent.committer_timestamp()),
+        "root corrected commit date equals its committer timestamp"
+    );
+    assert_eq!(
+        child.committer_timestamp(),
+        parent.committer_timestamp(),
+        "fixture pins both commits to the same committer timestamp"
+    );
+    assert_eq!(
+        child.corrected_committer_timestamp(),
+        parent.committer_timestamp().checked_add(1),
+        "child corrected commit date is one greater than its parent's corrected commit date"
+    );
+}
+
+#[test]
 fn single_commit_huge_dates_generation_v2_also_do_not_allow_huge_dates() {
     let (cg, refs) = graph_and_expected_named("single_commit_huge_dates.sh", "v2", &["HEAD"]);
     let info = &refs["HEAD"];

@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     File,
-    file::{self, COMMIT_DATA_ENTRY_SIZE_SANS_HASH, commit::Commit},
+    file::{self, COMMIT_DATA_ENTRY_SIZE_SANS_HASH, GENERATION_DATA_OVERFLOW_MASK, commit::Commit},
 };
 
 /// Access
@@ -130,6 +130,38 @@ impl File {
     /// Returns the byte slice for this file's entire Extra Edge List (EDGE) chunk.
     pub(crate) fn extra_edges_data(&self) -> Option<&[u8]> {
         Some(&self.data[self.extra_edges_list_range.clone()?])
+    }
+
+    /// Return true if this file contains corrected commit date offsets.
+    pub fn has_corrected_commit_dates(&self) -> bool {
+        self.generation_data_range.is_some()
+    }
+
+    pub(crate) fn corrected_commit_date_offset(&self, pos: file::Position) -> Option<u64> {
+        assert!(
+            pos.0 < self.num_commits(),
+            "expected lexicographical position less than {}, got {}",
+            self.num_commits(),
+            pos.0
+        );
+        let range = self.generation_data_range.clone()?;
+        let pos: usize = pos
+            .0
+            .try_into()
+            .expect("an architecture able to hold 32 bits of integer");
+        let start = range.start + pos * 4;
+        let raw_offset = u32::from_be_bytes(self.data[start..][..4].try_into().unwrap());
+        if raw_offset & GENERATION_DATA_OVERFLOW_MASK == 0 {
+            Some(u64::from(raw_offset))
+        } else {
+            let overflow_index = (raw_offset & !GENERATION_DATA_OVERFLOW_MASK) as usize;
+            let range = self
+                .generation_data_overflow_range
+                .as_ref()
+                .expect("validated generation data overflow references have overflow chunk");
+            let start = range.start + overflow_index * 8;
+            Some(u64::from_be_bytes(self.data[start..][..8].try_into().unwrap()))
+        }
     }
 }
 
