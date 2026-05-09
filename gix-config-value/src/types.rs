@@ -33,6 +33,24 @@ pub struct Integer {
     pub suffix: Option<integer::Suffix>,
 }
 
+/// Any value that can be interpreted as a shared-repository permission.
+///
+/// This is the value type used by Git's `core.sharedRepository` configuration.
+#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum Permission {
+    /// Use the process umask without widening repository permissions.
+    #[default]
+    Umask,
+    /// Make repository files readable and writable by the owner and group.
+    Group,
+    /// Make repository files readable by everybody and writable by the owner and group.
+    Everybody,
+    /// Use an exact file mode for shared repository permissions.
+    ///
+    /// The mode must keep owner read and write permissions. Only permission bits are retained.
+    Mode(u16),
+}
+
 /// Any value that can be interpreted as a boolean.
 #[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 #[allow(missing_docs)]
