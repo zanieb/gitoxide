@@ -65,7 +65,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
 * [x] utilities for applications to make long running operations interruptible gracefully and to support timeouts in servers.
 * [x] handle `core.repositoryFormatVersion` and extensions
 * [x] support for unicode-precomposition of command-line arguments (needs explicit use in parent application)
-* [ ] strict object creation (validate objects referenced by newly created objects exist)
+* [x] strict object creation (validate objects referenced by newly created objects exist)
 * [ ] strict hash verification (validate that objects actually have the hashes they claim to have)
 * **workflow composition**
     * [ ] checkout, switch, restore and reset orchestration over refs, index and worktree mutation

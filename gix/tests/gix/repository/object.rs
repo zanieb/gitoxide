@@ -260,7 +260,8 @@ mod edit_tree {
     }
 }
 mod write_object {
-    use crate::repository::object::empty_bare_in_memory_repo;
+    use crate::{repository::object::empty_bare_in_memory_repo, util::hex_to_id};
+    use gix::objs::tree::EntryKind;
 
     #[test]
     fn empty_tree() -> crate::Result {
@@ -296,6 +297,82 @@ mod write_object {
             r#"Signature name or email must not contain '<', '>' or \n: "1 < 0""#,
             "the actor is invalid so triggers an error when persisting it"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn checked_commit_allows_the_known_empty_tree() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: repo.object_hash().empty_tree(),
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "empty".into(),
+            extra_headers: vec![],
+        };
+
+        let id = repo.write_object_checked(commit)?;
+        assert!(repo.has_object(id));
+        Ok(())
+    }
+
+    #[test]
+    fn checked_commit_rejects_missing_tree() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let missing_tree = hex_to_id("1111111111111111111111111111111111111111");
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: missing_tree,
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "missing tree".into(),
+            extra_headers: vec![],
+        };
+
+        assert_eq!(
+            repo.write_object_checked(commit).unwrap_err().to_string(),
+            format!("Cannot write commit object because it references missing tree object {missing_tree}")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tree_rejects_missing_blob_but_allows_submodule_gitlinks() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let missing_blob = hex_to_id("2222222222222222222222222222222222222222");
+        let submodule_commit = hex_to_id("3333333333333333333333333333333333333333");
+        let mut tree = gix::objs::Tree::empty();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Blob.into(),
+            filename: "missing".into(),
+            oid: missing_blob,
+        });
+        assert_eq!(
+            repo.write_object_checked(&tree).unwrap_err().to_string(),
+            format!("Cannot write tree object because it references missing blob object {missing_blob}")
+        );
+
+        tree.entries.clear();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Commit.into(),
+            filename: "submodule".into(),
+            oid: submodule_commit,
+        });
+        let id = repo.write_object_checked(&tree)?;
+        assert!(repo.has_object(id));
         Ok(())
     }
 
