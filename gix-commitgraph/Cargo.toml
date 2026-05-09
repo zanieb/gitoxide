@@ -15,6 +15,10 @@ rust-version = "1.88"
 [lib]
 doctest = false
 
+[[example]]
+name = "summary"
+required-features = ["sha1"]
+
 [features]
 ## Enable support for the SHA-1 hash by enabling the respective feature in the `gix-hash` crate.
 sha1 = ["gix-hash/sha1"]
