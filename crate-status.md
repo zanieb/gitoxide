@@ -494,7 +494,7 @@ A utility crate with types and functionality related to shallow-file handling.
     * [x] git://<service>
         * [x] V1 handshake
             * [x] send values + receive data with sidebands
-            * [ ] ~~support for receiving 'shallow' refs in case the remote repository is shallow itself (I presume)~~
+            * [x] ~~support for receiving 'shallow' refs in case the remote repository is shallow itself (I presume)~~
                 * Since V2 doesn't seem to support that, let's skip this until there is an actual need. No completionist :D
         * [x] V2 handshake
             * [x] send command request, receive response with sideband support
@@ -504,7 +504,7 @@ A utility crate with types and functionality related to shallow-file handling.
             * [x] send values + receive data with sidebands
         * [x] V2 handshake
             * [x] send command request, receive response with sideband support
-        * [ ] ~~'dumb'~~ - _we opt out using this protocol seems too slow to be useful, unless it downloads entire packs for clones?_
+        * [x] ~~'dumb'~~ - _we opt out using this protocol seems too slow to be useful, unless it downloads entire packs for clones?_
     * [x] authentication failures are communicated by io::ErrorKind::PermissionDenied, allowing other layers to retry with authentication
     * [x] `async` support
 * **server**
