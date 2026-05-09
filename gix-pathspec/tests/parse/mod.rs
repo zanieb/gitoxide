@@ -63,6 +63,60 @@ fn try_into_pathspec_accepts_parsed_and_ready_made_patterns() {
     assert_eq!((&ready).try_into_pathspec(defaults).expect("infallible"), ready);
 }
 
+#[test]
+fn from_file_parses_lf_crlf_and_quoted_entries() {
+    let patterns = gix_pathspec::parse::from_file(
+        br#"src/*.rs
+"spaced path"
+:(literal)raw[chars]
+trailing-cr
+"#,
+        Default::default(),
+        Default::default(),
+    )
+    .expect("valid pathspec file");
+
+    let paths = patterns.iter().map(gix_pathspec::Pattern::path).collect::<Vec<_>>();
+    assert_eq!(paths, ["src/*.rs", "spaced path", "raw[chars]", "trailing-cr"]);
+    assert_eq!(patterns[2].search_mode, SearchMode::Literal);
+
+    let patterns =
+        gix_pathspec::parse::from_file(b"Cargo.toml\r\nREADME.md\r\n", Default::default(), Default::default())
+            .expect("valid CRLF pathspec file");
+    let paths = patterns.iter().map(gix_pathspec::Pattern::path).collect::<Vec<_>>();
+    assert_eq!(paths, ["Cargo.toml", "README.md"]);
+}
+
+#[test]
+fn from_file_parses_nul_separated_entries_without_unquoting() {
+    let options = gix_pathspec::parse::file::Options {
+        separator: gix_pathspec::parse::file::Separator::Nul,
+        allow_quoted_strings: false,
+    };
+
+    let patterns = gix_pathspec::parse::from_file(
+        b"\"literal quotes\"\0line\nbreak\0:(glob)src/**\0",
+        Default::default(),
+        options,
+    )
+    .expect("valid NUL-separated pathspec file");
+
+    let paths = patterns.iter().map(gix_pathspec::Pattern::path).collect::<Vec<_>>();
+    assert_eq!(paths, ["\"literal quotes\"", "line\nbreak", "src/**"]);
+    assert_eq!(patterns[2].search_mode, SearchMode::PathAwareGlob);
+}
+
+#[test]
+fn from_file_reports_entry_errors() {
+    let err =
+        gix_pathspec::parse::from_file(br#""quoted" trailing"#, Default::default(), Default::default()).unwrap_err();
+    assert!(err.to_string().contains("entry 1"));
+    assert!(err.to_string().contains("trailing data"));
+
+    let err = gix_pathspec::parse::from_file(b"valid\n\n", Default::default(), Default::default()).unwrap_err();
+    assert!(err.to_string().contains("entry 2"));
+}
+
 mod invalid;
 mod valid;
 

@@ -595,7 +595,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 
 ### gix-pathspec
 * [x] parse single
-* [ ] parse file line by line (with or without quoting, NUL and LF/CRLF line separation) (see `--pathspec-from-file` and `--pathspec-file-nul`)
+* [x] parse file line by line (with or without quoting, NUL and LF/CRLF line separation) (see `--pathspec-from-file` and `--pathspec-file-nul`)
 * [x] matching of paths with git-attributes support
 * [x] programmatic creation of pathspecs
 * [x] `TryIntoPathspec` trait to parse strings or accept ready-made pathspecs as well, for use in APIs

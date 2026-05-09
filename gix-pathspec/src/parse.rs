@@ -30,6 +30,101 @@ pub enum Error {
     IncompatibleSearchModes,
 }
 
+/// Parse pathspecs from `--pathspec-from-file` style input.
+pub mod file {
+    /// Options for [`from_file()`][super::from_file].
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub struct Options {
+        /// The separator between pathspec entries.
+        pub separator: Separator,
+        /// If true, entries may be double-quoted as described by Git's `core.quotePath`.
+        ///
+        /// Set this to `false` for `--pathspec-file-nul` behavior, where quotes and newlines
+        /// are part of the pathspec entry.
+        pub allow_quoted_strings: bool,
+    }
+
+    impl Default for Options {
+        fn default() -> Self {
+            Options {
+                separator: Separator::Line,
+                allow_quoted_strings: true,
+            }
+        }
+    }
+
+    /// The separator between pathspec entries.
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub enum Separator {
+        /// Entries are separated by LF, with a preceding CR stripped from each line.
+        Line,
+        /// Entries are separated by NUL bytes.
+        Nul,
+    }
+
+    /// The error returned by [`from_file()`][super::from_file].
+    #[derive(thiserror::Error, Debug)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error("Could not unquote pathspec entry {entry}")]
+        Unquote {
+            entry: usize,
+            source: gix_quote::ansi_c::undo::Error,
+        },
+        #[error("Quoted pathspec entry {entry} has trailing data after byte {consumed} of {len}")]
+        TrailingData { entry: usize, consumed: usize, len: usize },
+        #[error("Could not parse pathspec entry {entry}")]
+        Parse { entry: usize, source: super::Error },
+    }
+}
+
+/// Parse `input` in `--pathspec-from-file` format.
+///
+/// Line-separated input strips one trailing CR before the LF separator and supports
+/// double-quoted entries. NUL-separated input should set [`file::Options::allow_quoted_strings`]
+/// to `false` to match Git's `--pathspec-file-nul` behavior.
+pub fn from_file(input: &[u8], defaults: Defaults, options: file::Options) -> Result<Vec<Pattern>, file::Error> {
+    let separator = match options.separator {
+        file::Separator::Line => b'\n',
+        file::Separator::Nul => b'\0',
+    };
+    let mut entries = input.split(|b| *b == separator).peekable();
+    let mut patterns = Vec::new();
+    let mut entry = 0;
+
+    while let Some(mut raw) = entries.next() {
+        if raw.is_empty() && entries.peek().is_none() {
+            break;
+        }
+        entry += 1;
+
+        if matches!(options.separator, file::Separator::Line) && raw.last() == Some(&b'\r') {
+            raw = &raw[..raw.len() - 1];
+        }
+
+        let unquoted = if options.allow_quoted_strings {
+            let (unquoted, consumed) =
+                gix_quote::ansi_c::undo(raw.as_bstr()).map_err(|source| file::Error::Unquote { entry, source })?;
+            if consumed != raw.len() {
+                return Err(file::Error::TrailingData {
+                    entry,
+                    consumed,
+                    len: raw.len(),
+                });
+            }
+            unquoted
+        } else {
+            Cow::Borrowed(raw.as_bstr())
+        };
+
+        patterns.push(
+            Pattern::from_bytes(unquoted.as_ref(), defaults).map_err(|source| file::Error::Parse { entry, source })?,
+        );
+    }
+
+    Ok(patterns)
+}
+
 impl Pattern {
     /// Create a pattern from its individual fields without parsing a string.
     ///

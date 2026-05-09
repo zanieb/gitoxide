@@ -2228,6 +2228,7 @@ dependencies = [
  "gix-config-value",
  "gix-glob",
  "gix-path",
+ "gix-quote",
  "gix-testtools",
  "serial_test",
  "thiserror 2.0.18",
