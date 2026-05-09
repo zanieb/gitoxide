@@ -7,18 +7,10 @@ mod attributes;
 mod ignore;
 
 fn probe_case() -> Result<Case> {
-    Ok(
-        if gix_fs::Capabilities::probe(
-            &gix_discover::upwards(".".as_ref())?
-                .0
-                .into_repository_and_work_tree_directories()
-                .0,
-        )
-        .ignore_case
-        {
-            Case::Fold
-        } else {
-            Case::Sensitive
-        },
-    )
+    let dir = gix_testtools::tempfile::tempdir_in(std::env::current_dir()?)?;
+    Ok(if gix_fs::Capabilities::probe_dir(dir.path()).ignore_case {
+        Case::Fold
+    } else {
+        Case::Sensitive
+    })
 }
