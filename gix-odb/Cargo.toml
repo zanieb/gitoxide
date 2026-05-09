@@ -8,7 +8,7 @@ authors = ["Sebastian Thiel <sebastian.thiel@icloud.com>"]
 license = "MIT OR Apache-2.0"
 description = "Implements various git object databases"
 edition = "2024"
-include = ["/src/**/*", "/LICENSE-*"]
+include = ["/src/**/*", "/examples/**/*", "/LICENSE-*"]
 rust-version = "1.85"
 autotests = false
 
