@@ -188,6 +188,14 @@ pub trait Driver {
     /// Returns the id of the newly created commit.
     fn cherry_pick(&self, commit_id: ObjectId, message: Option<&[u8]>) -> Result<CherryPickOutcome, CherryPickError>;
 
+    /// Revert `commit_id` on top of the current `HEAD`.
+    fn revert(&self, commit_id: ObjectId) -> Result<CherryPickOutcome, CherryPickError> {
+        Err(CherryPickError::Other {
+            message: format!("revert operation is not supported by this driver: {commit_id}"),
+            source: "revert operation is not supported by this driver".to_string().into(),
+        })
+    }
+
     /// Read the raw message of a commit.
     fn read_commit_message(&self, commit_id: ObjectId) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -366,7 +374,7 @@ impl MergeState {
     /// Returns [`StepError::Label`] or [`StepError::Reset`] if a rebase-merges
     /// label/reset operation fails.
     /// Also returns `StepError::ResolvePrefix` for unsupported operations (update-ref,
-    /// revert, merge) rather than silently skipping them.
+    /// merge) rather than silently skipping them.
     pub fn step(&mut self, driver: &dyn Driver, rebase_merge_dir: &Path) -> Result<StepOutcome, StepError> {
         if self.todo.operations.is_empty() {
             return Ok(StepOutcome::Done);
@@ -565,7 +573,15 @@ impl MergeState {
                 self.accumulated_squash_message = None;
                 Ok(StepOutcome::Skipped)
             }
-            Operation::UpdateRef { .. } | Operation::Revert { .. } | Operation::Merge { .. } => {
+            Operation::Revert { commit, .. } => {
+                let commit_id = driver.resolve_commit(commit)?;
+                let result = driver.revert(commit_id)?;
+                self.accumulated_squash_message = None;
+                Ok(StepOutcome::Applied {
+                    new_commit: result.new_commit_id,
+                })
+            }
+            Operation::UpdateRef { .. } | Operation::Merge { .. } => {
                 // These operations are not yet supported by the rebase driver.
                 // Return an error rather than silently skipping, as skipping could
                 // corrupt repository state (e.g., missed Reset or Label operations).
