@@ -166,6 +166,10 @@ impl State {
         type WriteExtFn<'a> = &'a dyn Fn(&mut dyn std::io::Write) -> Option<std::io::Result<extension::Signature>>;
         let extensions: &[WriteExtFn<'_>] = &[
             &|write| {
+                self.link()
+                    .map(|link| extension::link::write_to(link, write).map(|_| extension::link::SIGNATURE))
+            },
+            &|write| {
                 extensions
                     .should_write(extension::tree::SIGNATURE)
                     .and_then(|signature| self.tree().map(|tree| tree.write_to(write).map(|_| signature)))
@@ -203,7 +207,7 @@ impl State {
         ];
 
         let mut offset_to_previous_ext = offset_to_extensions;
-        let mut out = Vec::with_capacity(5);
+        let mut out = Vec::with_capacity(6);
         for write_ext in extensions {
             if let Some(signature) = write_ext(&mut write).transpose()? {
                 let offset_past_ext = write.count;

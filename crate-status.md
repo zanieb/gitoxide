@@ -882,8 +882,8 @@ The git staging area.
       * [x] FSMN
       * [x] EOIE
       * [x] 'sdir'
-      * [ ] 'link'
-          - **note** that we currently **dissolve** any shared index we read so when writing this extension is removed.
+      * [x] 'link'
+          - **note** that `State` preserves raw split-index links, while `File::at()` still dissolves shared indices for normal access.
 * `stat` update
     * [ ] optional threaded `stat` based on thread_cost (aka preload)
 * [x] handling of `.gitignore` and system file exclude configuration

@@ -126,6 +126,37 @@ fn roundtrips_sparse_index() -> crate::Result {
 }
 
 #[test]
+fn raw_split_index_preserves_link_extension() -> crate::Result {
+    let fixture = Generated("v2_split_index");
+    let expected_bytes = std::fs::read(fixture.to_path())?;
+    let (expected, _) = State::from_bytes(
+        &expected_bytes,
+        FileTime::now(),
+        gix_hash::Kind::Sha1,
+        Default::default(),
+    )?;
+    assert!(expected.link().is_some(), "raw split index contains link extension");
+
+    let mut out_bytes = Vec::new();
+    let (actual_version, digest) = {
+        let mut hasher = gix_hash::io::Write::new(&mut out_bytes, gix_hash::Kind::Sha1);
+        let actual_version = expected.write_to(&mut hasher, only_tree_ext())?;
+        let digest = hasher.hash.try_finalize()?;
+        (actual_version, digest)
+    };
+    out_bytes.extend_from_slice(digest.as_slice());
+
+    let (actual, _) = State::from_bytes(&out_bytes, FileTime::now(), gix_hash::Kind::Sha1, Default::default())?;
+    assert_eq!(actual_version, expected.version(), "version mismatch");
+    assert_eq!(actual.entries(), expected.entries(), "entries mismatch");
+    assert_eq!(actual.path_backing(), expected.path_backing(), "path backing mismatch");
+    assert_eq!(actual.link(), expected.link(), "link extension mismatch");
+    compare_raw_bytes(&out_bytes, &expected_bytes, fixture.to_name());
+
+    Ok(())
+}
+
+#[test]
 fn state_comparisons_with_various_extension_configurations() {
     for fixture in [
         Loose("extended-flags"),
@@ -289,6 +320,11 @@ fn compare_states(actual: &State, actual_version: Version, expected: &State, opt
         actual.untracked(),
         writes_untracked(options).then(|| expected.untracked()).flatten(),
         "untracked-cache extension mismatch, actual vs option in {fixture:?}"
+    );
+    assert_eq!(
+        actual.link(),
+        expected.link(),
+        "link extension mismatch, actual vs expected in {fixture:?}"
     );
 
     // As `write_to` does / should not mutate we can test those properties here.

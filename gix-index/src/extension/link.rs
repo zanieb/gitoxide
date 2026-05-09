@@ -1,10 +1,12 @@
+use std::io::Write;
+
 use crate::extension::{Link, Signature};
 
 /// The signature of the link extension.
 pub const SIGNATURE: Signature = *b"link";
 
 /// Bitmaps to know which entries to delete or replace, even though details are still unknown.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bitmaps {
     /// A bitmap to signal which entries to delete, maybe.
     pub delete: gix_bitmap::ewah::Vec,
@@ -63,6 +65,23 @@ pub(crate) fn decode(data: &[u8], object_hash: gix_hash::Kind) -> Result<Link, d
         shared_index_checksum: id,
         bitmaps: Some(Bitmaps { delete, replace }),
     })
+}
+
+pub(crate) fn write_to(link: &Link, mut out: impl Write) -> Result<(), std::io::Error> {
+    let mut data = Vec::new();
+    data.extend_from_slice(link.shared_index_checksum.as_bytes());
+    if let Some(bitmaps) = &link.bitmaps {
+        bitmaps.delete.write_to(&mut data)?;
+        bitmaps.replace.write_to(&mut data)?;
+    }
+
+    out.write_all(&SIGNATURE)?;
+    out.write_all(
+        &u32::try_from(data.len())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "link extension exceeds 4GB"))?
+            .to_be_bytes(),
+    )?;
+    out.write_all(&data)
 }
 
 impl Link {
