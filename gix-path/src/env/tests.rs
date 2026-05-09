@@ -61,6 +61,7 @@ mod system_prefix {
     }
 
     #[test]
+    #[serial]
     fn exepath_no_relevant_subdir() {
         for names in [&[][..], &["ucrt64"][..]] {
             let exepath = ExePath::new();
@@ -71,6 +72,7 @@ mod system_prefix {
     }
 
     #[test]
+    #[serial]
     fn exepath_unambiguous_subdir() {
         for name in ["mingw32", "mingw64", "clangarm64"] {
             let exepath = ExePath::new();
@@ -81,6 +83,7 @@ mod system_prefix {
     }
 
     #[test]
+    #[serial]
     fn exepath_unambiguous_subdir_beside_strange_files() {
         for (dirname, filename1, filename2) in [
             ("mingw32", "mingw64", "clangarm64"),
@@ -96,6 +99,7 @@ mod system_prefix {
     }
 
     #[test]
+    #[serial]
     fn exepath_ambiguous_subdir() {
         for names in [
             &["mingw32", "mingw64"][..],

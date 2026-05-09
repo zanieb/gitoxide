@@ -39,12 +39,9 @@ mod deflate_stream {
 
     #[test]
     fn small_file_decompress() -> Result<(), Box<dyn std::error::Error>> {
-        fn fixture_path(path: &str) -> std::path::PathBuf {
-            std::path::PathBuf::from("tests/fixtures").join(path)
-        }
-        let r = InflateReader::from_read(io::BufReader::new(std::fs::File::open(fixture_path(
-            "objects/37/d4e6c5c48ba0d245164c4e10d5f41140cab980",
-        ))?));
+        let fixture =
+            include_bytes!("../../../../../gix-odb/tests/fixtures/objects/37/d4e6c5c48ba0d245164c4e10d5f41140cab980");
+        let r = InflateReader::from_read(io::BufReader::new(fixture.as_slice()));
         #[allow(clippy::unbuffered_bytes)]
         let mut bytes = r.bytes();
         let content = bytes.by_ref().take(16).collect::<Result<Vec<_>, _>>()?;

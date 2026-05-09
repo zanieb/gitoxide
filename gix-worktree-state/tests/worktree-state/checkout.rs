@@ -667,12 +667,13 @@ fn stripped_prefix(prefix: impl AsRef<Path>, source_files: &[PathBuf]) -> Vec<&P
 }
 
 fn probe_gitoxide_dir() -> crate::Result<gix_fs::Capabilities> {
-    Ok(gix_fs::Capabilities::probe(
-        &gix_discover::upwards(".".as_ref())?
-            .0
-            .into_repository_and_work_tree_directories()
-            .0,
-    ))
+    let (git_dir, worktree_dir) = gix_discover::upwards(".".as_ref())?
+        .0
+        .into_repository_and_work_tree_directories();
+    Ok(match worktree_dir {
+        Some(worktree_dir) => gix_fs::Capabilities::probe_dir(&worktree_dir),
+        None => gix_fs::Capabilities::probe(&git_dir),
+    })
 }
 
 fn opts_from_probe() -> gix_worktree_state::checkout::Options {
