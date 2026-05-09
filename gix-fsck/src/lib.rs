@@ -316,6 +316,67 @@ where
         Ok(())
     }
 
+    /// Run connectivity checks on all non-null ids from index entries.
+    ///
+    /// Blob, executable, and symlink entries are checked as blobs. Tree entries, as used by sparse indices,
+    /// are traversed as trees. Commit entries represent submodules and are skipped because they belong to a different repository.
+    pub fn check_index_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = (ObjectId, EntryKind)>,
+    ) -> Result<(), existing_object::Error> {
+        match self.check_index_entries_with_options(entries, Options::default()) {
+            Ok(()) => Ok(()),
+            Err(Error::Find(err)) => Err(err),
+            Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
+            Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
+            Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
+        }
+    }
+
+    /// Run connectivity checks on all non-null ids from index entries, using `options`.
+    ///
+    /// See [`Connectivity::check_index_entries`] for the mapping from index entry kind to object traversal.
+    pub fn check_index_entries_with_options(
+        &mut self,
+        entries: impl IntoIterator<Item = (ObjectId, EntryKind)>,
+        options: Options<'_>,
+    ) -> Result<(), Error> {
+        for (oid, kind) in entries {
+            if !oid.is_null() {
+                self.check_index_entry_with_options(&oid, kind, options)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Run connectivity checks on all non-null tree ids from an index tree-cache extension.
+    pub fn check_index_tree_cache(
+        &mut self,
+        tree_ids: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<(), existing_object::Error> {
+        match self.check_index_tree_cache_with_options(tree_ids, Options::default()) {
+            Ok(()) => Ok(()),
+            Err(Error::Find(err)) => Err(err),
+            Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
+            Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
+            Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
+        }
+    }
+
+    /// Run connectivity checks on all non-null tree ids from an index tree-cache extension, using `options`.
+    pub fn check_index_tree_cache_with_options(
+        &mut self,
+        tree_ids: impl IntoIterator<Item = ObjectId>,
+        options: Options<'_>,
+    ) -> Result<(), Error> {
+        for tree_id in tree_ids {
+            if !tree_id.is_null() {
+                self.check_tree_id(&tree_id, options)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Return all objects from `object_ids` that were not reached by previous connectivity checks.
     ///
     /// The input should be the object ids known to exist in the object database. Missing objects reported while
@@ -326,6 +387,24 @@ where
             .filter(|oid| !self.seen.contains(*oid))
             .copied()
             .collect()
+    }
+
+    fn check_index_entry_with_options(
+        &mut self,
+        oid: &ObjectId,
+        kind: EntryKind,
+        options: Options<'_>,
+    ) -> Result<(), Error> {
+        match kind {
+            EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => {
+                if insert_seen(&mut self.seen, *oid, options)? {
+                    check_blob(&self.db, oid, &mut self.buf, &mut self.missing_cb, options)?;
+                }
+                Ok(())
+            }
+            EntryKind::Tree => self.check_tree_id(oid, options),
+            EntryKind::Commit => Ok(()),
+        }
     }
 
     fn check_referenced_object(&mut self, oid: &ObjectId, kind: Kind, options: Options<'_>) -> Result<(), Error> {

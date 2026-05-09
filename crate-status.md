@@ -993,7 +993,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 * [x] validate connectivity and find missing objects starting from…
     - [x] commits
     - [x] tags
-    - [ ] tree-cache in the `index` or any entry within
+    - [x] tree-cache in the `index` or any entry within
 * [x] validate object hashes during connectivity traversal
 * [x] progress reporting and interruptability
 * [x] skipList to exclude objects which are known to be broken
