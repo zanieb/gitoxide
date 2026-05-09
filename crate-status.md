@@ -12,7 +12,7 @@ and itself relies on all `gix-*` crates. It's not meant for consumption, for app
 
 * **the `ein` program** - convenient and for humans
     * [x] **init** - initialize a new non-bare repository with a `main` branch
-    * [ ] **clone** - initialize a local copy of a remote repository
+    * [x] **clone** - initialize a local copy of a remote repository
     * **tools**
         * [x] **organize** - find all git repositories and place them in directories according to their remote paths
         * [x] **find** - find all git repositories in a given directory - useful for tools like [skim][skim]

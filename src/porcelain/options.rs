@@ -37,6 +37,9 @@ pub enum Subcommands {
         /// Defaults to the current working directory.
         directory: Option<PathBuf>,
     },
+    /// Clone a repository into a new directory.
+    #[cfg(feature = "gitoxide-core-blocking-client")]
+    Clone(crate::plumbing::options::clone::Platform),
     /// A selection of useful tools.
     #[cfg(feature = "gitoxide-core-tools")]
     #[clap(subcommand)]

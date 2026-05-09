@@ -42,6 +42,36 @@ pub fn main() -> Result<()> {
             move |_progress, _out, _err| panic!("something went very wrong"),
         ),
         Subcommands::Init { directory } => core::repository::init(directory).map(|_| ()),
+        #[cfg(feature = "gitoxide-core-blocking-client")]
+        Subcommands::Clone(crate::plumbing::options::clone::Platform {
+            handshake_info,
+            bare,
+            no_tags,
+            ref_name,
+            remote,
+            shallow,
+            directory,
+        }) => {
+            let opts = core::repository::clone::Options {
+                format: core::OutputFormat::Human,
+                bare,
+                handshake_info,
+                no_tags,
+                ref_name,
+                shallow: shallow.into(),
+            };
+            prepare_and_run(
+                "clone",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                core::repository::clone::PROGRESS_RANGE,
+                move |progress, out, err| {
+                    core::repository::clone(remote, directory, Vec::new(), progress, out, err, opts)
+                },
+            )
+        }
         #[cfg(feature = "gitoxide-core-tools")]
         Subcommands::Tool(tool) => match tool {
             #[cfg(feature = "gitoxide-core-tools-query")]
@@ -183,4 +213,14 @@ pub fn main() -> Result<()> {
         }
     }?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clap() {
+        Args::command().debug_assert();
+    }
 }
