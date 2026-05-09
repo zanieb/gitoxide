@@ -504,16 +504,15 @@ impl MergeState {
 
         match op {
             Operation::Pick { commit, .. } => {
+                self.accumulated_squash_message = None;
                 let commit_id = driver.resolve_commit(commit)?;
                 let result = driver.cherry_pick(commit_id, None)?;
-                // Clear accumulated squash message -- a non-squash/fixup operation
-                // starts a new sequence.
-                self.accumulated_squash_message = None;
                 Ok(StepOutcome::Applied {
                     new_commit: result.new_commit_id,
                 })
             }
             Operation::Reword { commit, .. } => {
+                self.accumulated_squash_message = None;
                 let commit_id = driver.resolve_commit(commit)?;
                 // Read the original message BEFORE cherry-picking so we can provide
                 // it to the caller for editing.
@@ -524,16 +523,15 @@ impl MergeState {
                 // The caller is expected to amend HEAD with the edited message after
                 // receiving this Paused outcome.
                 let result = driver.cherry_pick(commit_id, None)?;
-                self.accumulated_squash_message = None;
                 Ok(StepOutcome::Paused {
                     commit_id: Some(result.new_commit_id),
                     original_message: Some(original_message),
                 })
             }
             Operation::Edit { commit, .. } => {
+                self.accumulated_squash_message = None;
                 let commit_id = driver.resolve_commit(commit)?;
                 let result = driver.cherry_pick(commit_id, None)?;
-                self.accumulated_squash_message = None;
                 Ok(StepOutcome::Paused {
                     commit_id: Some(result.new_commit_id),
                     original_message: None,
@@ -609,22 +607,23 @@ impl MergeState {
                 Ok(StepOutcome::Skipped)
             }
             Operation::Reset { name } => {
+                self.accumulated_squash_message = None;
                 driver.reset_to_label(name).map_err(|source| StepError::Reset {
                     name: String::from_utf8_lossy(name).into_owned(),
                     source,
                 })?;
-                self.accumulated_squash_message = None;
                 Ok(StepOutcome::Skipped)
             }
             Operation::Revert { commit, .. } => {
+                self.accumulated_squash_message = None;
                 let commit_id = driver.resolve_commit(commit)?;
                 let result = driver.revert(commit_id)?;
-                self.accumulated_squash_message = None;
                 Ok(StepOutcome::Applied {
                     new_commit: result.new_commit_id,
                 })
             }
             Operation::Merge { commit, label, oneline } => {
+                self.accumulated_squash_message = None;
                 let commit = match commit {
                     Some((commit, amend)) => Some((driver.resolve_commit(commit)?, *amend)),
                     None => None,
@@ -638,7 +637,6 @@ impl MergeState {
                     _ => None,
                 };
                 let result = driver.merge(label, commit, oneline)?;
-                self.accumulated_squash_message = None;
                 if original_message.is_some() {
                     Ok(StepOutcome::Paused {
                         commit_id: Some(result.new_commit_id),

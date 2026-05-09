@@ -2144,6 +2144,56 @@ mod driver {
     }
 
     #[test]
+    fn squash_message_cleared_before_failing_head_changing_operation() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let hex_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let hex_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let hex_c = "cccccccccccccccccccccccccccccccccccccccc";
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(hex_a, hex_a, b"Message A");
+        driver.register_commit(hex_b, hex_b, b"Message B");
+        driver.register_commit(hex_c, hex_c, b"Message C");
+        driver.conflict_on.borrow_mut().insert(make_oid(hex_c));
+
+        let mut state = make_state_with_ops(vec![
+            Operation::Pick {
+                commit: make_oid(hex_a).into(),
+                summary: "A".into(),
+            },
+            Operation::Squash {
+                commit: make_oid(hex_b).into(),
+                summary: "B".into(),
+            },
+            Operation::Pick {
+                commit: make_oid(hex_c).into(),
+                summary: "C".into(),
+            },
+        ]);
+
+        state.step(&driver, &rebase_dir).unwrap();
+        state.step(&driver, &rebase_dir).unwrap();
+        assert!(
+            state.accumulated_squash_message.is_some(),
+            "squash should accumulate a message before the failing pick"
+        );
+
+        let err = state.step(&driver, &rebase_dir).unwrap_err();
+        assert!(matches!(err, gix_rebase::StepError::CherryPick(_)));
+        assert!(
+            state.accumulated_squash_message.is_none(),
+            "a failing pick starts a new sequence and must clear stale squash state"
+        );
+
+        let on_disk = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
+        assert!(
+            on_disk.accumulated_squash_message.is_none(),
+            "stale message-squash must not be persisted after the failed pick"
+        );
+    }
+
+    #[test]
     fn fixup_chain_uses_accumulated_message() {
         // pick A -> fixup B -> fixup C: result should use A's message throughout.
         let dir = tempfile::tempdir().unwrap();
