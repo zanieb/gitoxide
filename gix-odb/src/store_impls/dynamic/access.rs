@@ -17,6 +17,11 @@ impl Store {
         self.use_multi_pack_index
     }
 
+    /// Whether or not `info/alternates` is used to discover linked object databases.
+    pub fn use_alternates(&self) -> bool {
+        self.use_alternates
+    }
+
     /// An iterator over replacements from object-ids `X` to `X-replaced` as `(X, X-replaced)`, sorted by the original id `X`.
     pub fn replacements(&self) -> impl Iterator<Item = (gix_hash::ObjectId, gix_hash::ObjectId)> + '_ {
         self.replacements.iter().copied()

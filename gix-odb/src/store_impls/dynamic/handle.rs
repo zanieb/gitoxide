@@ -373,6 +373,7 @@ impl TryFrom<&super::Store> for super::Store {
                 slots: crate::store::init::Slots::Given(s.files.len().try_into().expect("BUG: too many slots")),
                 use_multi_pack_index: false,
                 alloc_limit_bytes: s.alloc_limit_bytes,
+                use_alternates: s.use_alternates,
                 current_dir: s.current_dir.clone().into(),
                 loose_compression: s.loose_compression,
             },
