@@ -337,23 +337,16 @@ fn coalesce_after_split_removal() -> gix_testtools::Result {
 }
 
 /// Scenario 4: path that was a directory, then became a regular file (t8003).
-/// gix-blame currently does not support this case — it panics with "can't be deleted"
-/// because the tree diff sees the transition from directory to file as a deletion.
-/// This test documents the limitation.
 #[test]
-fn path_was_directory_then_file_is_unsupported() -> gix_testtools::Result {
+fn path_was_directory_then_file() -> gix_testtools::Result {
     let worktree_path = interop_repo_path()?;
     let mut fixture = Fixture::new(worktree_path)?;
 
     let source_file_name = "path-was-dir";
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        fixture.blame_file(source_file_name.into(), default_options())
-    }));
+    let outcome = fixture.blame_file(source_file_name.into(), default_options())?;
 
-    assert!(
-        result.is_err(),
-        "gix-blame should panic (or error) on a path that transitioned from directory to file"
-    );
+    let baseline = Baseline::collect(fixture.git_dir().join("path-was-dir.baseline"), source_file_name.into());
+    pretty_assertions::assert_eq!(outcome.entries, baseline?);
     Ok(())
 }
 
