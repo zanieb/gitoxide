@@ -258,7 +258,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
 ### gix-object
 * *decode (zero-copy)* borrowed objects
     * [x] commit
-      * [ ] parse [trailers](https://git-scm.com/docs/git-interpret-trailers#_description)
+      * [x] parse [trailers](https://git-scm.com/docs/git-interpret-trailers#_description)
     * [x] tree
 * encode owned objects
     * [x] commit
