@@ -46,7 +46,7 @@ fn write_v2_header_format() {
 }
 
 /// Ported from t5607: 'git bundle v3 has expected contents'
-/// Expected: "# v3 git bundle\n@object-format=sha1\n\n..." followed by refs.
+/// Expected: "# v3 git bundle\n@object-format=sha1\n..." followed by refs.
 #[test]
 fn write_v3_header_format() {
     let header = Header {
@@ -66,9 +66,7 @@ fn write_v3_header_format() {
     let lines: Vec<&str> = output.lines().collect();
     assert_eq!(lines[0], "# v3 git bundle");
     assert_eq!(lines[1], "@object-format=sha1");
-    // Blank line separates capabilities from refs
-    assert_eq!(lines[2], "");
-    assert_eq!(lines[3], "abcdef0123456789abcdef0123456789abcdef01 refs/heads/main");
+    assert_eq!(lines[2], "abcdef0123456789abcdef0123456789abcdef01 refs/heads/main");
 }
 
 /// Write prerequisite line format: "-<hex>[ <comment>]\n"
