@@ -188,12 +188,19 @@ impl crate::Repository {
         // Load the current index.
         let mut index = self.open_index().map_err(Error::OpenIndex)?;
 
-        // Collect the paths we need to reset into a HashSet for O(1) lookup.
-        let reset_paths: std::collections::HashSet<Vec<u8>> = paths
+        // Collect normalized repository-relative paths. An empty path means the
+        // entire index, and directory paths match all entries below them.
+        let reset_paths: Vec<Vec<u8>> = paths
             .into_iter()
             .map(|p| {
-                let path_bstr = gix_path::into_bstr(p.as_ref().to_owned());
-                path_bstr.to_vec()
+                let mut path = gix_path::into_bstr(p.as_ref().to_owned()).to_vec();
+                while path.last() == Some(&b'/') {
+                    path.pop();
+                }
+                if path == b"." {
+                    path.clear();
+                }
+                path
             })
             .collect();
 
@@ -204,7 +211,9 @@ impl crate::Repository {
                 .iter()
                 .filter(|e| {
                     let path: &[u8] = e.path(&target_index);
-                    reset_paths.contains(path)
+                    reset_paths
+                        .iter()
+                        .any(|reset_path| path_matches_reset_path(path, reset_path))
                 })
                 .map(|e| {
                     let path: &[u8] = e.path(&target_index);
@@ -212,26 +221,32 @@ impl crate::Repository {
                 })
                 .collect();
 
-        // Update matching entries in the current index.
+        // Replace all matching entries in the current index. Removing first handles
+        // unmerged stages and file/directory replacements; adding target entries
+        // below restores the stage-0 entries from the target tree.
         for (entry, path) in index.entries_mut_with_paths() {
             let path_bytes: &[u8] = path;
-            if !reset_paths.contains(path_bytes) {
-                continue;
-            }
-            if let Some(&(id, mode)) = target_entries.get(path_bytes) {
-                entry.id = id;
-                entry.mode = mode;
-                entry
-                    .flags
-                    .remove(gix_index::entry::Flags::INTENT_TO_ADD | gix_index::entry::Flags::SKIP_WORKTREE);
-            } else {
-                // Path not in target tree: mark for removal.
+            if reset_paths
+                .iter()
+                .any(|reset_path| path_matches_reset_path(path_bytes, reset_path))
+            {
                 entry.flags.insert(gix_index::entry::Flags::REMOVE);
             }
         }
 
         // Remove entries marked with REMOVE.
         index.remove_entries(|_, _, e| e.flags.contains(gix_index::entry::Flags::REMOVE));
+
+        for (path, (id, mode)) in target_entries {
+            use crate::bstr::ByteSlice;
+            index.add_entry(
+                gix_index::entry::Stat::default(),
+                id,
+                gix_index::entry::Flags::empty(),
+                mode,
+                path.as_bstr(),
+            );
+        }
 
         // Write the updated index.
         index.write(Default::default()).map_err(Error::WriteIndex)?;
@@ -371,4 +386,11 @@ impl From<super::worktree_ops::CheckoutError> for Error {
             super::worktree_ops::CheckoutError::ObjectsToArc(e) => Error::ObjectsToArc(e),
         }
     }
+}
+
+fn path_matches_reset_path(path: &[u8], reset_path: &[u8]) -> bool {
+    if reset_path.is_empty() || path == reset_path {
+        return true;
+    }
+    path.get(..reset_path.len()).is_some_and(|prefix| prefix == reset_path) && path.get(reset_path.len()) == Some(&b'/')
 }
