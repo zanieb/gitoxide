@@ -414,7 +414,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
 * [ ] persist merge-in-progress state compatible with [`MERGE_HEAD`](https://git-scm.com/docs/gitrepository-layout), [`MERGE_MSG`](https://git-scm.com/docs/git-merge) and [`MERGE_MODE`](https://github.com/git/git/blob/ce74208c2fa13943fffa58f168ac27a76d0eb789/path.c#L1585)
 * [ ] support merge continuation and abort flows as used by [`git merge --continue`](https://git-scm.com/docs/git-merge) and [`git merge --abort`](https://git-scm.com/docs/git-merge)
 * [x] API documentation
-    * [ ] Examples
+    * [x] Examples
 
 ### gix-blame
 
