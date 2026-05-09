@@ -501,6 +501,60 @@ fn tree_order_validation_rejects_duplicate_tree_entries() {
 }
 
 #[test]
+fn tree_mode_validation_rejects_non_canonical_file_modes() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"hello".to_vec());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100700", "file", blob_id));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    let err = check
+        .check_index_tree_cache_with_options(
+            [tree_id],
+            Options {
+                validate_tree_modes: true,
+                ..Options::default()
+            },
+        )
+        .expect_err("tree mode validation rejects non-canonical file modes");
+
+    assert!(matches!(
+        err,
+        Error::InvalidTreeEntryMode {
+            tree_id: actual_tree_id,
+            mode,
+            ..
+        } if actual_tree_id == tree_id && mode.value() == 0o100700
+    ));
+}
+
+#[test]
+fn tree_mode_validation_rejects_zero_padded_tree_modes() {
+    let mut db = MemoryDb::default();
+    let child_tree_id = db.insert(Kind::Tree, Vec::new());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("040000", "dir", child_tree_id));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    let err = check
+        .check_index_tree_cache_with_options(
+            [tree_id],
+            Options {
+                validate_tree_modes: true,
+                ..Options::default()
+            },
+        )
+        .expect_err("tree mode validation rejects zero-padded tree modes");
+
+    assert!(matches!(
+        err,
+        Error::InvalidTreeEntryMode {
+            tree_id: actual_tree_id,
+            mode,
+            ..
+        } if actual_tree_id == tree_id && mode.value() == 0o040000
+    ));
+}
+
+#[test]
 fn unreachable_objects_are_reported_after_traversal() {
     let mut db = MemoryDb::default();
     let reachable_blob = db.insert(Kind::Blob, b"reachable".to_vec());
