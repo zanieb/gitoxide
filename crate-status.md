@@ -299,7 +299,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
             * [x] create 'thin' pack, i.e. deltas that are based on objects the other side has.
             * [x] parallel implementation that scales perfectly
         * [x] entries to pack data iterator
-        * [ ] write index along with the new pack
+        * [x] write index along with the new pack
     * [x] **verify** pack with statistics
         * [x] brute force - less memory
         * [x] indexed - optimal speed, but more memory
