@@ -58,14 +58,74 @@ where
             commit.tree()
         };
 
-        let mut tree_ids = VecDeque::from_iter(Some(tree_id));
+        self.check_tree_id(&tree_id);
+
+        Ok(())
+    }
+
+    /// Run the connectivity check on the provided annotated tag `oid`.
+    ///
+    /// Tags may point to any object kind, including another tag. Missing objects
+    /// referenced by the tag are reported through the missing-object callback.
+    pub fn check_tag(&mut self, oid: &ObjectId) -> Result<(), gix_object::find::existing_object::Error> {
+        if !self.seen.insert(*oid) {
+            return Ok(());
+        }
+
+        let (target, target_kind) = {
+            let tag = self.db.find_tag(oid, &mut self.buf)?;
+            (tag.target(), tag.target_kind)
+        };
+
+        self.check_referenced_object(&target, target_kind)
+    }
+
+    fn check_referenced_object(
+        &mut self,
+        oid: &ObjectId,
+        kind: Kind,
+    ) -> Result<(), gix_object::find::existing_object::Error> {
+        match kind {
+            Kind::Blob => {
+                if self.seen.insert(*oid) {
+                    check_blob(&self.db, oid, &mut self.missing_cb);
+                }
+                Ok(())
+            }
+            Kind::Tree => {
+                self.check_tree_id(oid);
+                Ok(())
+            }
+            Kind::Commit => {
+                if self.db.exists(oid) {
+                    self.check_commit(oid)
+                } else {
+                    if self.seen.insert(*oid) {
+                        (self.missing_cb)(oid, Kind::Commit);
+                    }
+                    Ok(())
+                }
+            }
+            Kind::Tag => {
+                if self.db.exists(oid) {
+                    self.check_tag(oid)
+                } else {
+                    if self.seen.insert(*oid) {
+                        (self.missing_cb)(oid, Kind::Tag);
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn check_tree_id(&mut self, oid: &ObjectId) {
+        let mut tree_ids = VecDeque::from_iter(Some(*oid));
         while let Some(tree_id) = tree_ids.pop_front() {
             if self.seen.insert(tree_id) {
                 self.check_tree(&tree_id, &mut tree_ids);
             }
         }
-
-        Ok(())
     }
 
     /// Blobs are checked right away, trees are stored in `tree_ids` for the parent to iterate them, and only
