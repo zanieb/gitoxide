@@ -628,6 +628,8 @@ mod driver {
         cherry_pick_calls: RefCell<Vec<(ObjectId, Option<Vec<u8>>)>>,
         /// Tracks revert calls.
         revert_calls: RefCell<Vec<ObjectId>>,
+        /// Tracks merge calls: (label, commit option, oneline).
+        merge_calls: RefCell<Vec<(Vec<u8>, Option<(ObjectId, gix_sequencer::todo::AmendMessage)>, Vec<u8>)>>,
         /// Tracks update_head calls.
         update_head_calls: RefCell<Vec<ObjectId>>,
         /// Tracks exec commands.
@@ -656,6 +658,7 @@ mod driver {
                 messages: HashMap::new(),
                 cherry_pick_calls: RefCell::new(Vec::new()),
                 revert_calls: RefCell::new(Vec::new()),
+                merge_calls: RefCell::new(Vec::new()),
                 update_head_calls: RefCell::new(Vec::new()),
                 execute_calls: RefCell::new(Vec::new()),
                 labels: RefCell::new(HashMap::new()),
@@ -716,6 +719,26 @@ mod driver {
                 return Err(CherryPickError::Other {
                     message: format!("simulated failure for {commit_id}"),
                     source: "simulated failure".to_string().into(),
+                });
+            }
+            let new_id = self.next_fake_commit_id();
+            *self.current_head.borrow_mut() = new_id;
+            Ok(CherryPickOutcome { new_commit_id: new_id })
+        }
+
+        fn merge(
+            &self,
+            label: &[u8],
+            commit: Option<(ObjectId, gix_sequencer::todo::AmendMessage)>,
+            oneline: &[u8],
+        ) -> Result<CherryPickOutcome, CherryPickError> {
+            self.merge_calls
+                .borrow_mut()
+                .push((label.to_vec(), commit, oneline.to_vec()));
+            if !self.labels.borrow().contains_key(label) {
+                return Err(CherryPickError::Other {
+                    message: format!("unknown label: {}", String::from_utf8_lossy(label)),
+                    source: "unknown label".to_string().into(),
                 });
             }
             let new_id = self.next_fake_commit_id();
@@ -1242,6 +1265,58 @@ mod driver {
             driver.cherry_pick_calls.borrow().is_empty(),
             "revert should use the revert driver operation"
         );
+    }
+
+    #[test]
+    fn step_merge_applies_driver_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let label_target = make_oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        let driver = MockDriver::new();
+        driver.labels.borrow_mut().insert(b"feature".to_vec(), label_target);
+
+        let mut state = make_state_with_ops(vec![Operation::Merge {
+            commit: None,
+            label: "feature".into(),
+            oneline: "Merge feature".into(),
+        }]);
+
+        let outcome = state.step(&driver, &rebase_dir).unwrap();
+        assert!(matches!(outcome, StepOutcome::Applied { .. }));
+        assert_eq!(
+            driver.merge_calls.borrow().as_slice(),
+            &[(b"feature".to_vec(), None, b"Merge feature".to_vec())]
+        );
+    }
+
+    #[test]
+    fn step_merge_with_edit_pauses_with_original_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let commit_hex = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        let mut driver = MockDriver::new();
+        driver.labels.borrow_mut().insert(
+            b"feature".to_vec(),
+            make_oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        );
+        driver.register_commit(commit_hex, commit_hex, b"Merge commit message\n");
+
+        let mut state = make_state_with_ops(vec![Operation::Merge {
+            commit: Some((make_oid(commit_hex).into(), gix_sequencer::todo::AmendMessage::Edit)),
+            label: "feature".into(),
+            oneline: "Merge feature".into(),
+        }]);
+
+        let outcome = state.step(&driver, &rebase_dir).unwrap();
+        assert!(matches!(
+            outcome,
+            StepOutcome::Paused {
+                commit_id: Some(_),
+                original_message: Some(ref msg),
+            } if msg == b"Merge commit message\n"
+        ));
     }
 
     #[test]

@@ -215,6 +215,73 @@ impl Driver for GitCliDriver {
         })
     }
 
+    fn merge(
+        &self,
+        label: &[u8],
+        commit: Option<(ObjectId, gix_sequencer::todo::AmendMessage)>,
+        oneline: &[u8],
+    ) -> Result<CherryPickOutcome, CherryPickError> {
+        let label = String::from_utf8_lossy(label);
+        let reference = format!("refs/rewritten/{label}");
+
+        let run = |cmd: &mut Command| -> Result<std::process::Output, CherryPickError> {
+            cmd.current_dir(&self.workdir)
+                .env("GIT_AUTHOR_NAME", "Test Author")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "Test Committer")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .output()
+                .map_err(|e| CherryPickError::Other {
+                    message: format!("failed to run git merge: {e}"),
+                    source: Box::new(e),
+                })
+        };
+
+        let merge_output = if let Some((commit_id, _amend)) = commit {
+            let mut cmd = Command::new("git");
+            cmd.args(["merge", "--no-ff", "--no-commit", &reference]);
+            let output = run(&mut cmd)?;
+            if output.status.success() {
+                let commit_hex = commit_id.to_hex().to_string();
+                let mut commit_cmd = Command::new("git");
+                commit_cmd.args(["commit", "-C", &commit_hex]);
+                run(&mut commit_cmd)?
+            } else {
+                output
+            }
+        } else {
+            let message = if oneline.is_empty() {
+                format!("Merge {label}")
+            } else {
+                String::from_utf8_lossy(oneline).into_owned()
+            };
+            let mut cmd = Command::new("git");
+            cmd.args(["merge", "--no-ff", "-m", &message, &reference]);
+            run(&mut cmd)?
+        };
+
+        if !merge_output.status.success() {
+            let stderr = String::from_utf8_lossy(&merge_output.stderr);
+            if stderr.contains("conflict") || stderr.contains("CONFLICT") {
+                let _ = Command::new("git")
+                    .args(["merge", "--abort"])
+                    .current_dir(&self.workdir)
+                    .output();
+                return Err(CherryPickError::Conflict {
+                    commit_id: commit.map(|(id, _)| id).unwrap_or_else(|| head_oid(&self.workdir)),
+                });
+            }
+            return Err(CherryPickError::Other {
+                message: format!("merge failed for {reference}: {stderr}"),
+                source: "merge failed".to_string().into(),
+            });
+        }
+
+        Ok(CherryPickOutcome {
+            new_commit_id: head_oid(&self.workdir),
+        })
+    }
+
     fn read_commit_message(&self, commit_id: ObjectId) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let hex = commit_id.to_hex().to_string();
         let output = Command::new("git")
@@ -1622,6 +1689,64 @@ mod mixed_operations {
         assert!(
             fix.workdir.join("feature2.txt").exists(),
             "reverting C should preserve later unrelated changes"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn merge_label_creates_merge_commit_in_real_repo() -> Result<(), Box<dyn std::error::Error>> {
+        let fix = RebaseFixture::new_no_conflict();
+        let driver = fix.driver();
+        let rebase_dir = fix.rebase_dir();
+
+        fix.detach_head_to("B");
+
+        let mut state = MergeState {
+            head_name: "refs/heads/feature".into(),
+            onto: fix.oid("B"),
+            orig_head: fix.oid("D"),
+            interactive: true,
+            todo: TodoList {
+                operations: vec![
+                    Operation::Label { name: "onto".into() },
+                    Operation::Pick {
+                        commit: fix.prefix("C"),
+                        summary: "C: add feature1.txt".into(),
+                    },
+                    Operation::Label { name: "feature".into() },
+                    Operation::Reset { name: "onto".into() },
+                    Operation::Merge {
+                        commit: None,
+                        label: "feature".into(),
+                        oneline: "Merge feature".into(),
+                    },
+                ]
+                .into(),
+            },
+            done: TodoList {
+                operations: std::collections::VecDeque::new(),
+            },
+            current_step: 0,
+            total_steps: 5,
+            stopped_sha: None,
+            accumulated_squash_message: None,
+        };
+
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+        assert!(matches!(state.step(&driver, &rebase_dir)?, StepOutcome::Applied { .. }));
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+
+        let outcome = state.step(&driver, &rebase_dir)?;
+        assert!(matches!(outcome, StepOutcome::Applied { .. }));
+        assert!(fix.workdir.join("feature1.txt").exists());
+
+        let parents = git(&fix.workdir, &["rev-list", "--parents", "-n", "1", "HEAD"]);
+        assert_eq!(
+            parents.split_whitespace().count(),
+            3,
+            "merge operation should create a two-parent merge commit"
         );
 
         Ok(())

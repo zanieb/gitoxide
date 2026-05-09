@@ -196,6 +196,23 @@ pub trait Driver {
         })
     }
 
+    /// Merge a previously created rebase label into the current `HEAD`.
+    fn merge(
+        &self,
+        label: &[u8],
+        commit: Option<(ObjectId, gix_sequencer::todo::AmendMessage)>,
+        oneline: &[u8],
+    ) -> Result<CherryPickOutcome, CherryPickError> {
+        let _ = (commit, oneline);
+        Err(CherryPickError::Other {
+            message: format!(
+                "merge operation is not supported by this driver: {}",
+                String::from_utf8_lossy(label)
+            ),
+            source: "merge operation is not supported by this driver".to_string().into(),
+        })
+    }
+
     /// Read the raw message of a commit.
     fn read_commit_message(&self, commit_id: ObjectId) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -373,8 +390,8 @@ impl MergeState {
     /// Returns [`StepError::Exec`] if an `exec` command fails.
     /// Returns [`StepError::Label`] or [`StepError::Reset`] if a rebase-merges
     /// label/reset operation fails.
-    /// Also returns `StepError::ResolvePrefix` for unsupported operations (update-ref,
-    /// merge) rather than silently skipping them.
+    /// Also returns `StepError::ResolvePrefix` for unsupported `update-ref`
+    /// operations rather than silently skipping them.
     pub fn step(&mut self, driver: &dyn Driver, rebase_merge_dir: &Path) -> Result<StepOutcome, StepError> {
         if self.todo.operations.is_empty() {
             return Ok(StepOutcome::Done);
@@ -581,7 +598,33 @@ impl MergeState {
                     new_commit: result.new_commit_id,
                 })
             }
-            Operation::UpdateRef { .. } | Operation::Merge { .. } => {
+            Operation::Merge { commit, label, oneline } => {
+                let commit = match commit {
+                    Some((commit, amend)) => Some((driver.resolve_commit(commit)?, *amend)),
+                    None => None,
+                };
+                let original_message = match commit {
+                    Some((commit_id, gix_sequencer::todo::AmendMessage::Edit)) => Some(
+                        driver
+                            .read_commit_message(commit_id)
+                            .map_err(StepError::ReadCommitMessage)?,
+                    ),
+                    _ => None,
+                };
+                let result = driver.merge(label, commit, oneline)?;
+                self.accumulated_squash_message = None;
+                if original_message.is_some() {
+                    Ok(StepOutcome::Paused {
+                        commit_id: Some(result.new_commit_id),
+                        original_message,
+                    })
+                } else {
+                    Ok(StepOutcome::Applied {
+                        new_commit: result.new_commit_id,
+                    })
+                }
+            }
+            Operation::UpdateRef { .. } => {
                 // These operations are not yet supported by the rebase driver.
                 // Return an error rather than silently skipping, as skipping could
                 // corrupt repository state (e.g., missed Reset or Label operations).
