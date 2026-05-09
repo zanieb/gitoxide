@@ -228,6 +228,76 @@ pub fn compress_log_block(uncompressed_block: &mut [u8]) -> Result<Vec<u8>, Erro
     Ok(result)
 }
 
+/// Read all reference records from a complete reftable file.
+///
+/// This parses the table header and footer, then walks consecutive ref blocks
+/// from the start of the file until a non-ref block, padding, or the footer is
+/// reached.
+pub fn read_table_ref_records(data: &[u8]) -> Result<Vec<RefRecord>, Error> {
+    let header = crate::parse_header(data)?;
+    let file_header_size = crate::header_size(header.version);
+    let footer_size = crate::footer_size(header.version);
+    if data.len() < file_header_size + footer_size {
+        return Err(Error::UnexpectedEof);
+    }
+
+    let footer_start = data.len() - footer_size;
+    let footer = crate::parse_footer(&data[footer_start..])?;
+    let hash_size = match header.version {
+        crate::Version::V1 => 20,
+        crate::Version::V2 => 32,
+    };
+
+    let mut records = Vec::new();
+    let mut block_start = file_header_size;
+    let mut is_first_block = true;
+
+    while block_start + 4 <= footer_start {
+        let block_data = &data[block_start..footer_start];
+        if block_data.is_empty() || block_data[0] == 0 {
+            break;
+        }
+
+        let (block_header, _) = parse_block_header(block_data)?;
+        if block_header.block_type != BlockType::Ref {
+            break;
+        }
+
+        let block_end = if header.block_size > 0 {
+            let next_boundary = if is_first_block {
+                header.block_size as usize
+            } else {
+                block_start + header.block_size as usize
+            };
+            next_boundary.min(footer_start)
+        } else {
+            let content_len = if is_first_block {
+                (block_header.block_len as usize).saturating_sub(file_header_size)
+            } else {
+                block_header.block_len as usize
+            };
+            block_start.saturating_add(content_len).min(footer_start)
+        };
+
+        let header_off = if is_first_block { file_header_size } else { 0 };
+        let mut block_records = read_ref_records_at(
+            &data[block_start..block_end],
+            hash_size,
+            footer.header.min_update_index,
+            header_off,
+        )?;
+        records.append(&mut block_records);
+
+        if block_end <= block_start {
+            break;
+        }
+        block_start = block_end;
+        is_first_block = false;
+    }
+
+    Ok(records)
+}
+
 /// A reftable stack: manages multiple reftable files as layers.
 ///
 /// The stack is tracked by a `tables.list` file in the reftable directory.
@@ -260,11 +330,87 @@ impl Stack {
     pub fn table_path(&self, table_name: &str) -> std::path::PathBuf {
         self.path.join(table_name)
     }
+
+    /// Read the visible reference records from all tables in this stack.
+    ///
+    /// Tables are applied in `tables.list` order, oldest to newest. Newer records
+    /// replace older records with the same name, and deletion records hide older
+    /// values.
+    pub fn ref_records(&self) -> Result<Vec<RefRecord>, Error> {
+        let mut visible = std::collections::BTreeMap::<Vec<u8>, RefRecord>::new();
+        for table_name in &self.tables {
+            let table_data = std::fs::read(self.table_path(table_name))?;
+            for record in read_table_ref_records(&table_data)? {
+                if matches!(&record.value, crate::RefRecordValue::Deletion) {
+                    visible.remove(record.name());
+                } else {
+                    visible.insert(record.name().to_vec(), record);
+                }
+            }
+        }
+        Ok(visible.into_values().collect())
+    }
+
+    /// Find a visible reference record by name.
+    pub fn find_ref(&self, name: &[u8]) -> Result<Option<RefRecord>, Error> {
+        Ok(self.ref_records()?.into_iter().find(|record| record.name() == name))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn oid(byte: u8) -> gix_hash::ObjectId {
+        gix_hash::ObjectId::from_bytes_or_panic(&[byte; 20])
+    }
+
+    fn val1(name: &str, byte: u8, update_index: u64) -> RefRecord {
+        RefRecord {
+            name: bstr::BString::from(name),
+            update_index,
+            value: crate::RefRecordValue::Val1 { target: oid(byte) },
+        }
+    }
+
+    fn deletion(name: &str, update_index: u64) -> RefRecord {
+        RefRecord {
+            name: bstr::BString::from(name),
+            update_index,
+            value: crate::RefRecordValue::Deletion,
+        }
+    }
+
+    fn table_with_records(records: &[RefRecord], min_update_index: u64, max_update_index: u64) -> Vec<u8> {
+        let opts = crate::write::Options {
+            block_size: crate::DEFAULT_BLOCK_SIZE,
+            min_update_index,
+            max_update_index,
+            version: crate::Version::V1,
+        };
+        let header = crate::write::write_header(&opts);
+        let block = crate::write::write_ref_block_at(records, opts.min_update_index, 20, opts.block_size, header.len())
+            .expect("block should write");
+        let footer = crate::Footer {
+            header: crate::Header {
+                version: opts.version,
+                block_size: opts.block_size,
+                min_update_index: opts.min_update_index,
+                max_update_index: opts.max_update_index,
+            },
+            ref_index_offset: 0,
+            obj_offset: 0,
+            obj_id_len: 0,
+            obj_index_offset: 0,
+            log_offset: 0,
+            log_index_offset: 0,
+        };
+        let mut table = Vec::new();
+        table.extend_from_slice(&header);
+        table.extend_from_slice(&block);
+        table.extend_from_slice(&crate::serialize_footer(&footer));
+        table
+    }
 
     #[test]
     fn parse_block_header_ref_type() {
@@ -351,6 +497,69 @@ mod tests {
         assert_eq!(decompressed[0], b'g');
         // Data matches original (after block_len was set)
         assert_eq!(&decompressed[4..4 + record_data.len()], record_data);
+    }
+
+    #[test]
+    fn read_table_ref_records_reads_complete_table() {
+        let records = vec![
+            RefRecord {
+                name: bstr::BString::from("HEAD"),
+                update_index: 2,
+                value: crate::RefRecordValue::Symref {
+                    target: bstr::BString::from("refs/heads/main"),
+                },
+            },
+            val1("refs/heads/main", 0xaa, 2),
+        ];
+        let table = table_with_records(&records, 2, 2);
+
+        let actual = read_table_ref_records(&table).expect("table should read");
+        assert_eq!(actual, records);
+    }
+
+    #[test]
+    fn stack_ref_records_applies_newer_tables_and_deletions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let reftable_dir = dir.path().join("reftable");
+        std::fs::create_dir(&reftable_dir).expect("reftable dir");
+
+        let first = table_with_records(
+            &[val1("refs/heads/main", 0xaa, 1), val1("refs/heads/old", 0xbb, 1)],
+            1,
+            1,
+        );
+        let second = table_with_records(&[val1("refs/heads/main", 0xcc, 2), deletion("refs/heads/old", 2)], 2, 2);
+        std::fs::write(reftable_dir.join("0x000000000001-0x000000000001-00000001.ref"), first).expect("first table");
+        std::fs::write(reftable_dir.join("0x000000000002-0x000000000002-00000002.ref"), second).expect("second table");
+        std::fs::write(
+            reftable_dir.join("tables.list"),
+            "0x000000000001-0x000000000001-00000001.ref\n0x000000000002-0x000000000002-00000002.ref\n",
+        )
+        .expect("tables.list");
+
+        let stack = Stack::open(&reftable_dir).expect("stack should open");
+        let refs = stack.ref_records().expect("refs should read");
+        assert_eq!(refs.len(), 1, "newer deletion should hide old ref: {refs:?}");
+        assert_eq!(refs[0].name(), b"refs/heads/main");
+        match &refs[0].value {
+            crate::RefRecordValue::Val1 { target } => assert_eq!(*target, oid(0xcc)),
+            other => panic!("expected Val1, got {other:?}"),
+        }
+
+        assert!(
+            stack
+                .find_ref(b"refs/heads/old")
+                .expect("lookup should succeed")
+                .is_none(),
+            "deleted ref should not be visible"
+        );
+        assert!(
+            stack
+                .find_ref(b"refs/heads/main")
+                .expect("lookup should succeed")
+                .is_some(),
+            "updated ref should be visible"
+        );
     }
 
     #[test]

@@ -76,92 +76,20 @@ fn read_c_git_produced_reftable() {
     let stack = gix_reftable::block::Stack::open(&reftable_dir).expect("should open stack");
     assert!(!stack.tables.is_empty(), "should have at least one table");
 
-    // Read all ref records from all tables
+    // Read visible ref records from the stack.
+    let records = stack.ref_records().expect("should read stack refs");
     let mut all_refs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-
-    for table_name in &stack.tables {
-        let table_path = stack.table_path(table_name);
-        let data = std::fs::read(&table_path).expect("should read table file");
-
-        // Parse header
-        let header = gix_reftable::parse_header(&data).expect("should parse header");
-        assert_eq!(header.version, gix_reftable::Version::V1, "should be version 1");
-
-        // Parse footer
-        let footer_size = gix_reftable::footer_size(header.version);
-        let footer_data = &data[data.len() - footer_size..];
-        let footer = gix_reftable::parse_footer(footer_data).expect("should parse footer");
-
-        let hash_size = 20; // SHA-1
-
-        // Read ref blocks
-        // The first block starts right after the file header
-        let file_header_size = gix_reftable::header_size(header.version);
-        let mut block_start = file_header_size;
-        let mut is_first_block = true;
-
-        // Read blocks until we hit the footer or a non-ref block
-        while block_start + 4 < data.len() - footer_size {
-            let block_data = &data[block_start..];
-            if block_data.is_empty() || block_data[0] == 0 {
-                break;
+    for record in records {
+        let name = String::from_utf8(record.name().to_vec()).expect("valid utf8 ref name");
+        let oid_str = match &record.value {
+            gix_reftable::RefRecordValue::Val1 { target } => target.to_string(),
+            gix_reftable::RefRecordValue::Val2 { target, .. } => target.to_string(),
+            gix_reftable::RefRecordValue::Symref { target } => {
+                format!("symref:{target}")
             }
-
-            let (block_header, _) = match gix_reftable::block::parse_block_header(block_data) {
-                Ok(h) => h,
-                Err(_) => break,
-            };
-
-            if block_header.block_type != gix_reftable::BlockType::Ref {
-                break;
-            }
-
-            let block_end = if header.block_size > 0 {
-                std::cmp::min(block_start + header.block_size as usize, data.len() - footer_size)
-            } else {
-                // Unaligned: compute from block_len (file-level offset for first block)
-                let content_end = if is_first_block {
-                    block_header.block_len as usize - file_header_size + block_start
-                } else {
-                    block_start + block_header.block_len as usize
-                };
-                std::cmp::min(content_end, data.len() - footer_size)
-            };
-
-            // C Git uses header_off = file_header_size for the first block, 0 for subsequent
-            let c_git_header_off = if is_first_block { file_header_size } else { 0 };
-
-            let block_slice = &data[block_start..block_end];
-            let records = gix_reftable::block::read_ref_records_at(
-                block_slice,
-                hash_size,
-                footer.header.min_update_index,
-                c_git_header_off,
-            )
-            .expect("should read ref records");
-
-            for record in records {
-                let name = String::from_utf8(record.name().to_vec()).expect("valid utf8 ref name");
-                let oid_str = match &record.value {
-                    gix_reftable::RefRecordValue::Val1 { target } => target.to_string(),
-                    gix_reftable::RefRecordValue::Val2 { target, .. } => target.to_string(),
-                    gix_reftable::RefRecordValue::Symref { target } => {
-                        format!("symref:{target}")
-                    }
-                    gix_reftable::RefRecordValue::Deletion => "deletion".to_string(),
-                };
-                all_refs.insert(name, oid_str);
-            }
-
-            is_first_block = false;
-
-            // For aligned blocks, the next block starts at the next block_size boundary.
-            if header.block_size > 0 {
-                block_start += header.block_size as usize;
-            } else {
-                block_start = block_header.block_len as usize;
-            }
-        }
+            gix_reftable::RefRecordValue::Deletion => "deletion".to_string(),
+        };
+        all_refs.insert(name, oid_str);
     }
 
     // Verify the refs we expect
@@ -373,80 +301,14 @@ fn reftable_roundtrip_through_c_git() {
     let reftable_dir = repo_path.join(".git").join("reftable");
     let stack = gix_reftable::block::Stack::open(&reftable_dir).expect("should open stack");
 
-    let mut found_roundtrip_branch = false;
-    for table_name in &stack.tables {
-        let table_path = stack.table_path(table_name);
-        let data = std::fs::read(&table_path).expect("should read table");
-        let header = gix_reftable::parse_header(&data).expect("should parse header");
-        let footer_size = gix_reftable::footer_size(header.version);
-        let footer_data = &data[data.len() - footer_size..];
-        let footer = gix_reftable::parse_footer(footer_data).expect("should parse footer");
-
-        let file_header_size = gix_reftable::header_size(header.version);
-        let hash_size = 20;
-        let mut block_start = file_header_size;
-        let mut is_first_block = true;
-
-        while block_start + 4 < data.len() - footer_size {
-            let block_data = &data[block_start..];
-            if block_data.is_empty() || block_data[0] == 0 {
-                break;
-            }
-
-            let (block_header, _) = match gix_reftable::block::parse_block_header(block_data) {
-                Ok(h) => h,
-                Err(_) => break,
-            };
-
-            if block_header.block_type != gix_reftable::BlockType::Ref {
-                break;
-            }
-
-            let block_end = if header.block_size > 0 {
-                std::cmp::min(block_start + header.block_size as usize, data.len() - footer_size)
-            } else {
-                let content_end = if is_first_block {
-                    block_header.block_len as usize - file_header_size + block_start
-                } else {
-                    block_start + block_header.block_len as usize
-                };
-                std::cmp::min(content_end, data.len() - footer_size)
-            };
-
-            let c_git_header_off = if is_first_block { file_header_size } else { 0 };
-            let block_slice = &data[block_start..block_end];
-            let records = gix_reftable::block::read_ref_records_at(
-                block_slice,
-                hash_size,
-                footer.header.min_update_index,
-                c_git_header_off,
-            )
-            .expect("should read ref records");
-
-            for record in &records {
-                if record.name() == b"refs/heads/roundtrip-branch" {
-                    found_roundtrip_branch = true;
-                    match &record.value {
-                        gix_reftable::RefRecordValue::Val1 { target } => {
-                            assert_eq!(target.to_string(), commit_oid_str, "roundtrip branch oid should match");
-                        }
-                        other => panic!("expected Val1 for branch, got: {other:?}"),
-                    }
-                }
-            }
-
-            is_first_block = false;
-
-            if header.block_size > 0 {
-                block_start += header.block_size as usize;
-            } else {
-                block_start = block_header.block_len as usize;
-            }
+    let record = stack
+        .find_ref(b"refs/heads/roundtrip-branch")
+        .expect("lookup should read stack")
+        .expect("should find refs/heads/roundtrip-branch in gitoxide-read reftable");
+    match &record.value {
+        gix_reftable::RefRecordValue::Val1 { target } => {
+            assert_eq!(target.to_string(), commit_oid_str, "roundtrip branch oid should match");
         }
+        other => panic!("expected Val1 for branch, got: {other:?}"),
     }
-
-    assert!(
-        found_roundtrip_branch,
-        "should find refs/heads/roundtrip-branch in gitoxide-read reftable"
-    );
 }
