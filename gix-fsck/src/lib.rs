@@ -214,6 +214,18 @@ where
         self.check_referenced_object(&target, target_kind, options)
     }
 
+    /// Return all objects from `object_ids` that were not reached by previous connectivity checks.
+    ///
+    /// The input should be the object ids known to exist in the object database. Missing objects reported while
+    /// traversing are remembered as seen, but they won't affect this result unless the caller includes them here.
+    pub fn unreachable<'a>(&self, object_ids: impl IntoIterator<Item = &'a ObjectId>) -> Vec<ObjectId> {
+        object_ids
+            .into_iter()
+            .filter(|oid| !self.seen.contains(*oid))
+            .copied()
+            .collect()
+    }
+
     fn check_referenced_object(&mut self, oid: &ObjectId, kind: Kind, options: Options<'_>) -> Result<(), Error> {
         match kind {
             Kind::Blob => {
