@@ -64,9 +64,16 @@ impl MemoryDb {
     }
 
     fn tree_data(mode: &str, filename: &str, oid: ObjectId) -> Vec<u8> {
-        let mut data = format!("{mode} {filename}").into_bytes();
-        data.push(0);
-        data.extend_from_slice(oid.as_bytes());
+        Self::tree_entries(&[(mode, filename, oid)])
+    }
+
+    fn tree_entries(entries: &[(&str, &str, ObjectId)]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for (mode, filename, oid) in entries {
+            data.extend_from_slice(format!("{mode} {filename}").as_bytes());
+            data.push(0);
+            data.extend_from_slice(oid.as_bytes());
+        }
         data
     }
 }
@@ -430,6 +437,66 @@ fn strict_mode_rejects_group_writable_tree_entries() {
             mode,
             ..
         } if actual_tree_id == tree_id && mode.value() == 0o100664
+    ));
+}
+
+#[test]
+fn tree_order_validation_rejects_unsorted_tree_entries() {
+    let mut db = MemoryDb::default();
+    let first_blob_id = db.insert(Kind::Blob, b"first".to_vec());
+    let second_blob_id = db.insert(Kind::Blob, b"second".to_vec());
+    let tree_id = db.insert(
+        Kind::Tree,
+        MemoryDb::tree_entries(&[("100644", "z", first_blob_id), ("100644", "a", second_blob_id)]),
+    );
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    let err = check
+        .check_index_tree_cache_with_options(
+            [tree_id],
+            Options {
+                validate_tree_order: true,
+                ..Options::default()
+            },
+        )
+        .expect_err("tree order validation rejects unsorted entries");
+
+    assert!(matches!(
+        err,
+        Error::TreeNotSorted {
+            tree_id: actual_tree_id,
+            ..
+        } if actual_tree_id == tree_id
+    ));
+}
+
+#[test]
+fn tree_order_validation_rejects_duplicate_tree_entries() {
+    let mut db = MemoryDb::default();
+    let first_blob_id = db.insert(Kind::Blob, b"first".to_vec());
+    let second_blob_id = db.insert(Kind::Blob, b"second".to_vec());
+    let tree_id = db.insert(
+        Kind::Tree,
+        MemoryDb::tree_entries(&[("100644", "dup", first_blob_id), ("100644", "dup", second_blob_id)]),
+    );
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    let err = check
+        .check_index_tree_cache_with_options(
+            [tree_id],
+            Options {
+                validate_tree_order: true,
+                ..Options::default()
+            },
+        )
+        .expect_err("tree order validation rejects duplicate entries");
+
+    assert!(matches!(
+        err,
+        Error::DuplicateTreeEntry {
+            tree_id: actual_tree_id,
+            ..
+        } if actual_tree_id == tree_id
     ));
 }
 
