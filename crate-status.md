@@ -912,7 +912,7 @@ The git staging area.
     * [ ] Bloom filter data
 * [ ] create and update graphs and graph files
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-tempfile
 

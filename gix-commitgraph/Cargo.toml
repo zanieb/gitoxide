@@ -9,11 +9,15 @@ license = "MIT OR Apache-2.0"
 description = "Read-only access to the git commitgraph file format"
 authors = ["Conor Davis <gitoxide@conor.fastmail.fm>", "Sebastian Thiel <sebastian.thiel@icloud.com>"]
 edition = "2024"
-include = ["/src/**/*", "/LICENSE-*"]
+include = ["/src/**/*", "/examples/**/*", "/LICENSE-*"]
 rust-version = "1.85"
 
 [lib]
 doctest = false
+
+[[example]]
+name = "summary"
+required-features = ["sha1"]
 
 [features]
 ## Enable support for the SHA-1 hash by enabling the respective feature in the `gix-hash` crate.
