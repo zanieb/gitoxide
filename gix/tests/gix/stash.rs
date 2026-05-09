@@ -198,8 +198,9 @@ mod stash {
     }
 
     #[test]
-    fn stash_apply_restores_index_state() -> crate::Result {
-        let (repo, _tmp) = repo_rw_stash()?;
+    fn stash_apply_restores_worktree_without_changing_index() -> crate::Result {
+        let (repo, tmp) = repo_rw_stash()?;
+        let workdir = tmp.path().to_owned();
         let head_id = repo.head_id()?.detach();
 
         // Save stash (captures staged "modified" in file.txt, then resets to HEAD).
@@ -220,7 +221,8 @@ mod stash {
         // Apply the stash.
         repo.stash_apply(0)?;
 
-        // After apply, the index should have the stashed version (different from HEAD).
+        // After default apply, the worktree has the stashed version but the index
+        // remains in its pre-apply state, matching C Git without --index.
         let index_after = repo.open_index()?;
         let entry_after = index_after
             .entries()
@@ -230,14 +232,137 @@ mod stash {
                 p == b"file.txt"
             })
             .expect("file.txt in index after apply");
-        assert_ne!(
+        assert_eq!(
             entry_after.id, head_file_oid,
-            "after apply, index should differ from HEAD"
+            "default apply should leave the index matching HEAD"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("file.txt"))?,
+            "modified\n",
+            "default apply should restore the stashed worktree content"
         );
 
         // The stash should still exist (apply does not remove it).
         let entries = repo.stash_list()?;
         assert_eq!(entries.len(), 1, "stash entry should still exist after apply");
+
+        Ok(())
+    }
+
+    #[test]
+    fn stash_apply_opts_reinstates_stashed_index_state() -> crate::Result {
+        use gix::repository::stash::StashApplyOptions;
+
+        let (repo, _tmp) = repo_rw_stash()?;
+        let head_id = repo.head_id()?.detach();
+
+        let head_commit = repo.find_object(head_id)?.try_into_commit().expect("commit");
+        let head_tree_id = head_commit.tree_id().expect("has tree");
+        let head_tree = repo.find_object(head_tree_id)?.try_into_tree().expect("tree");
+        let head_tree_decoded = head_tree.decode().expect("decoded");
+        let head_file_oid = head_tree_decoded
+            .entries
+            .iter()
+            .find(|e| e.filename == "file.txt".as_bytes())
+            .expect("file.txt in tree")
+            .oid;
+
+        repo.stash_save(None)?;
+        repo.stash_apply_opts(0, StashApplyOptions { reinstate_index: true })?;
+
+        let index_after = repo.open_index()?;
+        let entry_after = index_after
+            .entries()
+            .iter()
+            .find(|e| {
+                let p: &[u8] = e.path(&index_after);
+                p == b"file.txt"
+            })
+            .expect("file.txt in index after apply --index");
+        assert_ne!(
+            entry_after.id, head_file_oid,
+            "apply --index should restore the stashed index entry"
+        );
+        let blob = repo.find_object(entry_after.id)?;
+        assert_eq!(blob.data, b"modified\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn stash_apply_opts_keeps_staged_and_unstaged_distinct() -> crate::Result {
+        use gix::repository::stash::StashApplyOptions;
+
+        let (repo, tmp) = repo_rw_stash()?;
+        let workdir = tmp.path().to_owned();
+
+        // The fixture has "modified" staged. Add a separate unstaged worktree version.
+        std::fs::write(workdir.join("file.txt"), "worktree version\n")?;
+
+        repo.stash_save(None)?;
+        repo.stash_apply_opts(0, StashApplyOptions { reinstate_index: true })?;
+
+        let index_after = repo.open_index()?;
+        let entry_after = index_after
+            .entries()
+            .iter()
+            .find(|e| {
+                let p: &[u8] = e.path(&index_after);
+                p == b"file.txt"
+            })
+            .expect("file.txt in index after apply --index");
+        let index_blob = repo.find_object(entry_after.id)?;
+        assert_eq!(index_blob.data, b"modified\n", "--index should restore staged content");
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("file.txt"))?,
+            "worktree version\n",
+            "worktree should restore the unstaged stash content"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn stash_apply_default_does_not_reinstate_staged_state() -> crate::Result {
+        let (repo, tmp) = repo_rw_stash()?;
+        let workdir = tmp.path().to_owned();
+        let head_id = repo.head_id()?.detach();
+
+        let head_commit = repo.find_object(head_id)?.try_into_commit().expect("commit");
+        let head_tree_id = head_commit.tree_id().expect("has tree");
+        let head_index = repo.index_from_tree(&head_tree_id)?;
+        let head_entry = head_index
+            .entries()
+            .iter()
+            .find(|e| {
+                let p: &[u8] = e.path(&head_index);
+                p == b"file.txt"
+            })
+            .expect("file.txt in HEAD");
+
+        std::fs::write(workdir.join("file.txt"), "worktree version\n")?;
+
+        repo.stash_save(None)?;
+        repo.stash_apply(0)?;
+
+        let index_after = repo.open_index()?;
+        let entry_after = index_after
+            .entries()
+            .iter()
+            .find(|e| {
+                let p: &[u8] = e.path(&index_after);
+                p == b"file.txt"
+            })
+            .expect("file.txt in index after apply");
+        assert_eq!(
+            entry_after.id, head_entry.id,
+            "default apply should not reinstate the staged stash parent"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("file.txt"))?,
+            "worktree version\n",
+            "default apply should restore the unstaged worktree content"
+        );
 
         Ok(())
     }
@@ -753,25 +878,14 @@ mod stash {
         // Now apply the stash. The stash was made against the OLD HEAD.
         repo.stash_apply(0)?;
 
-        // After apply, file.txt should have the stashed content in the index.
-        let index_after = repo.open_index()?;
-        let entry = index_after
-            .entries()
-            .iter()
-            .find(|e| {
-                let p: &[u8] = e.path(&index_after);
-                p == b"file.txt"
-            })
-            .expect("file.txt in index after apply");
-
-        // The stash had "modified" content; HEAD had "hello".
-        // The stash tree contains "modified", the parent tree contains "hello",
-        // so apply should set file.txt to "modified".
-        let blob = repo.find_object(entry.id)?;
+        // After default apply, file.txt should have the stashed content in the
+        // worktree while the index remains at the moved HEAD state.
         assert_eq!(
-            blob.data, b"modified\n",
-            "after apply on moved HEAD, stashed changes should be restored"
+            std::fs::read_to_string(workdir.join("file.txt"))?,
+            "modified\n",
+            "after apply on moved HEAD, stashed worktree changes should be restored"
         );
+        let index_after = repo.open_index()?;
 
         // other.txt (from the new commit) should still be in the index.
         let other_entry = index_after.entries().iter().find(|e| {
@@ -850,15 +964,17 @@ mod stash {
         // Apply the stash to restore.
         repo.stash_apply(0)?;
 
-        // After apply, newfile.txt should be back in the index.
+        // Default apply restores newfile.txt to the worktree as an untracked file,
+        // but leaves the index at its pre-apply state.
+        assert_eq!(std::fs::read_to_string(workdir.join("newfile.txt"))?, "new content\n");
         let index_restored = repo.open_index()?;
         let restored_entry = index_restored.entries().iter().find(|e| {
             let p: &[u8] = e.path(&index_restored);
             p == b"newfile.txt"
         });
         assert!(
-            restored_entry.is_some(),
-            "after apply, newly added file should be restored in the index"
+            restored_entry.is_none(),
+            "default apply should not add the newly added file back to the index"
         );
 
         Ok(())
@@ -1135,7 +1251,13 @@ mod stash {
         // Apply via gix.
         repo.stash_apply(0)?;
 
-        // Verify the stashed content was restored.
+        // Verify the stashed content was restored to the worktree. Default apply
+        // leaves the index unchanged, matching C Git without --index.
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("first"))?,
+            "c-git-stash-content\n",
+            "gix apply should restore C Git stash content to the worktree"
+        );
         let index_after = repo.open_index()?;
         let entry = index_after
             .entries()
@@ -1147,8 +1269,8 @@ mod stash {
             .expect("first in index after apply");
         let blob = repo.find_object(entry.id)?;
         assert_eq!(
-            blob.data, b"c-git-stash-content\n",
-            "gix apply should restore C Git stash content"
+            blob.data, b"modified first\n",
+            "default apply should leave the index at HEAD"
         );
 
         Ok(())
@@ -1369,21 +1491,18 @@ mod stash {
             "binary.bin should be removed from index after stash (reset to HEAD)"
         );
 
-        // Apply and verify binary content is restored.
+        // Apply and verify binary content is restored to the worktree while the
+        // index remains unchanged by default.
         repo.stash_apply(0)?;
+        assert_eq!(std::fs::read(workdir.join("binary.bin"))?, binary_content);
         let index_restored = repo.open_index()?;
-        let restored_entry = index_restored
-            .entries()
-            .iter()
-            .find(|e| {
-                let p: &[u8] = e.path(&index_restored);
-                p == b"binary.bin"
-            })
-            .expect("binary.bin should be restored after apply");
-        let restored_blob = repo.find_object(restored_entry.id)?;
-        assert_eq!(
-            restored_blob.data, binary_content,
-            "restored binary content should match original"
+        let restored_entry = index_restored.entries().iter().find(|e| {
+            let p: &[u8] = e.path(&index_restored);
+            p == b"binary.bin"
+        });
+        assert!(
+            restored_entry.is_none(),
+            "default apply should not restore newly added binary file to the index"
         );
 
         Ok(())
@@ -1407,18 +1526,12 @@ mod stash {
         // Apply should succeed because file.txt is clean (matches HEAD).
         repo.stash_apply(0)?;
 
-        // Verify the stash was applied.
-        let index_after = repo.open_index()?;
-        let entry = index_after
-            .entries()
-            .iter()
-            .find(|e| {
-                let p: &[u8] = e.path(&index_after);
-                p == b"file.txt"
-            })
-            .expect("file.txt in index");
-        let blob = repo.find_object(entry.id)?;
-        assert_eq!(blob.data, b"modified\n", "stashed content should be applied");
+        // Verify the stash was applied to the worktree.
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("file.txt"))?,
+            "modified\n",
+            "stashed content should be applied to the worktree"
+        );
 
         // The unrelated worktree file should still be there.
         assert!(
