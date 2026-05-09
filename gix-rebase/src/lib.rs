@@ -119,6 +119,13 @@ pub enum StepError {
         name: String,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("could not record ref update: {reference}")]
+    UpdateRef {
+        reference: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("could not finish rebase")]
+    Finish(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// An error originating from the [`Driver::cherry_pick()`] callback.
@@ -244,6 +251,20 @@ pub trait Driver {
             String::from_utf8_lossy(name)
         )
         .into())
+    }
+
+    /// Record that `reference` should be updated to the current `HEAD` when the rebase finishes.
+    fn update_ref(&self, reference: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err(format!(
+            "update-ref operation is not supported by this driver: {}",
+            String::from_utf8_lossy(reference)
+        )
+        .into())
+    }
+
+    /// Finish the rebase, applying any pending end-of-rebase actions.
+    fn finish(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
     }
 }
 
@@ -390,10 +411,9 @@ impl MergeState {
     /// Returns [`StepError::Exec`] if an `exec` command fails.
     /// Returns [`StepError::Label`] or [`StepError::Reset`] if a rebase-merges
     /// label/reset operation fails.
-    /// Also returns `StepError::ResolvePrefix` for unsupported `update-ref`
-    /// operations rather than silently skipping them.
     pub fn step(&mut self, driver: &dyn Driver, rebase_merge_dir: &Path) -> Result<StepOutcome, StepError> {
         if self.todo.operations.is_empty() {
+            driver.finish().map_err(StepError::Finish)?;
             return Ok(StepOutcome::Done);
         }
 
@@ -424,6 +444,10 @@ impl MergeState {
             }
         }
 
+        if self.todo.operations.is_empty() && !matches!(outcome, StepOutcome::Paused { .. }) {
+            driver.finish().map_err(StepError::Finish)?;
+        }
+
         self.write_to(rebase_merge_dir)?;
         Ok(outcome)
     }
@@ -437,6 +461,7 @@ impl MergeState {
         if self.stopped_sha.is_none() && !self.todo.operations.is_empty() {
             // Not stopped, but there are operations -- just step.
         } else if self.stopped_sha.is_none() && self.todo.operations.is_empty() {
+            driver.finish().map_err(StepError::Finish)?;
             return Ok(StepOutcome::Done);
         }
 
@@ -448,6 +473,7 @@ impl MergeState {
         }
 
         if self.todo.operations.is_empty() {
+            driver.finish().map_err(StepError::Finish)?;
             return Ok(StepOutcome::Done);
         }
 
@@ -624,13 +650,12 @@ impl MergeState {
                     })
                 }
             }
-            Operation::UpdateRef { .. } => {
-                // These operations are not yet supported by the rebase driver.
-                // Return an error rather than silently skipping, as skipping could
-                // corrupt repository state (e.g., missed Reset or Label operations).
-                Err(StepError::ResolvePrefix(
-                    format!("unsupported rebase operation: {op:?}").into(),
-                ))
+            Operation::UpdateRef { reference } => {
+                driver.update_ref(reference).map_err(|source| StepError::UpdateRef {
+                    reference: String::from_utf8_lossy(reference).into_owned(),
+                    source,
+                })?;
+                Ok(StepOutcome::Skipped)
             }
         }
     }
