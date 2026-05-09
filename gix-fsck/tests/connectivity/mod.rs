@@ -58,6 +58,11 @@ impl MemoryDb {
         format!("object {target}\ntype {target_kind}\ntag {name}\n\n{name}\n").into_bytes()
     }
 
+    fn commit_data(tree: ObjectId, message: &str) -> Vec<u8> {
+        format!("tree {tree}\nauthor A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\n{message}\n")
+            .into_bytes()
+    }
+
     fn tree_data(mode: &str, filename: &str, oid: ObjectId) -> Vec<u8> {
         let mut data = format!("{mode} {filename}").into_bytes();
         data.push(0);
@@ -168,6 +173,39 @@ fn tags_report_missing_targets() {
             .into_iter()
             .collect()
     );
+}
+
+#[test]
+fn object_roots_are_detected_by_kind_and_traversed() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"reachable".to_vec());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "file", blob_id));
+    let commit_id = db.insert(Kind::Commit, MemoryDb::commit_data(tree_id, "commit-root"));
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(commit_id, Kind::Commit, "commit-tag"));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    check.check_object(&tag_id).expect("tag root is present");
+
+    assert!(check.unreachable(db.objects.keys()).is_empty());
+}
+
+#[test]
+fn reflog_entries_are_connectivity_roots() {
+    let mut db = MemoryDb::default();
+    let first_blob_id = db.insert(Kind::Blob, b"first".to_vec());
+    let first_tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "first", first_blob_id));
+    let first_commit_id = db.insert(Kind::Commit, MemoryDb::commit_data(first_tree_id, "first"));
+    let second_blob_id = db.insert(Kind::Blob, b"second".to_vec());
+    let second_tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "second", second_blob_id));
+    let second_commit_id = db.insert(Kind::Commit, MemoryDb::commit_data(second_tree_id, "second"));
+    let null = ObjectId::null(gix_hash::Kind::Sha1);
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    check
+        .check_reflog_entries([(null, first_commit_id), (second_commit_id, null)])
+        .expect("reflog roots are present");
+
+    assert!(check.unreachable(db.objects.keys()).is_empty());
 }
 
 #[test]
