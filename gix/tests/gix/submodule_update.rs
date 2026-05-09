@@ -240,6 +240,73 @@ mod update {
         Ok(())
     }
 
+    fn assert_branch_strategy_fast_forwards_current_branch(
+        fixture: &str,
+        expected_strategy: gix::submodule::config::Update,
+    ) -> crate::Result {
+        let (repo, _tmp) = repo_rw(fixture)?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+
+        let index_id = sm.index_id()?.expect("submodule in index");
+        let sm_repo = sm.open()?.expect("submodule repo exists");
+        assert_eq!(
+            sm_repo.head_name()?.expect("symbolic head").as_bstr(),
+            "refs/heads/local"
+        );
+        assert_ne!(
+            sm_repo.head_id()?.detach(),
+            index_id,
+            "fixture starts with local branch behind the superproject"
+        );
+
+        let outcome = sm.update_submodule(
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+            &Default::default(),
+        )?;
+
+        let outcome = outcome.expect("update should succeed");
+        assert_eq!(outcome.strategy, expected_strategy);
+        assert_eq!(outcome.target_commit, index_id);
+        assert!(!outcome.freshly_cloned, "fixture is already cloned");
+        assert!(
+            outcome.checkout.is_some(),
+            "fast-forward strategy should update the worktree"
+        );
+
+        let sm_repo = sm.open()?.expect("submodule repo exists after update");
+        assert_eq!(
+            sm_repo.head_name()?.expect("symbolic head").as_bstr(),
+            "refs/heads/local",
+            "merge/rebase update should preserve the current submodule branch"
+        );
+        assert_eq!(
+            sm_repo.head_id()?.detach(),
+            index_id,
+            "local branch should fast-forward to the superproject commit"
+        );
+        Ok(())
+    }
+
+    /// `update=merge` should keep the current submodule branch and fast-forward it
+    /// when the recorded superproject commit is a descendant of HEAD.
+    #[test]
+    fn update_with_strategy_merge_fast_forwards_current_branch() -> crate::Result {
+        assert_branch_strategy_fast_forwards_current_branch("update-merge-ff", gix::submodule::config::Update::Merge)
+    }
+
+    /// `update=rebase` has the same fast-forward result when there are no local
+    /// commits to replay.
+    #[test]
+    fn update_with_strategy_rebase_fast_forwards_current_branch() -> crate::Result {
+        assert_branch_strategy_fast_forwards_current_branch("update-rebase-ff", gix::submodule::config::Update::Rebase)
+    }
+
     /// Ported from libgit2 test_submodule_update__uninitialized_submodule_no_init:
     /// Updating an uninitialized submodule without init=true should be skipped.
     /// Git skips uninitialized submodules silently; we return Ok(None).

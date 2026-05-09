@@ -14,7 +14,7 @@ impl Submodule<'_> {
     ///
     /// 1. Optionally initialize the submodule (if `options.init` is set)
     /// 2. Clone the submodule repository if it doesn't exist, or fetch if the target commit is missing
-    /// 3. Apply the configured update strategy (currently only `checkout` is supported)
+    /// 3. Apply the configured update strategy
     /// 4. Optionally recurse into nested submodules
     ///
     /// Returns `Ok(None)` if the submodule has no commit recorded in the superproject index,
@@ -26,7 +26,8 @@ impl Submodule<'_> {
     /// - **Just-cloned submodules always use checkout**, even if configured for rebase/merge/none.
     ///   This matches git's `determine_submodule_update_strategy()`.
     /// - The update strategy `none` causes this method to silently skip the submodule.
-    /// - The `!command` strategy is not supported and returns an error.
+    /// - The `merge` and `rebase` strategies support already-up-to-date and fast-forward updates.
+    /// - The `!command` strategy requires running an external command and returns an error.
     pub fn update_submodule<P>(
         &self,
         mut progress: P,
@@ -233,31 +234,35 @@ impl Submodule<'_> {
             gix_submodule::config::Update::Command(cmd) => {
                 return Err(super::update::Error::CommandUnsupported { command: cmd.clone() });
             }
-            gix_submodule::config::Update::Rebase => {
-                return Err(super::update::Error::RebaseUnsupported);
-            }
-            gix_submodule::config::Update::Merge => {
-                return Err(super::update::Error::MergeUnsupported);
-            }
+            gix_submodule::config::Update::Rebase | gix_submodule::config::Update::Merge => {}
             gix_submodule::config::Update::Checkout => {}
         }
 
-        // Step 5b: Skip checkout if HEAD already matches target commit.
-        if !freshly_cloned {
-            if let Ok(head_id) = sm_repo.head_id() {
-                if head_id.detach() == target_commit {
-                    return Ok(Some(super::update::Outcome {
-                        strategy: effective_strategy,
-                        target_commit,
-                        freshly_cloned: false,
-                        checkout: None,
-                    }));
+        // Step 6: Apply the effective strategy.
+        let checkout_outcome = match &effective_strategy {
+            gix_submodule::config::Update::Checkout => {
+                // Skip checkout if HEAD already matches the target commit.
+                if !freshly_cloned {
+                    if let Ok(head_id) = sm_repo.head_id() {
+                        if head_id.detach() == target_commit {
+                            return Ok(Some(super::update::Outcome {
+                                strategy: effective_strategy,
+                                target_commit,
+                                freshly_cloned: false,
+                                checkout: None,
+                            }));
+                        }
+                    }
                 }
+                Some(checkout_to_commit(&sm_repo, target_commit, should_interrupt)?)
             }
-        }
-
-        // Step 6: Apply the checkout strategy — detach HEAD to target commit and checkout tree.
-        let checkout_outcome = checkout_to_commit(&sm_repo, target_commit, should_interrupt)?;
+            gix_submodule::config::Update::Rebase | gix_submodule::config::Update::Merge => {
+                update_current_branch_strategy(&sm_repo, target_commit, effective_strategy.clone(), should_interrupt)?
+            }
+            gix_submodule::config::Update::None | gix_submodule::config::Update::Command(_) => {
+                unreachable!("none and command strategies are handled before applying the update")
+            }
+        };
 
         // Step 7: Recursive update
         if options.recursive {
@@ -284,8 +289,72 @@ impl Submodule<'_> {
             strategy: effective_strategy,
             target_commit,
             freshly_cloned,
-            checkout: Some(checkout_outcome),
+            checkout: checkout_outcome,
         }))
+    }
+}
+
+#[cfg(feature = "revision")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ancestry {
+    Same,
+    HeadContainsTarget,
+    TargetContainsHead,
+    Diverged,
+}
+
+#[cfg(feature = "revision")]
+fn ancestry(
+    repo: &Repository,
+    head: gix_hash::ObjectId,
+    target: gix_hash::ObjectId,
+) -> Result<Ancestry, super::update::Error> {
+    if head == target {
+        return Ok(Ancestry::Same);
+    }
+
+    let base = repo.merge_base(head, target)?.detach();
+    Ok(if base == target {
+        Ancestry::HeadContainsTarget
+    } else if base == head {
+        Ancestry::TargetContainsHead
+    } else {
+        Ancestry::Diverged
+    })
+}
+
+fn update_current_branch_strategy(
+    repo: &Repository,
+    target_commit: gix_hash::ObjectId,
+    strategy: gix_submodule::config::Update,
+    should_interrupt: &AtomicBool,
+) -> Result<Option<gix_worktree_state::checkout::Outcome>, super::update::Error> {
+    #[cfg(not(feature = "revision"))]
+    {
+        let _ = (repo, target_commit, should_interrupt);
+        return Err(super::update::Error::StrategyNeedsRevisionFeature { strategy });
+    }
+
+    #[cfg(feature = "revision")]
+    {
+        let head = repo.head_id()?.detach();
+        match ancestry(repo, head, target_commit)? {
+            Ancestry::Same | Ancestry::HeadContainsTarget => Ok(None),
+            Ancestry::TargetContainsHead => {
+                set_head_to_commit(
+                    repo,
+                    target_commit,
+                    &format!("submodule update: {strategy:?} {target_commit}"),
+                    false,
+                )?;
+                checkout_commit_tree(repo, target_commit, should_interrupt).map(Some)
+            }
+            Ancestry::Diverged => Err(super::update::Error::StrategyNeedsNonFastForward {
+                strategy,
+                head,
+                target: target_commit,
+            }),
+        }
     }
 }
 
@@ -299,6 +368,22 @@ fn checkout_to_commit(
     should_interrupt: &AtomicBool,
 ) -> Result<gix_worktree_state::checkout::Outcome, super::update::Error> {
     // Set HEAD to the target commit (detached).
+    set_head_to_commit(
+        repo,
+        commit_id,
+        &format!("submodule update: checkout {commit_id}"),
+        true,
+    )?;
+
+    checkout_commit_tree(repo, commit_id, should_interrupt)
+}
+
+fn set_head_to_commit(
+    repo: &Repository,
+    commit_id: gix_hash::ObjectId,
+    reflog_message: &str,
+    detach: bool,
+) -> Result<(), super::update::Error> {
     use gix_ref::transaction::{Change, LogChange, RefEdit};
     // Get committer, falling back to a generic identity if not configured.
     let fallback_time_str = {
@@ -311,23 +396,41 @@ fn checkout_to_commit(
         time: &fallback_time_str,
     };
     let committer = repo.committer().and_then(std::result::Result::ok).unwrap_or(fallback);
+
+    let ref_name = if detach {
+        "HEAD".try_into().expect("valid ref name")
+    } else {
+        match repo.head()?.kind {
+            crate::head::Kind::Symbolic(reference) => reference.name,
+            crate::head::Kind::Unborn(name) => name,
+            crate::head::Kind::Detached { .. } => "HEAD".try_into().expect("valid ref name"),
+        }
+    };
+
     repo.edit_references_as(
         Some(RefEdit {
             change: Change::Update {
                 log: LogChange {
                     mode: gix_ref::transaction::RefLog::AndReference,
                     force_create_reflog: false,
-                    message: format!("submodule update: checkout {commit_id}").into(),
+                    message: reflog_message.into(),
                 },
                 expected: gix_ref::transaction::PreviousValue::Any,
                 new: gix_ref::Target::Object(commit_id),
             },
-            name: "HEAD".try_into().expect("valid ref name"),
+            name: ref_name,
             deref: false,
         }),
         Some(committer),
     )?;
+    Ok(())
+}
 
+fn checkout_commit_tree(
+    repo: &Repository,
+    commit_id: gix_hash::ObjectId,
+    should_interrupt: &AtomicBool,
+) -> Result<gix_worktree_state::checkout::Outcome, super::update::Error> {
     let workdir = repo.workdir().ok_or(super::update::Error::MissingWorkdir)?;
 
     // Read the old index from disk (if it exists) so we can detect removed files.

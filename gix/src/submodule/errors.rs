@@ -209,15 +209,36 @@ pub mod update {
         FindRemote(#[from] crate::remote::find::existing::Error),
         #[error(transparent)]
         HeadSet(#[from] crate::reference::edit::Error),
+        #[error(transparent)]
+        FindHead(#[from] crate::reference::find::existing::Error),
+        #[error(transparent)]
+        HeadId(#[from] crate::reference::head_id::Error),
+        #[cfg(feature = "revision")]
+        #[error(transparent)]
+        MergeBase(#[from] crate::repository::merge_base::Error),
         #[error("The submodule update strategy is '{command}' which requires running an external command, but this is not yet supported")]
         CommandUnsupported {
             /// The command that was configured.
             command: crate::bstr::BString,
         },
-        #[error("The submodule update strategy 'rebase' is not yet supported")]
-        RebaseUnsupported,
-        #[error("The submodule update strategy 'merge' is not yet supported")]
-        MergeUnsupported,
+        #[error(
+            "The submodule update strategy '{strategy:?}' requires the 'revision' feature to compare commit ancestry"
+        )]
+        StrategyNeedsRevisionFeature {
+            /// The update strategy that requires ancestry checks.
+            strategy: gix_submodule::config::Update,
+        },
+        #[error(
+            "The submodule update strategy '{strategy:?}' requires a non-fast-forward update from {head} to {target}"
+        )]
+        StrategyNeedsNonFastForward {
+            /// The update strategy that cannot be completed as a fast-forward.
+            strategy: gix_submodule::config::Update,
+            /// The current submodule HEAD.
+            head: gix_hash::ObjectId,
+            /// The commit recorded in the superproject.
+            target: gix_hash::ObjectId,
+        },
         #[error("Failed to create index from tree for submodule checkout")]
         IndexFromTree {
             /// The tree id that failed.
