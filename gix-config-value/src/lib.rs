@@ -35,4 +35,4 @@ pub mod integer;
 pub mod path;
 
 mod types;
-pub use types::{Boolean, Color, Integer, Path};
+pub use types::{Boolean, Color, Date, Integer, Path};

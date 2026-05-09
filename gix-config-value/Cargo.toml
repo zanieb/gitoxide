@@ -16,7 +16,7 @@ doctest = true
 
 [features]
 ## Data structures implement `serde::Serialize` and `serde::Deserialize`.
-serde = ["dep:serde", "bstr/serde"]
+serde = ["dep:serde", "bstr/serde", "gix-date/serde"]
 
 [dependencies]
 gix-path = { version = "^0.14.1", path = "../gix-path" }
