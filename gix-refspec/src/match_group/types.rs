@@ -44,6 +44,25 @@ pub mod match_rhs {
     }
 }
 
+///
+pub mod match_push {
+    use crate::{
+        match_group::{PushDeletion, PushUpdate},
+        MatchGroup,
+    };
+
+    /// The outcome of matching push refspecs against local and remote references.
+    #[derive(Debug, Clone)]
+    pub struct Outcome<'spec> {
+        /// The match group that produced this outcome.
+        pub group: MatchGroup<'spec>,
+        /// Updates to send to the remote.
+        pub updates: Vec<PushUpdate>,
+        /// Deletions to send to the remote.
+        pub deletions: Vec<PushDeletion>,
+    }
+}
+
 /// An item to match, input to various matching operations.
 #[derive(Debug, Copy, Clone)]
 pub struct Item<'a> {
@@ -90,6 +109,34 @@ impl std::fmt::Display for SourceRef<'_> {
 
 /// The source (or left-hand) side of a mapping, which owns its name.
 pub type Source = SourceRef<'static>;
+
+/// A matched push update from a local source to a remote destination.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PushUpdate {
+    /// The index into the local items list that matched against a spec, or `None` if the source is an object id.
+    pub local_item_index: Option<usize>,
+    /// The index into the remote items list with the same destination, if the remote advertised it.
+    pub remote_item_index: Option<usize>,
+    /// The local source to push.
+    pub src: Source,
+    /// The remote destination to update.
+    pub dst: bstr::BString,
+    /// The index of the matched ref-spec as seen from the match group.
+    pub spec_index: usize,
+    /// If true, allow non-fast-forward updates of `dst`.
+    pub allow_non_fast_forward: bool,
+}
+
+/// A matched push deletion for a remote destination.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PushDeletion {
+    /// The index into the remote items list that matched against a spec, if the remote advertised it.
+    pub remote_item_index: Option<usize>,
+    /// The remote destination to delete.
+    pub dst: bstr::BString,
+    /// The index of the matched ref-spec as seen from the match group.
+    pub spec_index: usize,
+}
 
 /// A mapping from a remote to a local refs for fetches or local to remote refs for pushes.
 ///

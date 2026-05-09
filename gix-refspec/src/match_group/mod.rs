@@ -1,9 +1,11 @@
 use std::collections::BTreeSet;
 
-use crate::{MatchGroup, RefSpecRef, parse::Operation, types::Mode};
+use bstr::BStr;
+
+use crate::{instruction::Push, parse::Operation, types::Mode, MatchGroup, RefSpecRef};
 
 pub(crate) mod types;
-pub use types::{Item, Mapping, Source, SourceRef, match_lhs, match_rhs};
+pub use types::{match_lhs, match_push, match_rhs, Item, Mapping, PushDeletion, PushUpdate, Source, SourceRef};
 
 ///
 pub mod validate;
@@ -179,6 +181,163 @@ impl<'spec> MatchGroup<'spec> {
             mappings: out,
         }
     }
+
+    /// Match all *push* specs in this group against local and remote references.
+    ///
+    /// `local_items` are the references available for use as push sources, while `remote_items` are advertised remote
+    /// references. The remote side is used to discover already-existing destinations and to implement the special `:`
+    /// all-matching-branches refspec.
+    ///
+    /// This method matches ref names and object ids. Source revspecs that are not object ids should be resolved by the
+    /// caller before constructing the actual push command.
+    pub fn match_push<'local, 'remote>(
+        self,
+        local_items: impl IntoIterator<Item = Item<'local>>,
+        remote_items: impl IntoIterator<Item = Item<'remote>>,
+    ) -> match_push::Outcome<'spec> {
+        let local_items: Vec<_> = local_items.into_iter().collect();
+        let remote_items: Vec<_> = remote_items.into_iter().collect();
+        let remote_index = |name: &BStr| remote_items.iter().position(|item| item.full_ref_name == name);
+
+        let mut updates = Vec::new();
+        let mut deletions = Vec::new();
+        let mut seen_updates = BTreeSet::default();
+        let mut seen_deletions = BTreeSet::default();
+        let mut negative_matchers = Vec::new();
+
+        for (spec_index, spec) in self.specs.iter().copied().enumerate() {
+            if spec.mode == Mode::Negative {
+                negative_matchers.push(Matcher::from(spec));
+                continue;
+            }
+
+            match spec.instruction() {
+                crate::Instruction::Push(Push::Matching {
+                    allow_non_fast_forward, ..
+                }) => {
+                    let matcher = Matcher::from(spec);
+                    if let (Some(Needle::Object(id)), Some(dst)) = (matcher.lhs, matcher.rhs) {
+                        push_unique(
+                            PushUpdate {
+                                local_item_index: None,
+                                remote_item_index: remote_index(dst.to_bstr().as_ref()),
+                                src: SourceRef::ObjectId(id),
+                                dst: dst.to_bstr().into_owned(),
+                                spec_index,
+                                allow_non_fast_forward,
+                            },
+                            &mut seen_updates,
+                            &mut updates,
+                        );
+                        continue;
+                    }
+
+                    for (local_item_index, item) in local_items.iter().copied().enumerate() {
+                        let (matched, dst) = matcher.matches_lhs(item);
+                        if matched {
+                            let dst = dst.map_or_else(|| item.full_ref_name.to_owned(), std::borrow::Cow::into_owned);
+                            push_unique(
+                                PushUpdate {
+                                    local_item_index: Some(local_item_index),
+                                    remote_item_index: remote_index(dst.as_ref()),
+                                    src: SourceRef::FullName(item.full_ref_name.to_owned().into()).into_owned(),
+                                    dst,
+                                    spec_index,
+                                    allow_non_fast_forward,
+                                },
+                                &mut seen_updates,
+                                &mut updates,
+                            );
+                        }
+                    }
+                }
+                crate::Instruction::Push(Push::AllMatchingBranches { allow_non_fast_forward }) => {
+                    for (local_item_index, local) in local_items.iter().copied().enumerate() {
+                        if !is_branch(local.full_ref_name) {
+                            continue;
+                        }
+                        if let Some(remote_item_index) = remote_index(local.full_ref_name) {
+                            push_unique(
+                                PushUpdate {
+                                    local_item_index: Some(local_item_index),
+                                    remote_item_index: Some(remote_item_index),
+                                    src: SourceRef::FullName(local.full_ref_name.to_owned().into()).into_owned(),
+                                    dst: local.full_ref_name.to_owned(),
+                                    spec_index,
+                                    allow_non_fast_forward,
+                                },
+                                &mut seen_updates,
+                                &mut updates,
+                            );
+                        }
+                    }
+                }
+                crate::Instruction::Push(Push::Delete { ref_or_pattern }) => {
+                    let matcher = Matcher::from(spec);
+                    let matched_remote_indices: Vec<_> = remote_items
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .filter_map(|(remote_item_index, item)| {
+                            matcher
+                                .matches_rhs(item)
+                                .0
+                                .then_some((remote_item_index, item.full_ref_name.to_owned()))
+                        })
+                        .collect();
+
+                    if matched_remote_indices.is_empty() {
+                        let dst = Needle::from(ref_or_pattern).to_bstr().into_owned();
+                        push_unique(
+                            PushDeletion {
+                                remote_item_index: remote_index(dst.as_ref()),
+                                dst,
+                                spec_index,
+                            },
+                            &mut seen_deletions,
+                            &mut deletions,
+                        );
+                    } else {
+                        for (remote_item_index, dst) in matched_remote_indices {
+                            push_unique(
+                                PushDeletion {
+                                    remote_item_index: Some(remote_item_index),
+                                    dst,
+                                    spec_index,
+                                },
+                                &mut seen_deletions,
+                                &mut deletions,
+                            );
+                        }
+                    }
+                }
+                crate::Instruction::Push(Push::Exclude { .. }) => unreachable!("handled as negative spec"),
+                crate::Instruction::Fetch(_) => unreachable!("push groups contain only push specs"),
+            }
+        }
+
+        if !negative_matchers.is_empty() {
+            updates.retain(|update| match &update.src {
+                SourceRef::ObjectId(_) => true,
+                SourceRef::FullName(name) => {
+                    let Some(local) = local_items
+                        .iter()
+                        .find(|item| item.full_ref_name == name.as_ref())
+                        .copied()
+                    else {
+                        return true;
+                    };
+                    !negative_matchers.iter().any(|matcher| matcher.matches_lhs(local).0)
+                }
+            });
+        }
+
+        match_push::Outcome {
+            group: self,
+            updates,
+            deletions,
+        }
+    }
 }
 
 fn calculate_hash<T: std::hash::Hash>(t: &T) -> u64 {
@@ -186,6 +345,16 @@ fn calculate_hash<T: std::hash::Hash>(t: &T) -> u64 {
     let mut s = std::collections::hash_map::DefaultHasher::new();
     t.hash(&mut s);
     s.finish()
+}
+
+fn push_unique<T: std::hash::Hash>(item: T, seen: &mut BTreeSet<u64>, out: &mut Vec<T>) {
+    if seen.insert(calculate_hash(&item)) {
+        out.push(item);
+    }
+}
+
+fn is_branch(name: &BStr) -> bool {
+    name.starts_with(b"refs/heads/")
 }
 
 mod util;
