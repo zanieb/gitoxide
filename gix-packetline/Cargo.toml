@@ -14,6 +14,10 @@ rust-version = "1.88"
 [lib]
 doctest = true
 
+[[example]]
+name = "encode-decode"
+required-features = ["blocking-io"]
+
 [features]
 #! By default, all IO related capabilities will be missing unless one of the following is chosen.
 default = []
