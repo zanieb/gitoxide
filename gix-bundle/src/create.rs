@@ -33,6 +33,8 @@ impl Default for Options {
 pub enum Error {
     #[error("no references specified for the bundle")]
     NoRefs,
+    #[error("bundle pack writer produced no objects")]
+    EmptyPack,
     #[error(transparent)]
     Header(#[from] std::io::Error),
     #[error("failed to generate pack data")]
@@ -124,7 +126,9 @@ impl Builder {
 
         self.header.write_to(&mut writer).map_err(Error::Header)?;
 
-        write_pack(&mut writer, &self.tips, &self.exclude).map_err(|e| Error::PackGeneration(Box::new(e)))?;
+        if !write_pack(&mut writer, &self.tips, &self.exclude).map_err(|e| Error::PackGeneration(Box::new(e)))? {
+            return Err(Error::EmptyPack);
+        }
 
         Ok(())
     }

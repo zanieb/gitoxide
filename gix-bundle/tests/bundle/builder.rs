@@ -1,12 +1,21 @@
 //! Tests for the bundle Builder API (gix_bundle::create::Builder).
 
 use bstr::BString;
-use gix_bundle::create::Builder;
+use gix_bundle::create::{Builder, Error};
 use gix_bundle::{header, Version};
 use gix_hash::ObjectId;
 
 fn oid(hex: &str) -> ObjectId {
     ObjectId::from_hex(hex.as_bytes()).expect("valid hex")
+}
+
+fn write_dummy_pack(
+    writer: &mut dyn std::io::Write,
+    _tips: &[ObjectId],
+    _exclude: &[ObjectId],
+) -> Result<bool, std::io::Error> {
+    writer.write_all(b"PACK")?;
+    Ok(true)
 }
 
 /// Builder should accumulate refs correctly.
@@ -64,11 +73,7 @@ fn builder_v3_capability() {
 
     // write_to should produce a valid header
     let mut buf = Vec::new();
-    builder
-        .write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
-            Ok(false)
-        })
-        .unwrap();
+    builder.write_to(&mut buf, write_dummy_pack).unwrap();
 
     // Parse the output to verify correctness
     let (parsed, _) = header::decode(&buf, gix_hash::Kind::Sha1).unwrap();
@@ -92,6 +97,23 @@ fn builder_write_fails_with_no_refs() {
     assert!(result.is_err(), "builder with no refs should fail to write");
 }
 
+/// Builder should reject a pack writer that produced no objects.
+#[test]
+fn builder_write_fails_when_pack_is_empty() {
+    let mut builder = Builder::new(Version::V2, gix_hash::Kind::Sha1);
+    builder.add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        Ok(false)
+    });
+
+    assert!(
+        matches!(result, Err(Error::EmptyPack)),
+        "builder should reject an empty generated pack"
+    );
+}
+
 /// Builder write_to should call the pack writer with correct tips and exclude lists.
 #[test]
 fn builder_write_passes_tips_and_exclude_to_pack_writer() {
@@ -112,10 +134,11 @@ fn builder_write_passes_tips_and_exclude_to_pack_writer() {
 
     let mut buf = Vec::new();
     builder
-        .write_to(&mut buf, |_writer, tips, exclude| -> Result<bool, std::io::Error> {
+        .write_to(&mut buf, |writer, tips, exclude| -> Result<bool, std::io::Error> {
             *tips_clone.lock().unwrap() = tips.to_vec();
             *exclude_clone.lock().unwrap() = exclude.to_vec();
-            Ok(false)
+            writer.write_all(b"PACK")?;
+            Ok(true)
         })
         .unwrap();
 
@@ -156,11 +179,7 @@ fn builder_output_is_parseable() {
         .add_prerequisite(prereq, Some(BString::from("boundary")));
 
     let mut buf = Vec::new();
-    builder
-        .write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
-            Ok(false)
-        })
-        .unwrap();
+    builder.write_to(&mut buf, write_dummy_pack).unwrap();
 
     // The header portion should be parseable
     let (parsed, _consumed) = header::decode(&buf, gix_hash::Kind::Sha1).unwrap();
