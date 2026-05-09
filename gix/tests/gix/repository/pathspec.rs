@@ -42,3 +42,29 @@ fn defaults_are_taken_from_repo_config() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn can_be_constructed_from_patterns() -> crate::Result {
+    let repo = named_repo("make_basic_repo.sh")?;
+    let mut pathspec = repo.pathspec_from_patterns(
+        true,
+        [
+            Pattern::from_components("hi", MagicSignature::ICASE, SearchMode::Literal, Vec::new()),
+            Pattern::from_components(
+                "hip",
+                MagicSignature::ICASE | MagicSignature::EXCLUDE,
+                SearchMode::Literal,
+                Vec::new(),
+            ),
+        ],
+        &**repo.index()?,
+        Source::WorktreeThenIdMapping.adjust_for_bare(repo.is_bare()),
+    )?;
+
+    assert!(pathspec.is_included("HI", Some(false)));
+    assert!(pathspec
+        .pattern_matching_relative_path("HIP", Some(false))
+        .expect("match")
+        .is_excluded());
+    Ok(())
+}

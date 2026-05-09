@@ -29,6 +29,25 @@ impl Repository {
         })
     }
 
+    /// Create a new pathspec abstraction from already parsed or programmatically constructed `patterns`.
+    ///
+    /// It will be initialized exactly how [`Repository::pathspec()`] would, except that parsing defaults from configuration or environment
+    /// variables are not applied to already constructed patterns.
+    #[doc(alias = "Pathspec", alias = "git2")]
+    pub fn pathspec_from_patterns(
+        &self,
+        empty_patterns_match_prefix: bool,
+        patterns: impl IntoIterator<Item = gix_pathspec::Pattern>,
+        index: &gix_index::State,
+        attributes_source: gix_worktree::stack::state::attributes::Source,
+    ) -> Result<Pathspec<'_>, crate::pathspec::init::Error> {
+        Pathspec::from_patterns(self, empty_patterns_match_prefix, patterns, || {
+            self.attributes_only(index, attributes_source)
+                .map(AttributeStack::detach)
+                .map_err(Into::into)
+        })
+    }
+
     /// Return default settings that are required when [parsing pathspecs](gix_pathspec::parse()) by hand.
     ///
     /// These are stemming from environment variables which have been converted to [config settings](crate::config::tree::gitoxide::Pathspec),
