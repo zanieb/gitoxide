@@ -981,7 +981,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
    * [ ] respect `export-ignore` and `export-subst`
 * [ ] extract a branch from a bundle into a repository
 * [ ] integrate bundle bootstrapping and bundle-uri metadata for clone/fetch
-* [ ] API documentation
+* [x] API documentation
     * [ ] Some examples
 
 ### gix-validate
