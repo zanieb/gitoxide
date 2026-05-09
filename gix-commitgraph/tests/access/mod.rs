@@ -34,6 +34,38 @@ fn corrected_commit_dates_are_available() {
 }
 
 #[test]
+fn corrected_commit_date_overflow_is_available() {
+    let (cg, refs) = graph_and_expected("corrected_commit_date_overflow.sh", &["parent", "child"]);
+    check_common(&cg, &refs);
+
+    let parent = cg.commit_at(refs["parent"].pos());
+    let child = cg.commit_at(refs["child"].pos());
+    let child_corrected = child
+        .corrected_committer_timestamp()
+        .expect("generation data is present");
+
+    assert_eq!(
+        child.committer_timestamp(),
+        946684800,
+        "fixture pins the child to a much older committer timestamp"
+    );
+    assert_eq!(
+        parent.corrected_committer_timestamp(),
+        Some(parent.committer_timestamp()),
+        "root corrected commit date equals its committer timestamp"
+    );
+    assert_eq!(
+        child_corrected,
+        parent.committer_timestamp() + 1,
+        "child corrected commit date is stored via GDO2 overflow"
+    );
+    assert!(
+        child_corrected - child.committer_timestamp() > (1_u64 << 31) - 1,
+        "the corrected-date offset must be too large for the 31-bit GDA2 inline form"
+    );
+}
+
+#[test]
 fn changed_path_filters_are_available() {
     let (cg, refs) = graph_and_expected("changed_path_filters.sh", &["base", "child"]);
     check_common(&cg, &refs);
