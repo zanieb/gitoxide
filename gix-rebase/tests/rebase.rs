@@ -630,6 +630,10 @@ mod driver {
         update_head_calls: RefCell<Vec<ObjectId>>,
         /// Tracks exec commands.
         execute_calls: RefCell<Vec<Vec<u8>>>,
+        /// Rebase labels created by label operations.
+        labels: RefCell<HashMap<Vec<u8>, ObjectId>>,
+        /// Simulated current HEAD for label/reset operations.
+        current_head: RefCell<ObjectId>,
         /// If set, cherry_pick returns this ObjectId as the new commit.
         /// Increments by 1 byte each call to simulate unique commits.
         next_commit_counter: RefCell<u32>,
@@ -651,6 +655,8 @@ mod driver {
                 cherry_pick_calls: RefCell::new(Vec::new()),
                 update_head_calls: RefCell::new(Vec::new()),
                 execute_calls: RefCell::new(Vec::new()),
+                labels: RefCell::new(HashMap::new()),
+                current_head: RefCell::new(make_oid("0000000000000000000000000000000000000000")),
                 next_commit_counter: RefCell::new(1),
                 conflict_on: RefCell::new(std::collections::HashSet::new()),
                 fail_on: RefCell::new(std::collections::HashSet::new()),
@@ -710,6 +716,7 @@ mod driver {
                 });
             }
             let new_id = self.next_fake_commit_id();
+            *self.current_head.borrow_mut() = new_id;
             Ok(CherryPickOutcome { new_commit_id: new_id })
         }
 
@@ -725,6 +732,7 @@ mod driver {
 
         fn update_head(&self, commit_id: ObjectId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.update_head_calls.borrow_mut().push(commit_id);
+            *self.current_head.borrow_mut() = commit_id;
             Ok(())
         }
 
@@ -734,6 +742,23 @@ mod driver {
                 return Err(format!("simulated exec failure: {}", String::from_utf8_lossy(command)).into());
             }
             Ok(())
+        }
+
+        fn label(&self, name: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.labels
+                .borrow_mut()
+                .insert(name.to_vec(), *self.current_head.borrow());
+            Ok(())
+        }
+
+        fn reset_to_label(&self, name: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let target = self
+                .labels
+                .borrow()
+                .get(name)
+                .copied()
+                .ok_or_else(|| format!("unknown label: {}", String::from_utf8_lossy(name)))?;
+            self.update_head(target)
         }
     }
 
@@ -1122,21 +1147,67 @@ mod driver {
     }
 
     #[test]
+    fn step_label_and_reset_roundtrip_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let start = make_oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            b"move head\n",
+        );
+        *driver.current_head.borrow_mut() = start;
+
+        let mut state = make_state_with_ops(vec![
+            Operation::Label { name: "start".into() },
+            Operation::Pick {
+                commit: make_oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").into(),
+                summary: "move head".into(),
+            },
+            Operation::Reset { name: "start".into() },
+        ]);
+
+        assert_eq!(state.step(&driver, &rebase_dir).unwrap(), StepOutcome::Skipped);
+        assert_eq!(driver.labels.borrow().get(b"start".as_slice()), Some(&start));
+
+        assert!(matches!(
+            state.step(&driver, &rebase_dir).unwrap(),
+            StepOutcome::Applied { .. }
+        ));
+        assert_ne!(*driver.current_head.borrow(), start, "pick should move HEAD");
+
+        assert_eq!(state.step(&driver, &rebase_dir).unwrap(), StepOutcome::Skipped);
+        assert_eq!(
+            *driver.current_head.borrow(),
+            start,
+            "reset should restore labeled HEAD"
+        );
+    }
+
+    #[test]
+    fn step_reset_unknown_label_errors_and_persists_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+
+        let driver = MockDriver::new();
+        let mut state = make_state_with_ops(vec![Operation::Reset { name: "missing".into() }, Operation::Noop]);
+
+        let result = state.step(&driver, &rebase_dir);
+        assert!(matches!(result, Err(gix_rebase::StepError::Reset { .. })));
+
+        let on_disk = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
+        assert!(matches!(on_disk.done.operations.front(), Some(Operation::Reset { .. })));
+        assert!(matches!(on_disk.todo.operations.front(), Some(Operation::Noop)));
+    }
+
+    #[test]
     fn step_unsupported_ops_return_error() {
         let dir = tempfile::tempdir().unwrap();
         let rebase_dir = dir.path().join("rebase-merge");
 
         let driver = MockDriver::new();
-
-        // Label is unsupported and should error.
-        let mut state = make_state_with_ops(vec![Operation::Label { name: "onto".into() }]);
-        let result = state.step(&driver, &rebase_dir);
-        assert!(result.is_err(), "Label should return an error");
-
-        // Reset is unsupported and should error.
-        let mut state = make_state_with_ops(vec![Operation::Reset { name: "onto".into() }]);
-        let result = state.step(&driver, &rebase_dir);
-        assert!(result.is_err(), "Reset should return an error");
 
         // UpdateRef is unsupported and should error.
         let mut state = make_state_with_ops(vec![Operation::UpdateRef {
