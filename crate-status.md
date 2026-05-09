@@ -578,7 +578,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 ### gix-quote
 * **ansi-c**
   * [x] quote
-  * [ ] unquote
+  * [x] unquote
 
 ### gix-mailmap
 * [x] parsing
