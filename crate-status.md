@@ -965,7 +965,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 * [x] apply standard worktree conversion to simulate an actual checkout
 * [ ] support for submodule inclusion
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-archive
 
