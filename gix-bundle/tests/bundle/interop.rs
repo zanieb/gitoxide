@@ -251,18 +251,9 @@ fn gix_bundle_header_verified_by_c_git() -> gix_testtools::Result {
     Ok(())
 }
 
-/// gix writes a v3 bundle header with capability -- tests interop with C Git.
-///
-/// KNOWN ISSUE: gix's v3 header writer inserts a blank line between capabilities
-/// and refs/prerequisites. C Git's v3 format does NOT have this blank line --
-/// the blank line only terminates the entire header. This means C Git sees zero
-/// refs in gix-written v3 bundles (the blank line makes C Git think the header
-/// ended before seeing any refs).
-///
-/// This test documents the incompatibility. The gix roundtrip (write -> parse)
-/// still works because gix's parser accepts the extra blank line.
+/// gix writes a v3 bundle header with a capability, and C Git can list its refs.
 #[test]
-fn gix_v3_bundle_header_known_format_difference() -> gix_testtools::Result {
+fn gix_v3_bundle_header_verified_by_c_git() -> gix_testtools::Result {
     let (dir, commits) = make_test_repo();
     let bundle_path = dir.path().join("gix-v3.bundle");
 
@@ -287,23 +278,18 @@ fn gix_v3_bundle_header_known_format_difference() -> gix_testtools::Result {
     assert_eq!(reparsed.refs[0].id, tip_oid);
     assert_eq!(reparsed.capabilities.len(), 1);
 
-    // C Git accepts the file (no error) but sees zero refs due to the extra blank line.
-    // This is a known format issue: gix inserts a blank line after capabilities
-    // which C Git interprets as the end-of-header marker.
-    let output = std::process::Command::new("git")
-        .args(["bundle", "list-heads", bundle_path.to_str().expect("valid path")])
-        .current_dir(dir.path())
-        .output()
-        .expect("git must be on PATH");
-    assert!(output.status.success(), "C Git should not error on gix v3 bundle");
-    // NOTE: C Git returns zero heads due to the extra blank line after capabilities.
-    // When this format issue is fixed in gix-bundle, this assertion should be updated
-    // to verify that C Git sees the refs.
-    let list_output = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if list_output.contains("refs/heads/main") {
-        // Format issue has been fixed! This path should trigger after the fix.
-        panic!("gix v3 format issue appears fixed! Update this test to remove the known-issue note.");
-    }
+    let list_output = git_output(
+        dir.path(),
+        &["bundle", "list-heads", bundle_path.to_str().expect("valid path")],
+    );
+    assert!(
+        list_output.contains("refs/heads/main"),
+        "C Git should list refs/heads/main from gix v3 bundle: {list_output}"
+    );
+    assert!(
+        list_output.contains(&commits[2]),
+        "C Git should see the correct OID in gix v3 bundle: {list_output}"
+    );
 
     Ok(())
 }

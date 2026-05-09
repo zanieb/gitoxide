@@ -179,9 +179,6 @@ impl Header {
                     writer.write_all(cap.as_ref())?;
                     writer.write_all(b"\n")?;
                 }
-                if !self.capabilities.is_empty() {
-                    writer.write_all(b"\n")?;
-                }
             }
         }
 
