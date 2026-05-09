@@ -190,6 +190,27 @@ fn object_roots_are_detected_by_kind_and_traversed() {
 }
 
 #[test]
+fn reachability_paths_describe_the_first_route_to_objects() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"reachable".to_vec());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "file", blob_id));
+    let commit_id = db.insert(Kind::Commit, MemoryDb::commit_data(tree_id, "commit-root"));
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(commit_id, Kind::Commit, "commit-tag"));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    check.check_tag(&tag_id).expect("tag root is present");
+
+    let mut expected_blob_path = format!("tag {tag_id} -> commit {commit_id} -> tree {tree_id}").into_bytes();
+    expected_blob_path.extend_from_slice(b" -> file");
+    let blob_path: &[u8] = check.path_to(&blob_id).expect("blob path recorded").as_ref();
+    assert_eq!(blob_path, expected_blob_path.as_slice());
+
+    check.check_commit(&commit_id).expect("seen commit is skipped");
+    let commit_path: &[u8] = check.path_to(&commit_id).expect("first commit path retained").as_ref();
+    assert_eq!(commit_path, format!("tag {tag_id} -> commit {commit_id}").as_bytes());
+}
+
+#[test]
 fn reflog_entries_are_connectivity_roots() {
     let mut db = MemoryDb::default();
     let first_blob_id = db.insert(Kind::Blob, b"first".to_vec());
@@ -206,6 +227,16 @@ fn reflog_entries_are_connectivity_roots() {
         .expect("reflog roots are present");
 
     assert!(check.unreachable(db.objects.keys()).is_empty());
+    let first_path: &[u8] = check
+        .path_to(&first_commit_id)
+        .expect("new reflog id path recorded")
+        .as_ref();
+    assert!(first_path.starts_with(format!("reflog-new {first_commit_id}").as_bytes()));
+    let second_path: &[u8] = check
+        .path_to(&second_commit_id)
+        .expect("old reflog id path recorded")
+        .as_ref();
+    assert!(second_path.starts_with(format!("reflog-old {second_commit_id}").as_bytes()));
 }
 
 #[test]
@@ -228,6 +259,13 @@ fn index_entries_are_connectivity_roots() {
         .expect("index roots are present");
 
     assert!(check.unreachable(db.objects.keys()).is_empty());
+    let blob_path: &[u8] = check.path_to(&blob_id).expect("index blob path recorded").as_ref();
+    assert!(blob_path.starts_with(format!("index-entry {blob_id}").as_bytes()));
+    let nested_blob_path: &[u8] = check
+        .path_to(&nested_blob_id)
+        .expect("nested index tree blob path recorded")
+        .as_ref();
+    assert!(nested_blob_path.ends_with(b" -> nested"));
 }
 
 #[test]
