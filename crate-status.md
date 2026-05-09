@@ -874,7 +874,7 @@ The git staging area.
 * write
   * [x] V2
   * [x] V3 - extension bits
-  * [ ] V4
+  * [x] V4
   * extensions
       * [x] TREE
       * [x] REUC

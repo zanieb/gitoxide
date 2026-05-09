@@ -206,6 +206,22 @@ pub(crate) mod util {
     }
 
     #[inline]
+    pub fn write_var_int(mut value: u64, mut out: impl std::io::Write) -> Result<(), std::io::Error> {
+        let mut bytes = vec![(value & 0x7f) as u8];
+        while {
+            value >>= 7;
+            value != 0
+        } {
+            value -= 1;
+            bytes.push(((value & 0x7f) as u8) | 0x80);
+        }
+        for byte in bytes.iter().rev() {
+            out.write_all(&[*byte])?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     pub fn read_u32(data: &[u8]) -> Option<(u32, &[u8])> {
         data.split_at_checked(4)
             .map(|(num, data)| (u32::from_be_bytes(num.try_into().unwrap()), data))

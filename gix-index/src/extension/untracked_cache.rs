@@ -4,7 +4,7 @@ use gix_hash::ObjectId;
 use crate::{
     entry,
     extension::{Signature, UntrackedCache},
-    util::{read_u32, split_at_byte_exclusive, var_int},
+    util::{read_u32, split_at_byte_exclusive, var_int, write_var_int},
 };
 
 /// A structure to track filesystem stat information along with an object id, linking a worktree file with what's in our ODB.
@@ -310,7 +310,7 @@ fn write_directory_block(
             .len()
             .try_into()
             .expect("untracked entry count fits u64"),
-        out,
+        &mut *out,
     )?;
     write_var_int(
         directory
@@ -318,7 +318,7 @@ fn write_directory_block(
             .len()
             .try_into()
             .expect("subdirectory count fits u64"),
-        out,
+        &mut *out,
     )?;
     out.write_all(&directory.name)?;
     out.write_all(b"\0")?;
@@ -356,24 +356,10 @@ fn write_bitmap(
     out.write_all(&0_u32.to_be_bytes())
 }
 
-fn write_var_int(mut value: u64, out: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
-    let mut bytes = vec![(value & 0x7f) as u8];
-    while {
-        value >>= 7;
-        value != 0
-    } {
-        value -= 1;
-        bytes.push(((value & 0x7f) as u8) | 0x80);
-    }
-    for byte in bytes.iter().rev() {
-        out.write_all(&[*byte])?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{write_bitmap, write_var_int};
+    use super::write_bitmap;
+    use crate::util::write_var_int;
 
     #[test]
     fn var_int_roundtrips_through_the_decoder() {

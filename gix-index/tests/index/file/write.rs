@@ -140,9 +140,7 @@ fn state_comparisons_with_various_extension_configurations() {
         Generated("v2_more_files"),
         Generated("v2_all_file_kinds"),
         Generated("v2_split_index"),
-        // TODO: this fails because git allows to configure the index version while gitoxide doesn't
-        //       the fixture artificially sets the version to V4 and gitoxide writes it back out as the lowest required version, V2
-        // Generated("v4_more_files_IEOT"),
+        Generated("v4_more_files_IEOT"),
         Generated("v3_skip_worktree"),
         Generated("v3_added_files"),
         Generated("v3_sparse_index_non_cone"),

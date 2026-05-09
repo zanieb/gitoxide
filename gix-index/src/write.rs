@@ -112,7 +112,7 @@ impl State {
             .expect("definitely not too many entries");
 
         let offset_to_entries = header(&mut write, version, num_entries - removed_entries)?;
-        let offset_to_extensions = entries(&mut write, self, offset_to_entries)?;
+        let offset_to_extensions = entries(&mut write, self, version, offset_to_entries)?;
         let effective_extensions = if skip_stale_tree_cache {
             match extensions {
                 Extensions::All => Extensions::Given {
@@ -218,6 +218,9 @@ impl State {
 
 impl State {
     fn detect_required_version(&self) -> Version {
+        if self.version == Version::V4 {
+            return Version::V4;
+        }
         self.entries
             .iter()
             .find_map(|e| e.flags.contains(entry::Flags::EXTENDED).then_some(Version::V3))
@@ -243,17 +246,28 @@ fn header<T: std::io::Write>(
     Ok(out.count)
 }
 
-fn entries<T: std::io::Write>(out: &mut CountBytes<T>, state: &State, header_size: u32) -> Result<u32, std::io::Error> {
+fn entries<T: std::io::Write>(
+    out: &mut CountBytes<T>,
+    state: &State,
+    version: Version,
+    header_size: u32,
+) -> Result<u32, std::io::Error> {
+    let mut previous_path = None;
     for entry in state.entries() {
         if entry.flags.contains(entry::Flags::REMOVE) {
             continue;
         }
-        entry.write_to(&mut *out, state)?;
-        match (out.count - header_size) % 8 {
-            0 => {}
-            n => {
-                let eight_null_bytes = [0u8; 8];
-                out.write_all(&eight_null_bytes[n as usize..])?;
+        if version == Version::V4 {
+            entry.write_v4_to(&mut *out, state, previous_path)?;
+            previous_path = Some(entry.path(state));
+        } else {
+            entry.write_to(&mut *out, state)?;
+            match (out.count - header_size) % 8 {
+                0 => {}
+                n => {
+                    let eight_null_bytes = [0u8; 8];
+                    out.write_all(&eight_null_bytes[n as usize..])?;
+                }
             }
         }
     }
