@@ -33,6 +33,8 @@ pub mod color;
 pub mod integer;
 /// Path interpolation support.
 pub mod path;
+///
+pub mod permission;
 
 mod types;
-pub use types::{Boolean, Color, Date, Integer, Path};
+pub use types::{Boolean, Color, Date, Integer, Path, Permission};
