@@ -510,7 +510,7 @@ A utility crate with types and functionality related to shallow-file handling.
 * **server**
     * [ ] general purpose `accept(…)` for servers
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-ssh
 
