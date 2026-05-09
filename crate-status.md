@@ -834,7 +834,7 @@ A plumbing crate with shared functionality regarding EWAH compressed bitmaps, as
   * `Array` type to read and write bits
      * [x] execute closure for each `true` bit
   * [x] decode on-disk representation
-  * [ ] encode on-disk representation
+  * [x] encode on-disk representation
 
 ### gix-dir
 

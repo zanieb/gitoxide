@@ -38,6 +38,37 @@ pub fn decode(data: &[u8]) -> Result<(Vec, &[u8]), decode::Error> {
     ))
 }
 
+mod write {
+    use super::Vec;
+
+    impl Vec {
+        /// Write this EWAH bitmap in its on-disk representation.
+        pub fn write_to(&self, mut out: impl std::io::Write) -> std::io::Result<()> {
+            out.write_all(&self.num_bits.to_be_bytes())?;
+            out.write_all(
+                &u32::try_from(self.bits.len())
+                    .map_err(|_| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidInput, "EWAH bitmap has more than 2^32 words")
+                    })?
+                    .to_be_bytes(),
+            )?;
+            for word in &self.bits {
+                out.write_all(&word.to_be_bytes())?;
+            }
+            out.write_all(
+                &u32::try_from(self.rlw)
+                    .map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "EWAH bitmap running length word offset exceeds 2^32",
+                        )
+                    })?
+                    .to_be_bytes(),
+            )
+        }
+    }
+}
+
 mod access {
     use super::Vec;
 
@@ -179,4 +210,62 @@ pub struct Vec {
     bits: std::vec::Vec<u64>,
     /// RLW is an offset into the `bits` buffer, so `1` translates into &bits\[1] essentially.
     rlw: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode, Vec};
+    use std::vec::Vec as StdVec;
+
+    #[test]
+    fn write_to_produces_the_on_disk_representation() {
+        let bitmap = Vec {
+            num_bits: 128,
+            bits: vec![0x0000_0004_0000_0000, 0x8000_0000_0000_0001, 0x0000_0000_0000_0002],
+            rlw: 0,
+        };
+        let mut out = StdVec::new();
+        bitmap.write_to(&mut out).unwrap();
+
+        assert_eq!(
+            out,
+            [
+                0x00, 0x00, 0x00, 0x80, // bit count
+                0x00, 0x00, 0x00, 0x03, // word count
+                0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, // RLW
+                0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // literal word 1
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // literal word 2
+                0x00, 0x00, 0x00, 0x00, // RLW offset
+            ]
+        );
+    }
+
+    #[test]
+    fn decoded_bitmaps_roundtrip_through_write_to() {
+        let input = [
+            0x00, 0x00, 0x00, 0x80, // bit count
+            0x00, 0x00, 0x00, 0x03, // word count
+            0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, // RLW
+            0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // literal word 1
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // literal word 2
+            0x00, 0x00, 0x00, 0x00, // RLW offset
+            0xaa, 0xbb,
+        ];
+        let (bitmap, rest) = decode(&input).unwrap();
+        assert_eq!(rest, [0xaa, 0xbb]);
+        assert_eq!(bitmap.num_bits(), 128);
+
+        let mut set_bits = StdVec::new();
+        bitmap
+            .for_each_set_bit(|index| {
+                set_bits.push(index);
+                Some(())
+            })
+            .unwrap();
+        assert_eq!(set_bits, [0, 63, 65]);
+
+        let mut out = StdVec::new();
+        bitmap.write_to(&mut out).unwrap();
+        assert_eq!(out, input[..input.len() - rest.len()]);
+    }
 }
