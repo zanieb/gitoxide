@@ -170,8 +170,8 @@ pub struct Options {
     /// passed through to its parent(s) rather than being attributed to the ignored commit.
     /// This is equivalent to `git blame --ignore-rev` / `--ignore-revs-file`.
     ///
-    /// **Warning**: Not yet implemented. Setting this field has no effect.
-    /// See [GitHub issue #2064](https://github.com/GitoxideLabs/gitoxide/issues/2064).
+    /// Lines that cannot be matched back to a parent remain attributed to the ignored commit,
+    /// matching C Git's fallback behavior.
     ///
     /// See [Git documentation](https://git-scm.com/docs/git-blame#Documentation/git-blame.txt---ignore-revltrevgt).
     pub ignore_revs: Vec<ObjectId>,
