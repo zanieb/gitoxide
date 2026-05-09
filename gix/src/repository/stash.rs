@@ -179,6 +179,8 @@ pub enum DropError {
     LockAcquire(#[from] gix_lock::acquire::Error),
     #[error("Could not commit lock file")]
     LockCommit(String),
+    #[error("Could not parse refs/stash reflog")]
+    InvalidReflog,
 }
 
 impl From<super::worktree_ops::CheckoutError> for ApplyError {
@@ -872,7 +874,7 @@ impl Repository {
             });
         }
 
-        use gix_ref::transaction::{Change, PreviousValue, RefEdit, RefLog};
+        use gix_ref::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
 
         if entries.len() == 1 {
             // Last stash entry: delete the ref entirely.
@@ -914,6 +916,26 @@ impl Repository {
             })?;
             lines.remove(line_index);
 
+            let new_stash_id = lines
+                .last()
+                .and_then(|line| parse_reflog_new_oid(line, self.object_hash()))
+                .ok_or(DropError::InvalidReflog)?;
+
+            self.edit_reference(RefEdit {
+                change: Change::Update {
+                    log: LogChange {
+                        mode: RefLog::AndReference,
+                        force_create_reflog: false,
+                        message: "stash: drop".into(),
+                    },
+                    expected: PreviousValue::MustExistAndMatch(gix_ref::Target::Object(entries[0].commit_id.detach())),
+                    new: gix_ref::Target::Object(new_stash_id),
+                },
+                name: "refs/stash".try_into().expect("valid ref name"),
+                deref: false,
+            })
+            .map_err(DropError::EditReference)?;
+
             // Build the new reflog content.
             let mut new_content = Vec::with_capacity(content.len());
             for line in &lines {
@@ -921,7 +943,9 @@ impl Repository {
                 new_content.push(b'\n');
             }
 
-            // Use gix_lock for atomic reflog rewrite.
+            // Rewrite the reflog file because the reference transaction API cannot
+            // remove an arbitrary reflog entry yet. The visible ref target was
+            // updated through edit_reference() above.
             use std::io::Write;
             let mut reflog_lock =
                 gix_lock::File::acquire_to_update_resource(&reflog_path, gix_lock::acquire::Fail::Immediately, None)?;
@@ -929,28 +953,6 @@ impl Repository {
             reflog_lock
                 .commit()
                 .map_err(|e| DropError::LockCommit(e.error.to_string()))?;
-
-            // Update refs/stash to point at the new most recent stash (last reflog line).
-            // Use gix_lock for atomic ref update.
-            // TODO: This bypasses the ref transaction layer (edit_reference), which means hooks
-            // (reference-transaction) won't fire and alternative ref backends (e.g., reftable)
-            // won't be updated. This should be refactored once the ref transaction API supports
-            // reflog entry removal.
-            if let Some(last_line) = lines.last() {
-                if let Some(new_stash_id) = parse_reflog_new_oid(last_line, self.object_hash()) {
-                    let ref_path = self.common_dir().join("refs").join("stash");
-                    let hex = new_stash_id.to_string();
-                    let mut ref_lock = gix_lock::File::acquire_to_update_resource(
-                        &ref_path,
-                        gix_lock::acquire::Fail::Immediately,
-                        None,
-                    )?;
-                    ref_lock.write_all(format!("{hex}\n").as_bytes())?;
-                    ref_lock
-                        .commit()
-                        .map_err(|e| DropError::LockCommit(e.error.to_string()))?;
-                }
-            }
         }
 
         Ok(())
