@@ -547,7 +547,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 * [x] ls-refs
     * [x] parse V1 refs as provided during handshake
     * [x] parse V2 refs
-    * [ ] handle empty refs, AKA PKT-LINE(zero-id SP "capabilities^{}" NUL capability-list)
+    * [x] handle empty refs, AKA PKT-LINE(zero-id SP "capabilities^{}" NUL capability-list)
 * [x] fetch
     * [x] detailed progress
     * [x] control credentials provider to fill, approve and reject

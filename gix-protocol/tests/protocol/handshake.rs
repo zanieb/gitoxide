@@ -120,6 +120,23 @@ dce0ea858eef7ff61ad345cc5cdac62203fb3c10 refs/tags/gix-commitgraph-v0.0.0
 }
 
 #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
+async fn extract_empty_v1_refs_from_capabilities_dummy_ref() {
+    let input = &mut Fixture("0000000000000000000000000000000000000000 capabilities^{}".as_bytes());
+    let (out, shallow) = refs::from_v1_refs_received_as_part_of_handshake_and_capabilities(
+        input,
+        Capabilities::from_bytes(b"\0multi_ack agent=git/2.50.1")
+            .expect("valid capabilities")
+            .0
+            .iter(),
+    )
+    .await
+    .expect("no failure from empty refs advertisement");
+
+    assert!(out.is_empty());
+    assert!(shallow.is_empty());
+}
+
+#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
 async fn extract_references_from_v1_refs_with_shallow() {
     use gix_protocol::fetch::response::ShallowUpdate;
     let input = &mut Fixture(
