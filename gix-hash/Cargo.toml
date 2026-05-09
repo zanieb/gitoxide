@@ -15,6 +15,10 @@ rust-version = "1.85"
 doctest = true
 test = false
 
+[[example]]
+name = "hash"
+required-features = ["sha1"]
+
 [features]
 default = []
 ## Support for SHA1 hashes and digests.
