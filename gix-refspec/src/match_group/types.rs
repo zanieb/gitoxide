@@ -44,6 +44,25 @@ pub mod match_rhs {
     }
 }
 
+///
+pub mod match_push {
+    use crate::{
+        match_group::{PushDeletion, PushUpdate},
+        MatchGroup,
+    };
+
+    /// The outcome of matching push refspecs against local and remote references.
+    #[derive(Debug, Clone)]
+    pub struct Outcome<'spec> {
+        /// The match group that produced this outcome.
+        pub group: MatchGroup<'spec>,
+        /// Updates to send to the remote.
+        pub updates: Vec<PushUpdate>,
+        /// Deletions to send to the remote.
+        pub deletions: Vec<PushDeletion>,
+    }
+}
+
 /// An item to match, input to various matching operations.
 #[derive(Debug, Copy, Clone)]
 pub struct Item<'a> {
