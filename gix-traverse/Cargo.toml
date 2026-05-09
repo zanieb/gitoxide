@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 description = "A crate of the gitoxide project"
 authors = ["Sebastian Thiel <sebastian.thiel@icloud.com>"]
 edition = "2024"
-include = ["/src/**/*", "/LICENSE-*"]
+include = ["/src/**/*", "/examples/**/*", "/LICENSE-*"]
 rust-version = "1.85"
 
 [lib]
@@ -34,7 +34,7 @@ bitflags = "2"
 [dev-dependencies]
 gix-hash = { path = "../gix-hash", features = ["sha1"] }
 gix-testtools = { path = "../tests/tools", default-features = false }
-gix-odb = { path = "../gix-odb" }
+gix-odb = { path = "../gix-odb", features = ["sha1"] }
 gix-object = { path = "../gix-object" }
 gix-commitgraph = { path = "../gix-commitgraph" }
 gix-path = { path = "../gix-path" }

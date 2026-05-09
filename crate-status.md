@@ -446,7 +446,7 @@ Check out the [performance discussion][gix-traverse-performance] as well.
   * [ ] (performance) stop descending hidden ancestry early instead of prepainting it all
   * [x] `commitgraph` support
 * [x] API documentation
-    * [ ] Examples
+    * [x] Examples
 
 [gix-traverse-performance]: https://github.com/GitoxideLabs/gitoxide/discussions/76
 
