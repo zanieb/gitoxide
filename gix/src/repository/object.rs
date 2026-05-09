@@ -3,7 +3,7 @@ use gix_error::ResultExt;
 use std::ops::DerefMut;
 
 use gix_hash::ObjectId;
-use gix_object::{Exists, Find, FindExt, Write};
+use gix_object::{tree::EntryKind, Exists, Find, FindExt, ObjectRef, Write};
 use gix_odb::{Header, HeaderExt};
 use gix_ref::{FullName, transaction::PreviousValue};
 use smallvec::SmallVec;
@@ -247,6 +247,57 @@ impl crate::Repository {
             .map(|oid| oid.attach(self))
     }
 
+    fn validate_object_references(&self, kind: gix_object::Kind, buf: &[u8]) -> Result<(), object::write::Error> {
+        let object = gix_object::Data::new(kind, buf)
+            .decode()
+            .map_err(|err| Box::new(err) as Box<dyn std::error::Error + Send + Sync + 'static>)?;
+        match object {
+            ObjectRef::Blob(_) => {}
+            ObjectRef::Tree(tree) => {
+                for entry in tree.entries {
+                    let referenced_kind = match entry.mode.kind() {
+                        EntryKind::Tree => gix_object::Kind::Tree,
+                        EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => gix_object::Kind::Blob,
+                        EntryKind::Commit => continue,
+                    };
+                    self.validate_referenced_object(kind, referenced_kind, entry.oid.to_owned())?;
+                }
+            }
+            ObjectRef::Commit(commit) => {
+                self.validate_referenced_object(kind, gix_object::Kind::Tree, commit.tree())?;
+                for parent in commit.parents() {
+                    self.validate_referenced_object(kind, gix_object::Kind::Commit, parent)?;
+                }
+            }
+            ObjectRef::Tag(tag) => {
+                self.validate_referenced_object(kind, tag.target_kind, tag.target())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_referenced_object(
+        &self,
+        object_kind: gix_object::Kind,
+        referenced_kind: gix_object::Kind,
+        id: ObjectId,
+    ) -> Result<(), object::write::Error> {
+        let known_empty = match referenced_kind {
+            gix_object::Kind::Blob => ObjectId::empty_blob(id.kind()) == id,
+            gix_object::Kind::Tree => ObjectId::empty_tree(id.kind()) == id,
+            gix_object::Kind::Commit | gix_object::Kind::Tag => false,
+        };
+        if known_empty || self.objects.exists(&id) {
+            Ok(())
+        } else {
+            Err(object::write::Error(Box::new(MissingObjectReference {
+                object_kind,
+                referenced_kind,
+                id,
+            })))
+        }
+    }
+
     /// Write a blob from the given `bytes`.
     ///
     /// We avoid writing duplicate objects to slow disks that will eventually have to be garbage collected by
@@ -298,6 +349,14 @@ impl crate::Repository {
             .write_buf_with_known_id(gix_object::Kind::Blob, buf, oid)
             .map(|oid| oid.attach(self))
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Cannot write {object_kind} object because it references missing {referenced_kind} object {id}")]
+struct MissingObjectReference {
+    object_kind: gix_object::Kind,
+    referenced_kind: gix_object::Kind,
+    id: ObjectId,
 }
 
 /// Create commits and tags
