@@ -35,7 +35,7 @@ pub struct Tree {
 }
 
 /// The link extension to track a shared index.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Link {
     /// The checksum of the shared index as last seen.
     pub shared_index_checksum: gix_hash::ObjectId,
