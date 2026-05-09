@@ -74,6 +74,8 @@ pub struct Context {
     ///
     /// If set, it will be used to set the `GIT_DIR` environment variable.
     pub git_dir: Option<PathBuf>,
+    /// Set the `GIT_EXEC_PATH` environment variable with the directory containing Git helper programs.
+    pub git_exec_path: Option<PathBuf>,
     /// Set the `GIT_WORK_TREE` environment variable with the given path.
     pub worktree_dir: Option<PathBuf>,
     /// If `true`, set `GIT_NO_REPLACE_OBJECTS` to `1`, which turns off object replacements, or `0` otherwise.
@@ -362,6 +364,9 @@ mod prepare {
             if let Some(ctx) = prep.context {
                 if let Some(git_dir) = ctx.git_dir {
                     cmd.env("GIT_DIR", &git_dir);
+                }
+                if let Some(git_exec_path) = ctx.git_exec_path {
+                    cmd.env("GIT_EXEC_PATH", git_exec_path);
                 }
                 if let Some(worktree_dir) = ctx.worktree_dir {
                     cmd.env("GIT_WORK_TREE", worktree_dir);

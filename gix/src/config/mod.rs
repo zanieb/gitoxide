@@ -260,6 +260,7 @@ pub mod checkout_options {
 #[cfg(feature = "attributes")]
 pub mod command_context {
     use crate::config;
+    use std::path::PathBuf;
 
     /// The error produced when collecting all information relevant to spawned commands,
     /// obtained via [Repository::command_context()](crate::Repository::command_context()).
@@ -270,6 +271,8 @@ pub mod command_context {
         Boolean(#[from] config::boolean::Error),
         #[error(transparent)]
         ParseBool(#[from] gix_config::value::Error),
+        #[error(transparent)]
+        EnvironmentPermission(#[from] gix_sec::permission::Error<PathBuf>),
     }
 }
 

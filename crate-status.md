@@ -609,7 +609,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 ### gix-command
 * [x] execute commands directly
 * [x] execute commands with `sh`
-* [ ] support for `GIT_EXEC_PATH` environment variable with `gix-sec` filter
+* [x] support for `GIT_EXEC_PATH` environment variable with `gix-sec` filter
 
 ### gix-prompt
 * [x] open prompts for usernames for example

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::{bstr::ByteSlice, config};
 
@@ -146,6 +146,11 @@ impl crate::Repository {
                     .into()
             },
             git_dir: self.git_dir().to_owned().into(),
+            git_exec_path: std::env::var_os("GIT_EXEC_PATH")
+                .map(PathBuf::from)
+                .map(|path| self.options.permissions.env.git_prefix.check(path))
+                .transpose()?
+                .flatten(),
             worktree_dir: self.workdir().map(ToOwned::to_owned),
             no_replace_objects: config::shared::is_replace_refs_enabled(
                 &self.config.resolved,

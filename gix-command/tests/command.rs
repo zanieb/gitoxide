@@ -136,6 +136,16 @@ mod context {
     }
 
     #[test]
+    fn git_exec_path_sets_env_only() {
+        let ctx = Context {
+            git_exec_path: Some("git-core".into()),
+            ..Default::default()
+        };
+        let cmd = std::process::Command::from(gix_command::prepare("").with_context(ctx));
+        assert_eq!(format!("{cmd:?}"), winfix(r#"GIT_EXEC_PATH="git-core" """#));
+    }
+
+    #[test]
     fn worktree_dir_sets_env_only() {
         let ctx = Context {
             worktree_dir: Some(".".into()),

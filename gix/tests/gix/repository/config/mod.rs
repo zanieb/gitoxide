@@ -2,6 +2,50 @@ mod config_snapshot;
 mod identity;
 mod remote;
 
+mod command_context {
+    use std::path::Path;
+
+    use gix::sec::Permission;
+    use gix_testtools::Env;
+    use serial_test::serial;
+
+    use crate::repository::config::repo_opts;
+
+    fn repo_with_git_prefix_permission(permission: Permission) -> gix::Repository {
+        repo_opts("with-hasconfig", |mut opts| {
+            opts.permissions.env.git_prefix = permission;
+            opts.strict_config(true)
+        })
+    }
+
+    #[test]
+    #[serial]
+    fn git_exec_path_is_allowed_through_git_prefix_permission() -> crate::Result {
+        let _env = Env::new().set("GIT_EXEC_PATH", "/opt/git/libexec/git-core");
+        let ctx = repo_with_git_prefix_permission(Permission::Allow).command_context()?;
+        assert_eq!(
+            ctx.git_exec_path.as_deref(),
+            Some(Path::new("/opt/git/libexec/git-core"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn git_exec_path_can_be_denied_or_forbidden() -> crate::Result {
+        let _env = Env::new().set("GIT_EXEC_PATH", "/untrusted/git-core");
+
+        let ctx = repo_with_git_prefix_permission(Permission::Deny).command_context()?;
+        assert_eq!(ctx.git_exec_path, None);
+
+        let err = repo_with_git_prefix_permission(Permission::Forbid)
+            .command_context()
+            .unwrap_err();
+        assert!(err.to_string().contains("permission denied"));
+        Ok(())
+    }
+}
+
 #[test]
 fn big_file_threshold() -> crate::Result {
     let repo = repo("with-hasconfig");
