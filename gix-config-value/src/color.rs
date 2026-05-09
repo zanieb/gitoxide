@@ -225,7 +225,13 @@ impl serde::Serialize for Name {
 impl FromStr for Name {
     type Err = Error;
 
-    fn from_str(mut s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lowercase = s
+            .bytes()
+            .any(|b| b.is_ascii_uppercase())
+            .then(|| s.to_ascii_lowercase());
+        let mut s = lowercase.as_deref().unwrap_or(s);
+
         let bright = if let Some(rest) = s.strip_prefix("bright") {
             s = rest;
             true

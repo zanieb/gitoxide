@@ -10,6 +10,7 @@ mod name {
         assert_eq!(Name::from_str("default"), Ok(Name::Default));
         assert_eq!(Name::from_str("black"), Ok(Name::Black));
         assert_eq!(Name::from_str("red"), Ok(Name::Red));
+        assert_eq!(Name::from_str("RED"), Ok(Name::Red));
         assert_eq!(Name::from_str("green"), Ok(Name::Green));
         assert_eq!(Name::from_str("yellow"), Ok(Name::Yellow));
         assert_eq!(Name::from_str("blue"), Ok(Name::Blue));
@@ -22,6 +23,8 @@ mod name {
     fn bright() {
         assert_eq!(Name::from_str("brightblack"), Ok(Name::BrightBlack));
         assert_eq!(Name::from_str("brightred"), Ok(Name::BrightRed));
+        assert_eq!(Name::from_str("BrightRed"), Ok(Name::BrightRed));
+        assert_eq!(Name::from_str("BRIGHTRED"), Ok(Name::BrightRed));
         assert_eq!(Name::from_str("brightgreen"), Ok(Name::BrightGreen));
         assert_eq!(Name::from_str("brightyellow"), Ok(Name::BrightYellow));
         assert_eq!(Name::from_str("brightblue"), Ok(Name::BrightBlue));
@@ -39,6 +42,7 @@ mod name {
     #[test]
     fn hex() {
         assert_eq!(Name::from_str("#ff0010"), Ok(Name::Rgb(255, 0, 16)));
+        assert_eq!(Name::from_str("#Ff0010"), Ok(Name::Rgb(255, 0, 16)));
         assert_eq!(Name::from_str("#ffffff"), Ok(Name::Rgb(255, 255, 255)));
         assert_eq!(Name::from_str("#000000"), Ok(Name::Rgb(0, 0, 0)));
     }
