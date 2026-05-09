@@ -131,9 +131,14 @@ where
             }
         }
 
-        // Get the inner handle which implements gix_pack::Find (needed for pack generation).
+        // Get a thread-safe inner handle which implements gix_pack::Find (needed for pack generation).
         // `prevent_pack_unload()` is required so that pack IDs remain stable during pack creation.
-        let mut odb_for_pack = repo.objects.clone().into_inner();
+        let mut odb_for_pack = repo
+            .objects
+            .clone()
+            .into_arc()
+            .map_err(|err| Error::PackGeneration(Box::new(err)))?
+            .into_inner();
         odb_for_pack.prevent_pack_unload();
 
         let result = gix_protocol::push(
@@ -329,7 +334,7 @@ fn build_push_commands(
 }
 
 fn write_pack_for_push(
-    odb: &gix_odb::Handle,
+    odb: &gix_odb::HandleArc,
     new_tips: &[gix_hash::ObjectId],
     known_remote: &[gix_hash::ObjectId],
     object_hash: gix_hash::Kind,
