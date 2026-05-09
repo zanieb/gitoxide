@@ -109,6 +109,16 @@ pub enum StepError {
         command: String,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("could not create rebase label: {name}")]
+    Label {
+        name: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("could not reset to rebase label: {name}")]
+    Reset {
+        name: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 /// An error originating from the [`Driver::cherry_pick()`] callback.
@@ -189,6 +199,24 @@ pub trait Driver {
         Err(format!(
             "exec operation is not supported by this driver: {}",
             String::from_utf8_lossy(command)
+        )
+        .into())
+    }
+
+    /// Label the current `HEAD` for a later `reset` operation.
+    fn label(&self, name: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err(format!(
+            "label operation is not supported by this driver: {}",
+            String::from_utf8_lossy(name)
+        )
+        .into())
+    }
+
+    /// Reset `HEAD` to a label previously created with [`Driver::label`].
+    fn reset_to_label(&self, name: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err(format!(
+            "reset operation is not supported by this driver: {}",
+            String::from_utf8_lossy(name)
         )
         .into())
     }
@@ -335,8 +363,10 @@ impl MergeState {
     /// Returns [`StepError::ReadCommitMessage`] if a commit message cannot be read
     /// (needed for squash/fixup operations).
     /// Returns [`StepError::Exec`] if an `exec` command fails.
-    /// Also returns `StepError::ResolvePrefix` for unsupported operations (label,
-    /// reset, update-ref, revert, merge) rather than silently skipping them.
+    /// Returns [`StepError::Label`] or [`StepError::Reset`] if a rebase-merges
+    /// label/reset operation fails.
+    /// Also returns `StepError::ResolvePrefix` for unsupported operations (update-ref,
+    /// revert, merge) rather than silently skipping them.
     pub fn step(&mut self, driver: &dyn Driver, rebase_merge_dir: &Path) -> Result<StepOutcome, StepError> {
         if self.todo.operations.is_empty() {
             return Ok(StepOutcome::Done);
@@ -520,11 +550,22 @@ impl MergeState {
                 })?;
                 Ok(StepOutcome::Skipped)
             }
-            Operation::Label { .. }
-            | Operation::Reset { .. }
-            | Operation::UpdateRef { .. }
-            | Operation::Revert { .. }
-            | Operation::Merge { .. } => {
+            Operation::Label { name } => {
+                driver.label(name).map_err(|source| StepError::Label {
+                    name: String::from_utf8_lossy(name).into_owned(),
+                    source,
+                })?;
+                Ok(StepOutcome::Skipped)
+            }
+            Operation::Reset { name } => {
+                driver.reset_to_label(name).map_err(|source| StepError::Reset {
+                    name: String::from_utf8_lossy(name).into_owned(),
+                    source,
+                })?;
+                self.accumulated_squash_message = None;
+                Ok(StepOutcome::Skipped)
+            }
+            Operation::UpdateRef { .. } | Operation::Revert { .. } | Operation::Merge { .. } => {
                 // These operations are not yet supported by the rebase driver.
                 // Return an error rather than silently skipping, as skipping could
                 // corrupt repository state (e.g., missed Reset or Label operations).

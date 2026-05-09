@@ -237,6 +237,36 @@ impl Driver for GitCliDriver {
         }
         Ok(())
     }
+
+    fn label(&self, name: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let name = String::from_utf8_lossy(name);
+        let reference = format!("refs/rewritten/{name}");
+        let output = Command::new("git")
+            .args(["update-ref", &reference, "HEAD"])
+            .current_dir(&self.workdir)
+            .output()
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("label failed for {reference}: {stderr}").into());
+        }
+        Ok(())
+    }
+
+    fn reset_to_label(&self, name: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let name = String::from_utf8_lossy(name);
+        let reference = format!("refs/rewritten/{name}");
+        let output = Command::new("git")
+            .args(["reset", "--hard", &reference])
+            .current_dir(&self.workdir)
+            .output()
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("reset failed for {reference}: {stderr}").into());
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1461,6 +1491,59 @@ mod mixed_operations {
         assert_eq!(r, StepOutcome::Skipped);
         assert_eq!(head_oid(&fix.workdir), head_before, "exec should not create a commit");
         assert_eq!(std::fs::read_to_string(fix.workdir.join("exec.txt"))?.trim(), "exec-ok");
+
+        Ok(())
+    }
+
+    #[test]
+    fn label_and_reset_move_head_in_real_repo() -> Result<(), Box<dyn std::error::Error>> {
+        let fix = RebaseFixture::new_no_conflict();
+        let driver = fix.driver();
+        let rebase_dir = fix.rebase_dir();
+
+        fix.detach_head_to("B");
+        let onto = head_oid(&fix.workdir);
+
+        let mut state = MergeState {
+            head_name: "refs/heads/feature".into(),
+            onto: fix.oid("B"),
+            orig_head: fix.oid("D"),
+            interactive: true,
+            todo: TodoList {
+                operations: vec![
+                    Operation::Label { name: "onto".into() },
+                    Operation::Pick {
+                        commit: fix.prefix("C"),
+                        summary: "C: add feature1.txt".into(),
+                    },
+                    Operation::Label { name: "feature".into() },
+                    Operation::Reset { name: "onto".into() },
+                    Operation::Reset { name: "feature".into() },
+                ]
+                .into(),
+            },
+            done: TodoList {
+                operations: std::collections::VecDeque::new(),
+            },
+            current_step: 0,
+            total_steps: 5,
+            stopped_sha: None,
+            accumulated_squash_message: None,
+        };
+
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+        assert!(matches!(state.step(&driver, &rebase_dir)?, StepOutcome::Applied { .. }));
+        let feature_head = head_oid(&fix.workdir);
+        assert!(fix.workdir.join("feature1.txt").exists());
+
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+        assert_eq!(head_oid(&fix.workdir), onto);
+        assert!(!fix.workdir.join("feature1.txt").exists());
+
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+        assert_eq!(head_oid(&fix.workdir), feature_head);
+        assert!(fix.workdir.join("feature1.txt").exists());
 
         Ok(())
     }
