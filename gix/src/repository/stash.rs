@@ -21,6 +21,8 @@ fn validate_path_within_worktree(path: &[u8]) -> Result<(), ApplyError> {
     Ok(())
 }
 
+type StashIndexChange = (Vec<u8>, ObjectId, gix_index::entry::Mode);
+
 /// A single entry from the stash reflog.
 #[derive(Debug)]
 pub struct StashEntry<'repo> {
@@ -58,6 +60,17 @@ pub struct StashSaveOptions<'a> {
     /// on the stash commit, matching C Git's format. After stashing, the untracked files
     /// are removed from the worktree.
     pub include_untracked: bool,
+}
+
+/// Options for [`Repository::stash_apply_opts()`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StashApplyOptions {
+    /// If `true`, restore the stashed index state as well as the worktree state.
+    ///
+    /// This matches `git stash apply --index`. The default `git stash apply`
+    /// behavior restores the stashed worktree content while leaving the index in
+    /// its pre-apply state.
+    pub reinstate_index: bool,
 }
 
 /// The error returned by [`Repository::stash_save()`].
@@ -449,23 +462,93 @@ impl Repository {
         Ok(stash_commit_id)
     }
 
+    fn index_delta(
+        base_index: &gix_index::File,
+        target_index: &gix_index::File,
+    ) -> (Vec<StashIndexChange>, Vec<Vec<u8>>) {
+        let unconflicted = gix_index::entry::Stage::Unconflicted;
+        let mut changed: Vec<StashIndexChange> = Vec::new();
+        let mut deleted: Vec<Vec<u8>> = Vec::new();
+
+        for target_entry in target_index.entries() {
+            let path = target_entry.path(target_index);
+            match base_index.entry_by_path_and_stage(path, unconflicted) {
+                Some(base_entry) => {
+                    if target_entry.id != base_entry.id || target_entry.mode != base_entry.mode {
+                        let path_bytes: &[u8] = path;
+                        changed.push((path_bytes.to_vec(), target_entry.id, target_entry.mode));
+                    }
+                }
+                None => {
+                    let path_bytes: &[u8] = path;
+                    changed.push((path_bytes.to_vec(), target_entry.id, target_entry.mode));
+                }
+            }
+        }
+
+        for base_entry in base_index.entries() {
+            let path = base_entry.path(base_index);
+            if target_index.entry_by_path_and_stage(path, unconflicted).is_none() {
+                let path_bytes: &[u8] = path;
+                deleted.push(path_bytes.to_vec());
+            }
+        }
+
+        (changed, deleted)
+    }
+
+    fn apply_index_delta(index: &mut gix_index::File, changed: &[StashIndexChange], deleted: &[Vec<u8>]) {
+        use crate::bstr::ByteSlice;
+
+        let unconflicted = gix_index::entry::Stage::Unconflicted;
+        for (path, new_id, new_mode) in changed {
+            let path_bstr = path.as_bstr();
+            if let Some(idx) = index.entry_index_by_path_and_stage(path_bstr, unconflicted) {
+                index.entries_mut()[idx].id = *new_id;
+                index.entries_mut()[idx].mode = *new_mode;
+            } else {
+                index.add_entry(
+                    gix_index::entry::Stat::default(),
+                    *new_id,
+                    gix_index::entry::Flags::empty(),
+                    *new_mode,
+                    path_bstr,
+                );
+            }
+        }
+
+        if !deleted.is_empty() {
+            index.remove_entries(|_, path, _entry| {
+                let path_bytes: &[u8] = path;
+                deleted.iter().any(|dp| dp.as_slice() == path_bytes)
+            });
+        }
+
+        index.sort_entries();
+    }
+
     /// Apply a stash entry by its index (0 = most recent) to the current index and working tree.
     ///
-    /// This implements the core of `git stash apply [stash@{n}]`:
+    /// This implements the default `git stash apply [stash@{n}]` behavior: restore
+    /// stashed worktree content while leaving the index in its pre-apply state.
+    /// Use [`stash_apply_opts()`](Self::stash_apply_opts) with
+    /// [`StashApplyOptions::reinstate_index`] to match `git stash apply --index`.
     ///
-    /// 1. Reads the stash commit and its first parent (HEAD at stash time).
-    /// 2. Computes which index entries were changed by the stash (diff stash-parent-tree vs stash-tree).
-    /// 3. Applies those changes to the current index, failing if any affected path has local modifications.
-    /// 4. Writes the updated index and checks out changed files to the worktree.
+    /// The stash entry is **not** removed; use [`stash_pop()`](Self::stash_pop) for apply+drop.
+    pub fn stash_apply(&self, index: usize) -> Result<(), ApplyError> {
+        self.stash_apply_opts(index, StashApplyOptions::default())
+    }
+
+    /// Apply a stash entry with explicit options.
+    ///
+    /// This implements the core of `git stash apply [--index] [stash@{n}]`.
     ///
     /// The stash entry is **not** removed; use [`stash_pop()`](Self::stash_pop) for apply+drop.
     ///
     /// # Limitations
     ///
-    /// The stash save implementation captures full worktree state (via a separate worktree tree),
-    /// and apply diffs the stash's worktree tree against the parent tree to restore changes to
-    /// both the index and working tree. However, three-way merge conflict handling and
-    /// `--index` mode (restoring staged vs unstaged distinction) are not yet implemented.
+    /// Three-way merge conflict handling is not yet implemented; apply fails instead
+    /// of merging when affected paths have local modifications.
     ///
     /// # Errors
     ///
@@ -475,7 +558,7 @@ impl Repository {
     /// Returns [`ApplyError::Conflict`] if applying the stash would overwrite local modifications.
     /// Returns [`ApplyError::PathTraversal`] if an untracked file path contains `..` components.
     /// Other variants cover object lookup, commit decoding, index I/O, and checkout failures.
-    pub fn stash_apply(&self, index: usize) -> Result<(), ApplyError> {
+    pub fn stash_apply_opts(&self, index: usize, options: StashApplyOptions) -> Result<(), ApplyError> {
         if self.is_bare() {
             return Err(ApplyError::BareRepository);
         }
@@ -505,44 +588,32 @@ impl Repository {
             .map_err(|_| ApplyError::NoStash)?;
         let stash_parent_tree_id = stash_parent_commit.tree_id().map_err(ApplyError::DecodeCommit)?;
 
-        // Build indexes from the stash parent tree and stash tree to compute the diff.
-        // The indexes are sorted, so we use binary search instead of building HashMaps.
+        // Build indexes from the stash parent tree and stash tree to compute the
+        // worktree diff. The indexes are sorted, so diffing uses binary search.
         let parent_index = self
             .index_from_tree(&stash_parent_tree_id)
             .map_err(ApplyError::IndexFromTree)?;
         let stash_index = self
             .index_from_tree(&stash_tree_id)
             .map_err(ApplyError::IndexFromTree)?;
+        let (changed, deleted) = Self::index_delta(&parent_index, &stash_index);
 
-        // Compute which entries changed in the stash vs its parent using binary search
-        // on sorted index entries, avoiding HashMap construction with cloned paths.
         let unconflicted = gix_index::entry::Stage::Unconflicted;
-        let mut changed: Vec<(Vec<u8>, ObjectId, gix_index::entry::Mode)> = Vec::new();
-        let mut deleted: Vec<Vec<u8>> = Vec::new();
-
-        for stash_entry in stash_index.entries() {
-            let path = stash_entry.path(&stash_index);
-            match parent_index.entry_by_path_and_stage(path, unconflicted) {
-                Some(parent_entry) => {
-                    if stash_entry.id != parent_entry.id || stash_entry.mode != parent_entry.mode {
-                        let path_bytes: &[u8] = path;
-                        changed.push((path_bytes.to_vec(), stash_entry.id, stash_entry.mode));
-                    }
-                }
-                None => {
-                    let path_bytes: &[u8] = path;
-                    changed.push((path_bytes.to_vec(), stash_entry.id, stash_entry.mode));
-                }
-            }
-        }
-
-        for parent_entry in parent_index.entries() {
-            let path = parent_entry.path(&parent_index);
-            if stash_index.entry_by_path_and_stage(path, unconflicted).is_none() {
-                let path_bytes: &[u8] = path;
-                deleted.push(path_bytes.to_vec());
-            }
-        }
+        let index_delta = if options.reinstate_index {
+            let index_parent_id = parent_ids.get(1).ok_or(ApplyError::NoStash)?.detach();
+            let index_parent_commit = self
+                .find_object(index_parent_id)?
+                .try_into_commit()
+                .map_err(|_| ApplyError::NoStash)?;
+            let index_parent_tree_id = index_parent_commit.tree_id().map_err(ApplyError::DecodeCommit)?;
+            let index_parent_index = self
+                .index_from_tree(&index_parent_tree_id)
+                .map_err(ApplyError::IndexFromTree)?;
+            let delta = Self::index_delta(&parent_index, &index_parent_index);
+            Some(delta)
+        } else {
+            None
+        };
 
         // Collect untracked files from the third parent (if any).
         let mut untracked_files: Vec<(Vec<u8>, ObjectId)> = Vec::new();
@@ -562,13 +633,15 @@ impl Repository {
             }
         }
 
-        if changed.is_empty() && deleted.is_empty() && untracked_files.is_empty() {
+        let has_index_changes =
+            matches!(&index_delta, Some((changed, deleted)) if !changed.is_empty() || !deleted.is_empty());
+        if changed.is_empty() && deleted.is_empty() && untracked_files.is_empty() && !has_index_changes {
             return Ok(());
         }
 
         // Load the current index and check for conflicts.
         // Handle repos where .git/index doesn't exist yet by loading from the parent tree.
-        let mut current_index = match self.open_index() {
+        let current_index = match self.open_index() {
             Ok(idx) => idx,
             Err(_) => self
                 .index_from_tree(&stash_parent_tree_id)
@@ -652,6 +725,42 @@ impl Repository {
             }
         }
 
+        if let Some((index_changed, index_deleted)) = &index_delta {
+            for (path, target_id, target_mode) in index_changed {
+                use crate::bstr::ByteSlice;
+                let path_bstr = path.as_bstr();
+                let current_entry = current_index.entry_by_path_and_stage(path_bstr, unconflicted);
+                let parent_entry = parent_index.entry_by_path_and_stage(path_bstr, unconflicted);
+                match (current_entry, parent_entry) {
+                    (Some(current_entry), Some(parent_entry)) => {
+                        if current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode {
+                            conflicts.push(BString::from(path.as_slice()));
+                        }
+                    }
+                    (None, Some(_)) => conflicts.push(BString::from(path.as_slice())),
+                    (Some(current_entry), None) => {
+                        if current_entry.id != *target_id || current_entry.mode != *target_mode {
+                            conflicts.push(BString::from(path.as_slice()));
+                        }
+                    }
+                    (None, None) => {}
+                }
+            }
+
+            for path in index_deleted {
+                use crate::bstr::ByteSlice;
+                let path_bstr = path.as_bstr();
+                if let (Some(current_entry), Some(parent_entry)) = (
+                    current_index.entry_by_path_and_stage(path_bstr, unconflicted),
+                    parent_index.entry_by_path_and_stage(path_bstr, unconflicted),
+                ) {
+                    if current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode {
+                        conflicts.push(BString::from(path.as_slice()));
+                    }
+                }
+            }
+        }
+
         // Check untracked files for conflicts: if a file from the untracked commit
         // already exists in the worktree with different content, it's a conflict.
         for (path, blob_id) in &untracked_files {
@@ -680,50 +789,32 @@ impl Repository {
         }
 
         let index_before_apply = current_index.clone();
+        let mut worktree_index = current_index;
 
-        // Apply changes to the current index using binary search for lookups.
-        for (path, new_id, new_mode) in &changed {
-            use crate::bstr::ByteSlice;
-            let path_bstr = path.as_bstr();
-            if let Some(idx) = current_index.entry_index_by_path_and_stage(path_bstr, unconflicted) {
-                current_index.entries_mut()[idx].id = *new_id;
-                current_index.entries_mut()[idx].mode = *new_mode;
-            } else {
-                current_index.add_entry(
-                    gix_index::entry::Stat::default(),
-                    *new_id,
-                    gix_index::entry::Flags::empty(),
-                    *new_mode,
-                    path_bstr,
-                );
-            }
-        }
+        // Materialize the stashed worktree tree via a temporary index. The final
+        // index may differ from this index for default apply and `--index`.
+        Self::apply_index_delta(&mut worktree_index, &changed, &deleted);
 
-        // Remove deleted entries.
-        if !deleted.is_empty() {
-            current_index.remove_entries(|_, path, _entry| {
-                let path_bytes: &[u8] = path;
-                deleted.iter().any(|dp| dp.as_slice() == path_bytes)
-            });
-        }
-
-        current_index.sort_entries();
-
-        // Write the updated index.
-        current_index
+        worktree_index
             .write(Default::default())
             .map_err(ApplyError::WriteIndex)?;
 
         // Remove files that disappeared from the applied tree before checkout writes
         // the remaining entries. Checkout itself doesn't delete files absent from
         // the target index.
-        Self::remove_worktree_files_not_in_index(&index_before_apply, &current_index, &workdir, true);
+        Self::remove_worktree_files_not_in_index(&index_before_apply, &worktree_index, &workdir, true);
 
         // Check out affected files to the worktree. If the resulting index is
         // empty, there is nothing for checkout to materialize.
-        if !current_index.entries().is_empty() {
-            self.checkout_index_to_worktree_impl(&mut current_index, &workdir)?;
+        if !worktree_index.entries().is_empty() {
+            self.checkout_index_to_worktree_impl(&mut worktree_index, &workdir)?;
         }
+
+        let mut final_index = index_before_apply.clone();
+        if let Some((index_changed, index_deleted)) = &index_delta {
+            Self::apply_index_delta(&mut final_index, index_changed, index_deleted);
+        }
+        final_index.write(Default::default()).map_err(ApplyError::WriteIndex)?;
 
         // Restore untracked files from the third parent.
         for (path, blob_id) in &untracked_files {
@@ -749,6 +840,15 @@ impl Repository {
     /// If the apply fails, the stash entry is **not** dropped.
     pub fn stash_pop(&self, index: usize) -> Result<(), PopError> {
         self.stash_apply(index).map_err(PopError::Apply)?;
+        self.stash_drop(index).map_err(PopError::Drop)?;
+        Ok(())
+    }
+
+    /// Apply a stash entry with explicit options and then drop it.
+    ///
+    /// If the apply fails, the stash entry is **not** dropped.
+    pub fn stash_pop_opts(&self, index: usize, options: StashApplyOptions) -> Result<(), PopError> {
+        self.stash_apply_opts(index, options).map_err(PopError::Apply)?;
         self.stash_drop(index).map_err(PopError::Drop)?;
         Ok(())
     }
