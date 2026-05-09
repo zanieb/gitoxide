@@ -12,21 +12,28 @@ fn verify_on_exfat() -> crate::Result<()> {
 
     let _cleanup = {
         // Mount dmg file
-        Command::new("hdiutil")
+        let status = Command::new("hdiutil")
             .args(["attach", "-nobrowse", "-mountpoint"])
             .arg(mount_point.path())
             .arg(fixtures.as_path().join("exfat_repo.dmg"))
             .status()?;
+        if !status.success() {
+            eprintln!("skipping exFAT discovery test: hdiutil attach failed with status {status}");
+            return Ok(());
+        }
 
         // Ensure that the mount point is always cleaned up
         defer::defer({
             let mount_point = mount_point.path().to_owned();
             move || {
-                Command::new("hdiutil")
+                let status = Command::new("hdiutil")
                     .arg("detach")
                     .arg(&mount_point)
                     .status()
-                    .expect("detach temporary test dmg filesystem successfully");
+                    .expect("hdiutil is still available to detach temporary test dmg filesystem");
+                if !status.success() {
+                    eprintln!("failed to detach temporary test dmg filesystem with status {status}");
+                }
             }
         })
     };
