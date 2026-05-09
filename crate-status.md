@@ -433,7 +433,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
     2. Implement access of trees from commit-graph and fill that information into the traversal info by default.
     3. commit-graph with bloom filter, used to quickly check if a commit has a path.
 * [x] API documentation
-    * [ ] Examples
+    * [x] Examples
 
 ### gix-traverse
 
