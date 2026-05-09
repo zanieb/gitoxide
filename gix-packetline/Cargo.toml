@@ -8,11 +8,15 @@ license = "MIT OR Apache-2.0"
 description = "A crate of the gitoxide project implementing the pkt-line serialization format"
 authors = ["Sebastian Thiel <sebastian.thiel@icloud.com>"]
 edition = "2024"
-include = ["/src/**/*", "/LICENSE-*"]
+include = ["/src/**/*", "/examples/**/*", "/LICENSE-*"]
 rust-version = "1.85"
 
 [lib]
 doctest = true
+
+[[example]]
+name = "encode-decode"
+required-features = ["blocking-io"]
 
 [features]
 #! By default, all IO related capabilities will be missing unless one of the following is chosen.
