@@ -1015,6 +1015,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
   * **loose file**
     * [x] ref validation
     * [x] find single ref by name
+    * [x] special handling of `FETCH_HEAD` and `MERGE_HEAD`
     * [x] iterate refs with optional prefix
     * **worktree support**
         * [x] support multiple bases and classify refs

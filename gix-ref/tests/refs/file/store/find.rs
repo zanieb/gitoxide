@@ -102,7 +102,10 @@ mod existing {
 }
 
 mod loose {
-    use crate::{file::store, hex_to_id};
+    use crate::{
+        file::{store, store_writable},
+        hex_to_id,
+    };
 
     mod existing {
         use std::path::Path;
@@ -148,6 +151,16 @@ mod loose {
             hex_to_id("134385f6d781b7e97062102c6a483440bfda2a03"),
             "despite being special, we are able to read the first commit out of a typical FETCH_HEAD"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn merge_head_can_be_parsed() -> crate::Result {
+        let (_tmp, store) = store_writable("make_ref_repository.sh")?;
+        let id = hex_to_id("9064ea31fae4dc59a56bdd3a06c0ddc990ee689e");
+        std::fs::write(store.git_dir().join("MERGE_HEAD"), format!("{id}\n"))?;
+
+        assert_eq!(store.find_loose("MERGE_HEAD")?.target.id(), id);
         Ok(())
     }
 
