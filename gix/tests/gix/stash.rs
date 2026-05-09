@@ -7,6 +7,28 @@ mod stash {
         repo_rw("make_stash_repo.sh")
     }
 
+    fn write_and_commit_file(
+        workdir: &std::path::Path,
+        path: &str,
+        content: &str,
+        message: &str,
+    ) -> crate::Result<()> {
+        std::fs::write(workdir.join(path), content)?;
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(workdir)
+            .args(["add", path])
+            .status()?;
+        assert!(status.success(), "git add should succeed");
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(workdir)
+            .args(["commit", "-q", "-m", message])
+            .status()?;
+        assert!(status.success(), "git commit should succeed");
+        Ok(())
+    }
+
     #[test]
     fn stash_list_empty_when_no_stashes() -> crate::Result {
         let (repo, _tmp) = repo_rw_stash()?;
@@ -1123,6 +1145,74 @@ mod stash {
         assert!(
             err_msg.contains("file.txt"),
             "error should mention the conflicting file: {err_msg}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn stash_apply_auto_merges_non_overlapping_worktree_changes() -> crate::Result {
+        let (repo, tmp) = repo_rw("make_reset_repo.sh")?;
+        let workdir = tmp.path().to_owned();
+        let path = workdir.join("first");
+
+        write_and_commit_file(&workdir, "first", "one\ntwo\nthree\n", "base multiline")?;
+
+        std::fs::write(&path, "ONE from stash\ntwo\nthree\n")?;
+        repo.stash_save(None)?;
+
+        std::fs::write(&path, "one\ntwo\nTHREE local\n")?;
+        repo.stash_apply(0)?;
+
+        assert_eq!(
+            std::fs::read_to_string(&path)?,
+            "ONE from stash\ntwo\nTHREE local\n",
+            "non-overlapping local and stashed edits should be merged"
+        );
+
+        let index = repo.open_index()?;
+        let entry = index
+            .entries()
+            .iter()
+            .find(|entry| {
+                let path: &[u8] = entry.path(&index);
+                path == b"first"
+            })
+            .expect("first remains in the index");
+        let base_blob = repo.write_blob("one\ntwo\nthree\n")?;
+        assert_eq!(
+            entry.id,
+            base_blob.detach(),
+            "default apply should leave the index at HEAD"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn stash_apply_rejects_overlapping_worktree_changes() -> crate::Result {
+        let (repo, tmp) = repo_rw("make_reset_repo.sh")?;
+        let workdir = tmp.path().to_owned();
+        let path = workdir.join("first");
+
+        write_and_commit_file(&workdir, "first", "one\ntwo\nthree\n", "base multiline")?;
+
+        std::fs::write(&path, "ONE from stash\ntwo\nthree\n")?;
+        repo.stash_save(None)?;
+
+        std::fs::write(&path, "ONE local\ntwo\nthree\n")?;
+        let err = repo
+            .stash_apply(0)
+            .expect_err("overlapping stashed and local edits should still conflict");
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("first"),
+            "error should mention the overlapping file: {err_msg}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path)?,
+            "ONE local\ntwo\nthree\n",
+            "failed apply should leave the local worktree content untouched"
         );
 
         Ok(())

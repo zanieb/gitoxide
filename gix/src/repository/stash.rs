@@ -548,8 +548,9 @@ impl Repository {
     ///
     /// # Limitations
     ///
-    /// Three-way merge conflict handling is not yet implemented; apply fails instead
-    /// of merging when affected paths have local modifications.
+    /// Non-overlapping text edits to an affected path are merged into the worktree.
+    /// Overlapping edits still fail with [`ApplyError::Conflict`] instead of writing
+    /// conflict markers and unmerged index stages.
     ///
     /// # Errors
     ///
@@ -656,6 +657,7 @@ impl Repository {
         // Check both index-level changes AND worktree-level changes.
         // Uses binary search on sorted indexes instead of HashMaps.
         let mut conflicts: Vec<BString> = Vec::new();
+        let mut merged_worktree_files: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         for (path, stash_id, _mode) in &changed {
             use crate::bstr::ByteSlice;
             let path_bstr = path.as_bstr();
@@ -677,7 +679,18 @@ impl Repository {
                         gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)
                     {
                         if worktree_oid != current_entry.id {
-                            conflicts.push(BString::from(path.as_slice()));
+                            if let Some(merged) = self.try_auto_merge_stash_worktree_file(
+                                path,
+                                parent_index
+                                    .entry_by_path_and_stage(path_bstr, unconflicted)
+                                    .map(|e| e.id),
+                                *stash_id,
+                                &content,
+                            )? {
+                                merged_worktree_files.push((path.clone(), merged));
+                            } else {
+                                conflicts.push(BString::from(path.as_slice()));
+                            }
                         }
                     }
                 }
@@ -809,6 +822,17 @@ impl Repository {
         // empty, there is nothing for checkout to materialize.
         if !worktree_index.entries().is_empty() {
             self.checkout_index_to_worktree_impl(&mut worktree_index, &workdir)?;
+        }
+
+        for (path, content) in &merged_worktree_files {
+            validate_path_within_worktree(path)?;
+            let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
+                path.as_slice(),
+            )));
+            if let Some(parent) = file_path.parent() {
+                std::fs::create_dir_all(parent).map_err(ApplyError::ObjectsToArc)?;
+            }
+            std::fs::write(&file_path, content).map_err(ApplyError::ObjectsToArc)?;
         }
 
         let mut final_index = index_before_apply.clone();
@@ -955,6 +979,34 @@ impl Repository {
         }
 
         Ok(())
+    }
+
+    fn try_auto_merge_stash_worktree_file(
+        &self,
+        path: &[u8],
+        base_id: Option<ObjectId>,
+        stash_id: ObjectId,
+        current_worktree: &[u8],
+    ) -> Result<Option<Vec<u8>>, ApplyError> {
+        let Some(base_id) = base_id else {
+            return Ok(None);
+        };
+
+        let base = self.find_object(base_id)?;
+        let stash = self.find_object(stash_id)?;
+        if looks_binary(base.data.as_ref()) || looks_binary(current_worktree) || looks_binary(stash.data.as_ref()) {
+            return Ok(None);
+        }
+        let Some(merged) = merge_non_overlapping_lines(base.data.as_ref(), current_worktree, stash.data.as_ref())
+        else {
+            return Ok(None);
+        };
+
+        if merged == current_worktree {
+            return Ok(None);
+        }
+        validate_path_within_worktree(path)?;
+        Ok(Some(merged))
     }
 
     /// Collect untracked files in the worktree (not in the index, not ignored).
@@ -1329,4 +1381,165 @@ fn parse_reflog_new_oid(line: &[u8], hash_kind: gix_hash::Kind) -> Option<Object
     }
     let hex = &line[start..end];
     ObjectId::from_hex(hex).ok()
+}
+
+#[derive(Debug, Clone)]
+struct LineMergeHunk {
+    base: std::ops::Range<usize>,
+    target: std::ops::Range<usize>,
+}
+
+fn merge_non_overlapping_lines(base: &[u8], ours: &[u8], theirs: &[u8]) -> Option<Vec<u8>> {
+    let ours_hunks = line_diff_hunks(base, ours);
+    let theirs_hunks = line_diff_hunks(base, theirs);
+
+    if ours_hunks.is_empty() {
+        return Some(theirs.to_vec());
+    }
+    if theirs_hunks.is_empty() {
+        return Some(ours.to_vec());
+    }
+
+    let base_lines = split_lines(base);
+    let ours_lines = split_lines(ours);
+    let theirs_lines = split_lines(theirs);
+
+    let mut out = Vec::new();
+    let mut base_cursor = 0usize;
+    let mut ours_idx = 0usize;
+    let mut theirs_idx = 0usize;
+
+    while ours_idx < ours_hunks.len() || theirs_idx < theirs_hunks.len() {
+        match (ours_hunks.get(ours_idx), theirs_hunks.get(theirs_idx)) {
+            (Some(ours_hunk), Some(theirs_hunk)) => {
+                if line_hunks_overlap(ours_hunk, theirs_hunk) {
+                    if ours_hunk.base != theirs_hunk.base
+                        || !line_ranges_equal(
+                            &ours_lines,
+                            ours_hunk.target.clone(),
+                            &theirs_lines,
+                            theirs_hunk.target.clone(),
+                        )
+                    {
+                        return None;
+                    }
+                    append_line_hunk(&mut out, &base_lines, &ours_lines, ours_hunk, &mut base_cursor)?;
+                    ours_idx += 1;
+                    theirs_idx += 1;
+                } else if ours_hunk.base.start < theirs_hunk.base.start {
+                    append_line_hunk(&mut out, &base_lines, &ours_lines, ours_hunk, &mut base_cursor)?;
+                    ours_idx += 1;
+                } else {
+                    append_line_hunk(&mut out, &base_lines, &theirs_lines, theirs_hunk, &mut base_cursor)?;
+                    theirs_idx += 1;
+                }
+            }
+            (Some(ours_hunk), None) => {
+                append_line_hunk(&mut out, &base_lines, &ours_lines, ours_hunk, &mut base_cursor)?;
+                ours_idx += 1;
+            }
+            (None, Some(theirs_hunk)) => {
+                append_line_hunk(&mut out, &base_lines, &theirs_lines, theirs_hunk, &mut base_cursor)?;
+                theirs_idx += 1;
+            }
+            (None, None) => break,
+        }
+    }
+
+    append_lines(&mut out, &base_lines, base_cursor..base_lines.len());
+    Some(out)
+}
+
+fn line_diff_hunks(base: &[u8], target: &[u8]) -> Vec<LineMergeHunk> {
+    struct HunkCollector {
+        hunks: Vec<LineMergeHunk>,
+    }
+
+    impl gix_diff::blob::Sink for HunkCollector {
+        type Out = Vec<LineMergeHunk>;
+
+        fn process_change(&mut self, before: std::ops::Range<u32>, after: std::ops::Range<u32>) {
+            self.hunks.push(LineMergeHunk {
+                base: before.start as usize..before.end as usize,
+                target: after.start as usize..after.end as usize,
+            });
+        }
+
+        fn finish(self) -> Self::Out {
+            self.hunks
+        }
+    }
+
+    let input = gix_diff::blob::intern::InternedInput::new(
+        gix_diff::blob::sources::byte_lines_with_terminator(base),
+        gix_diff::blob::sources::byte_lines_with_terminator(target),
+    );
+    gix_diff::blob::diff(
+        gix_diff::blob::Algorithm::Histogram,
+        &input,
+        HunkCollector { hunks: Vec::new() },
+    )
+}
+
+fn split_lines(data: &[u8]) -> Vec<&[u8]> {
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    for (idx, byte) in data.iter().enumerate() {
+        if *byte == b'\n' {
+            lines.push(&data[start..=idx]);
+            start = idx + 1;
+        }
+    }
+    if start < data.len() {
+        lines.push(&data[start..]);
+    }
+    lines
+}
+
+fn line_hunks_overlap(a: &LineMergeHunk, b: &LineMergeHunk) -> bool {
+    if a.base.is_empty() && b.base.is_empty() {
+        return a.base.start == b.base.start;
+    }
+    if a.base.is_empty() {
+        return b.base.start <= a.base.start && a.base.start < b.base.end;
+    }
+    if b.base.is_empty() {
+        return a.base.start <= b.base.start && b.base.start < a.base.end;
+    }
+    a.base.start < b.base.end && b.base.start < a.base.end
+}
+
+fn append_line_hunk(
+    out: &mut Vec<u8>,
+    base_lines: &[&[u8]],
+    target_lines: &[&[u8]],
+    hunk: &LineMergeHunk,
+    base_cursor: &mut usize,
+) -> Option<()> {
+    if hunk.base.start < *base_cursor {
+        return None;
+    }
+    append_lines(out, base_lines, *base_cursor..hunk.base.start);
+    append_lines(out, target_lines, hunk.target.clone());
+    *base_cursor = hunk.base.end;
+    Some(())
+}
+
+fn append_lines(out: &mut Vec<u8>, lines: &[&[u8]], range: std::ops::Range<usize>) {
+    for line in &lines[range] {
+        out.extend_from_slice(line);
+    }
+}
+
+fn line_ranges_equal(
+    lhs: &[&[u8]],
+    lhs_range: std::ops::Range<usize>,
+    rhs: &[&[u8]],
+    rhs_range: std::ops::Range<usize>,
+) -> bool {
+    lhs_range.len() == rhs_range.len() && lhs[lhs_range].iter().zip(&rhs[rhs_range]).all(|(lhs, rhs)| lhs == rhs)
+}
+
+fn looks_binary(data: &[u8]) -> bool {
+    data[..data.len().min(8000)].contains(&0)
 }
