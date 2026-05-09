@@ -18,8 +18,7 @@ pub enum Delay {
     /// Do not delay the processing, and force it to happen immediately. In this case, no delayed processing will occur
     /// even if the filter supports it.
     ///
-    /// This is the default as it requires no special precautions to be taken by the caller as
-    /// outputs will be produced immediately.
+    /// This requires no special precautions to be taken by the caller as outputs will be produced immediately.
     Forbid,
 }
 
