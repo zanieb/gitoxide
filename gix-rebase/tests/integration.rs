@@ -209,6 +209,34 @@ impl Driver for GitCliDriver {
         }
         Ok(())
     }
+
+    fn execute(&self, command: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let command = String::from_utf8_lossy(command);
+        let mut shell = if cfg!(windows) {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", command.as_ref()]);
+            cmd
+        } else {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", command.as_ref()]);
+            cmd
+        };
+
+        let output = shell
+            .current_dir(&self.workdir)
+            .output()
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+        if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "exec command failed with status {}: stdout: {stdout}; stderr: {stderr}",
+                output.status
+            )
+            .into());
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,6 +1424,43 @@ mod mixed_operations {
         let r = state.step(&driver, &rebase_dir)?;
         assert!(matches!(r, StepOutcome::Applied { .. }));
         assert!(fix.workdir.join("feature1.txt").exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn exec_runs_in_real_repo() -> Result<(), Box<dyn std::error::Error>> {
+        let fix = RebaseFixture::new_no_conflict();
+        let driver = fix.driver();
+        let rebase_dir = fix.rebase_dir();
+
+        fix.detach_head_to("B");
+        let head_before = head_oid(&fix.workdir);
+
+        let mut state = MergeState {
+            head_name: "refs/heads/feature".into(),
+            onto: fix.oid("B"),
+            orig_head: fix.oid("D"),
+            interactive: true,
+            todo: TodoList {
+                operations: vec![Operation::Exec {
+                    command: "echo exec-ok > exec.txt".into(),
+                }]
+                .into(),
+            },
+            done: TodoList {
+                operations: std::collections::VecDeque::new(),
+            },
+            current_step: 0,
+            total_steps: 1,
+            stopped_sha: None,
+            accumulated_squash_message: None,
+        };
+
+        let r = state.step(&driver, &rebase_dir)?;
+        assert_eq!(r, StepOutcome::Skipped);
+        assert_eq!(head_oid(&fix.workdir), head_before, "exec should not create a commit");
+        assert_eq!(std::fs::read_to_string(fix.workdir.join("exec.txt"))?.trim(), "exec-ok");
 
         Ok(())
     }

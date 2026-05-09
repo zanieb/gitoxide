@@ -628,6 +628,8 @@ mod driver {
         cherry_pick_calls: RefCell<Vec<(ObjectId, Option<Vec<u8>>)>>,
         /// Tracks update_head calls.
         update_head_calls: RefCell<Vec<ObjectId>>,
+        /// Tracks exec commands.
+        execute_calls: RefCell<Vec<Vec<u8>>>,
         /// If set, cherry_pick returns this ObjectId as the new commit.
         /// Increments by 1 byte each call to simulate unique commits.
         next_commit_counter: RefCell<u32>,
@@ -637,6 +639,8 @@ mod driver {
         fail_on: RefCell<std::collections::HashSet<ObjectId>>,
         /// If set, resolve_commit will fail for these prefix hex strings.
         resolve_fail_on: RefCell<std::collections::HashSet<String>>,
+        /// If set, execute will fail for these command strings.
+        execute_fail_on: RefCell<std::collections::HashSet<Vec<u8>>>,
     }
 
     impl MockDriver {
@@ -646,10 +650,12 @@ mod driver {
                 messages: HashMap::new(),
                 cherry_pick_calls: RefCell::new(Vec::new()),
                 update_head_calls: RefCell::new(Vec::new()),
+                execute_calls: RefCell::new(Vec::new()),
                 next_commit_counter: RefCell::new(1),
                 conflict_on: RefCell::new(std::collections::HashSet::new()),
                 fail_on: RefCell::new(std::collections::HashSet::new()),
                 resolve_fail_on: RefCell::new(std::collections::HashSet::new()),
+                execute_fail_on: RefCell::new(std::collections::HashSet::new()),
             }
         }
 
@@ -719,6 +725,14 @@ mod driver {
 
         fn update_head(&self, commit_id: ObjectId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.update_head_calls.borrow_mut().push(commit_id);
+            Ok(())
+        }
+
+        fn execute(&self, command: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.execute_calls.borrow_mut().push(command.to_vec());
+            if self.execute_fail_on.borrow().contains(command) {
+                return Err(format!("simulated exec failure: {}", String::from_utf8_lossy(command)).into());
+            }
             Ok(())
         }
     }
@@ -1130,6 +1144,54 @@ mod driver {
         }]);
         let result = state.step(&driver, &rebase_dir);
         assert!(result.is_err(), "UpdateRef should return an error");
+    }
+
+    #[test]
+    fn step_exec_runs_driver_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+
+        let driver = MockDriver::new();
+        let mut state = make_state_with_ops(vec![Operation::Exec {
+            command: "make test".into(),
+        }]);
+
+        let outcome = state.step(&driver, &rebase_dir).unwrap();
+        assert_eq!(outcome, StepOutcome::Skipped);
+        assert_eq!(driver.execute_calls.borrow().as_slice(), &[b"make test".to_vec()]);
+        assert!(
+            driver.cherry_pick_calls.borrow().is_empty(),
+            "exec should not create a commit"
+        );
+    }
+
+    #[test]
+    fn step_exec_failure_persists_done_and_remaining_todo() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+
+        let driver = MockDriver::new();
+        driver.execute_fail_on.borrow_mut().insert(b"false".to_vec());
+
+        let mut state = make_state_with_ops(vec![
+            Operation::Exec {
+                command: "false".into(),
+            },
+            Operation::Noop,
+        ]);
+
+        let result = state.step(&driver, &rebase_dir);
+        assert!(matches!(result, Err(gix_rebase::StepError::Exec { .. })));
+        assert_eq!(state.done.operations.len(), 1, "failed exec should be recorded in done");
+        assert_eq!(
+            state.todo.operations.len(),
+            1,
+            "following operations should remain queued"
+        );
+
+        let on_disk = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
+        assert!(matches!(on_disk.done.operations.front(), Some(Operation::Exec { .. })));
+        assert!(matches!(on_disk.todo.operations.front(), Some(Operation::Noop)));
     }
 
     #[test]
