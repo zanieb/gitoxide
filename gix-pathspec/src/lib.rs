@@ -177,3 +177,30 @@ pub enum SearchMode {
 pub fn parse(input: &[u8], default: Defaults) -> Result<Pattern, parse::Error> {
     Pattern::from_bytes(input, default)
 }
+
+/// Convert string-like values or ready-made [`Pattern`] instances into a pathspec [`Pattern`].
+pub trait TryIntoPathspec {
+    /// Convert `self` into a pathspec pattern, using `defaults` only when parsing is required.
+    fn try_into_pathspec(self, defaults: Defaults) -> Result<Pattern, parse::Error>;
+}
+
+impl TryIntoPathspec for Pattern {
+    fn try_into_pathspec(self, _defaults: Defaults) -> Result<Pattern, parse::Error> {
+        Ok(self)
+    }
+}
+
+impl TryIntoPathspec for &Pattern {
+    fn try_into_pathspec(self, _defaults: Defaults) -> Result<Pattern, parse::Error> {
+        Ok(self.clone())
+    }
+}
+
+impl<T> TryIntoPathspec for T
+where
+    T: AsRef<bstr::BStr>,
+{
+    fn try_into_pathspec(self, defaults: Defaults) -> Result<Pattern, parse::Error> {
+        parse(self.as_ref(), defaults)
+    }
+}

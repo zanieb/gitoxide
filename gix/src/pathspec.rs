@@ -39,14 +39,14 @@ impl<'repo> Pathspec<'repo> {
     pub fn new(
         repo: &'repo Repository,
         empty_patterns_match_prefix: bool,
-        patterns: impl IntoIterator<Item = impl AsRef<BStr>>,
+        patterns: impl IntoIterator<Item = impl TryIntoPathspec>,
         inherit_ignore_case: bool,
         make_attributes: impl FnOnce() -> Result<gix_worktree::Stack, Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Result<Self, init::Error> {
         let defaults = repo.pathspec_defaults_inherit_ignore_case(inherit_ignore_case)?;
         let patterns = patterns
             .into_iter()
-            .map(move |p| parse(p.as_ref(), defaults))
+            .map(move |p| p.try_into_pathspec(defaults))
             .collect::<Result<Vec<_>, _>>()?;
         Self::from_patterns_inner(repo, empty_patterns_match_prefix, patterns, make_attributes)
     }

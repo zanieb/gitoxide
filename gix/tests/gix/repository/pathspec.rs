@@ -71,3 +71,23 @@ fn can_be_constructed_from_patterns() -> crate::Result {
         .is_excluded());
     Ok(())
 }
+
+#[test]
+fn can_parse_or_accept_patterns_in_the_same_api() -> crate::Result {
+    let repo = named_repo("make_basic_repo.sh")?;
+    let mut pathspec = repo.pathspec(
+        true,
+        [Pattern::from_components(
+            "hi",
+            MagicSignature::ICASE,
+            SearchMode::Literal,
+            Vec::new(),
+        )],
+        true,
+        &**repo.index()?,
+        Source::WorktreeThenIdMapping.adjust_for_bare(repo.is_bare()),
+    )?;
+
+    assert!(pathspec.is_included("HI", Some(false)));
+    Ok(())
+}

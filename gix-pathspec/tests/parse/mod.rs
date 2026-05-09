@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bstr::{BStr, BString, ByteSlice};
 use gix_attributes::State;
-use gix_pathspec::{MagicSignature, Pattern, SearchMode};
+use gix_pathspec::{MagicSignature, Pattern, SearchMode, TryIntoPathspec};
 use std::sync::LazyLock;
 
 #[test]
@@ -48,6 +48,19 @@ fn construct_programmatically() {
     let nil = Pattern::nil();
     assert!(nil.is_nil());
     assert_eq!(nil.to_bstring(), ":");
+}
+
+#[test]
+fn try_into_pathspec_accepts_parsed_and_ready_made_patterns() {
+    let defaults = Default::default();
+    let parsed = "src/**"
+        .try_into_pathspec(defaults)
+        .expect("string-like values are parsed");
+    assert_eq!(parsed.path(), "src/**");
+
+    let ready = Pattern::from_components("README.md", MagicSignature::ICASE, SearchMode::Literal, Vec::new());
+    assert_eq!(ready.clone().try_into_pathspec(defaults).expect("infallible"), ready);
+    assert_eq!((&ready).try_into_pathspec(defaults).expect("infallible"), ready);
 }
 
 mod invalid;
