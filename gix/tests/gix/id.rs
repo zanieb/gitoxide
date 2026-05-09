@@ -153,6 +153,31 @@ mod ancestors {
     }
 
     #[test]
+    fn hidden_tips_exclude_their_ancestors() -> crate::Result {
+        let repo = crate::repo("make_repo_with_fork_and_dates.sh")?.to_thread_local();
+        let head = repo.head()?.into_peeled_id()?;
+
+        for use_commit_graph in [false, true] {
+            let commits = head
+                .ancestors()
+                .with_hidden(Some(hex_to_id("bcb05040a6925f2ff5e10d3ae1f9264f2e8c43ac")))
+                .use_commit_graph(use_commit_graph)
+                .all()?
+                .map(|c| c.map(|c| c.id))
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(
+                commits,
+                &[
+                    hex_to_id("288e509293165cb5630d08f4185bdf2445bf6170"),
+                    hex_to_id("9902e3c3e8f0c569b4ab295ddf473e6de763e1e7"),
+                ],
+                "this behaves like `git rev-list HEAD ^branch1`: hide branch1 and its ancestors"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn filtered() -> crate::Result {
         let repo = crate::repo("make_repo_with_fork_and_dates.sh")?.to_thread_local();
         let head = repo.head()?.into_peeled_id()?;
