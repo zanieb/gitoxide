@@ -641,7 +641,7 @@ A mechanism to associate metadata with any object, and keep revisions of it usin
    * [x] define ceilings that should not be surpassed
    * [x] prevent crossing file-systems (non-windows only)
 * [x] handle linked worktrees
-* [ ] a way to handle [`safe.directory`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-safedirectory)
+* [x] a way to handle [`safe.directory`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-safedirectory)
      - note that it's less critical to support it as `gitoxide` allows access but prevents untrusted configuration to become effective.
 
 ### gix-date
