@@ -307,6 +307,55 @@ mod update {
         assert_branch_strategy_fast_forwards_current_branch("update-rebase-ff", gix::submodule::config::Update::Rebase)
     }
 
+    /// A custom update command from local config should be executed in the submodule worktree
+    /// with the target commit as its argument.
+    #[test]
+    fn update_with_custom_command_runs_local_config_command() -> crate::Result {
+        let (repo, _tmp) = repo_rw("update-command")?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+
+        let index_id = sm.index_id()?.expect("submodule in index");
+        let sm_repo = sm.open()?.expect("submodule repo exists");
+        assert_ne!(
+            sm_repo.head_id()?.detach(),
+            index_id,
+            "fixture starts behind the superproject commit"
+        );
+
+        let outcome = sm.update_submodule(
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+            &Default::default(),
+        )?;
+
+        let outcome = outcome.expect("update should succeed");
+        assert!(matches!(outcome.strategy, gix::submodule::config::Update::Command(_)));
+        assert_eq!(outcome.target_commit, index_id);
+        assert!(!outcome.freshly_cloned, "fixture is already cloned");
+        assert!(
+            outcome.checkout.is_none(),
+            "custom commands perform their own worktree update"
+        );
+
+        let sm_repo = sm.open()?.expect("submodule repo exists after update");
+        assert_eq!(
+            sm_repo.head_id()?.detach(),
+            index_id,
+            "custom command should update the submodule to the target commit"
+        );
+        assert_eq!(
+            std::fs::read_to_string(sm_repo.workdir().expect("worktree").join("custom-update-ran"))?,
+            format!("{index_id}\n"),
+            "command should receive the target commit as its argument"
+        );
+        Ok(())
+    }
+
     /// Ported from libgit2 test_submodule_update__uninitialized_submodule_no_init:
     /// Updating an uninitialized submodule without init=true should be skipped.
     /// Git skips uninitialized submodules silently; we return Ok(None).
