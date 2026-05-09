@@ -20,6 +20,8 @@ pub enum Extensions {
         tree_cache: bool,
         /// Write the resolve-undo extension, if present.
         resolve_undo: bool,
+        /// Write the fsmonitor extension, if present.
+        fs_monitor: bool,
         /// Write the end-of-index-entry extension.
         end_of_index_entry: bool,
     },
@@ -36,10 +38,12 @@ impl Extensions {
             Extensions::Given {
                 tree_cache,
                 resolve_undo,
+                fs_monitor,
                 end_of_index_entry,
             } => match signature {
                 extension::tree::SIGNATURE => tree_cache,
                 extension::resolve_undo::SIGNATURE => resolve_undo,
+                extension::fs_monitor::SIGNATURE => fs_monitor,
                 extension::end_of_index_entry::SIGNATURE => end_of_index_entry,
                 _ => &false,
             }
@@ -150,6 +154,14 @@ impl State {
                         self.resolve_undo().map(|resolve_undo| {
                             extension::resolve_undo::write_to(resolve_undo, write).map(|_| signature)
                         })
+                    })
+            },
+            &|write| {
+                extensions
+                    .should_write(extension::fs_monitor::SIGNATURE)
+                    .and_then(|signature| {
+                        self.fs_monitor()
+                            .map(|fs_monitor| extension::fs_monitor::write_to(fs_monitor, write).map(|_| signature))
                     })
             },
             &|write| {

@@ -880,7 +880,7 @@ The git staging area.
       * [x] TREE
       * [x] REUC
       * [ ] UNTR
-      * [ ] FSMN
+      * [x] FSMN
       * [x] EOIE
       * [x] 'sdir'
       * [ ] 'link'
