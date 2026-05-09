@@ -618,6 +618,8 @@ mod driver {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
+    type MergeCall = (Vec<u8>, Option<(ObjectId, gix_sequencer::todo::AmendMessage)>, Vec<u8>);
+
     /// A mock driver that records operations for testing.
     struct MockDriver {
         /// Map from Prefix hex -> full ObjectId for resolve_commit.
@@ -629,7 +631,7 @@ mod driver {
         /// Tracks revert calls.
         revert_calls: RefCell<Vec<ObjectId>>,
         /// Tracks merge calls: (label, commit option, oneline).
-        merge_calls: RefCell<Vec<(Vec<u8>, Option<(ObjectId, gix_sequencer::todo::AmendMessage)>, Vec<u8>)>>,
+        merge_calls: RefCell<Vec<MergeCall>>,
         /// Tracks update_head calls.
         update_head_calls: RefCell<Vec<ObjectId>>,
         /// Tracks exec commands.
@@ -638,6 +640,12 @@ mod driver {
         labels: RefCell<HashMap<Vec<u8>, ObjectId>>,
         /// Simulated current HEAD for label/reset operations.
         current_head: RefCell<ObjectId>,
+        /// Simulated refs for update-ref operations.
+        refs: RefCell<HashMap<Vec<u8>, ObjectId>>,
+        /// Ref updates pending until finish.
+        pending_update_refs: RefCell<HashMap<Vec<u8>, (ObjectId, ObjectId)>>,
+        /// Tracks finish calls.
+        finish_calls: RefCell<usize>,
         /// If set, cherry_pick returns this ObjectId as the new commit.
         /// Increments by 1 byte each call to simulate unique commits.
         next_commit_counter: RefCell<u32>,
@@ -663,6 +671,9 @@ mod driver {
                 execute_calls: RefCell::new(Vec::new()),
                 labels: RefCell::new(HashMap::new()),
                 current_head: RefCell::new(make_oid("0000000000000000000000000000000000000000")),
+                refs: RefCell::new(HashMap::new()),
+                pending_update_refs: RefCell::new(HashMap::new()),
+                finish_calls: RefCell::new(0),
                 next_commit_counter: RefCell::new(1),
                 conflict_on: RefCell::new(std::collections::HashSet::new()),
                 fail_on: RefCell::new(std::collections::HashSet::new()),
@@ -801,6 +812,29 @@ mod driver {
                 .copied()
                 .ok_or_else(|| format!("unknown label: {}", String::from_utf8_lossy(name)))?;
             self.update_head(target)
+        }
+
+        fn update_ref(&self, reference: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let old_id = self
+                .refs
+                .borrow()
+                .get(reference)
+                .copied()
+                .unwrap_or_else(|| make_oid("0000000000000000000000000000000000000000"));
+            let new_id = *self.current_head.borrow();
+            self.pending_update_refs
+                .borrow_mut()
+                .insert(reference.to_vec(), (old_id, new_id));
+            Ok(())
+        }
+
+        fn finish(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            *self.finish_calls.borrow_mut() += 1;
+            let updates = std::mem::take(&mut *self.pending_update_refs.borrow_mut());
+            for (reference, (_old_id, new_id)) in updates {
+                self.refs.borrow_mut().insert(reference, new_id);
+            }
+            Ok(())
         }
     }
 
@@ -1320,18 +1354,69 @@ mod driver {
     }
 
     #[test]
-    fn step_unsupported_ops_return_error() {
+    fn step_update_ref_is_applied_only_at_finish() {
         let dir = tempfile::tempdir().unwrap();
         let rebase_dir = dir.path().join("rebase-merge");
+        let old_id = make_oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let new_id = make_oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
         let driver = MockDriver::new();
+        driver.refs.borrow_mut().insert(b"refs/heads/side".to_vec(), old_id);
+        *driver.current_head.borrow_mut() = new_id;
 
-        // UpdateRef is unsupported and should error.
-        let mut state = make_state_with_ops(vec![Operation::UpdateRef {
-            reference: "refs/heads/topic".into(),
-        }]);
+        let mut state = make_state_with_ops(vec![
+            Operation::UpdateRef {
+                reference: "refs/heads/side".into(),
+            },
+            Operation::Noop,
+        ]);
+
+        assert_eq!(state.step(&driver, &rebase_dir).unwrap(), StepOutcome::Skipped);
+        assert_eq!(
+            driver.refs.borrow().get(b"refs/heads/side".as_slice()),
+            Some(&old_id),
+            "update-ref should not update refs until the rebase finishes"
+        );
+        assert_eq!(*driver.finish_calls.borrow(), 0);
+
+        assert_eq!(state.step(&driver, &rebase_dir).unwrap(), StepOutcome::Skipped);
+        assert_eq!(
+            driver.refs.borrow().get(b"refs/heads/side".as_slice()),
+            Some(&new_id),
+            "finish should apply pending update-ref entries"
+        );
+        assert_eq!(*driver.finish_calls.borrow(), 1);
+    }
+
+    #[test]
+    fn step_update_ref_is_not_applied_if_later_step_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let old_id = make_oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let new_id = make_oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+        let driver = MockDriver::new();
+        driver.refs.borrow_mut().insert(b"refs/heads/side".to_vec(), old_id);
+        *driver.current_head.borrow_mut() = new_id;
+        driver.execute_fail_on.borrow_mut().insert(b"false".to_vec());
+
+        let mut state = make_state_with_ops(vec![
+            Operation::UpdateRef {
+                reference: "refs/heads/side".into(),
+            },
+            Operation::Exec {
+                command: "false".into(),
+            },
+        ]);
+
+        assert_eq!(state.step(&driver, &rebase_dir).unwrap(), StepOutcome::Skipped);
         let result = state.step(&driver, &rebase_dir);
-        assert!(result.is_err(), "UpdateRef should return an error");
+        assert!(matches!(result, Err(gix_rebase::StepError::Exec { .. })));
+        assert_eq!(
+            driver.refs.borrow().get(b"refs/heads/side".as_slice()),
+            Some(&old_id),
+            "failed rebase should leave pending update-ref unapplied"
+        );
     }
 
     #[test]

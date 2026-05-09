@@ -268,7 +268,7 @@ impl Driver for GitCliDriver {
                     .current_dir(&self.workdir)
                     .output();
                 return Err(CherryPickError::Conflict {
-                    commit_id: commit.map(|(id, _)| id).unwrap_or_else(|| head_oid(&self.workdir)),
+                    commit_id: commit.map_or_else(|| head_oid(&self.workdir), |(id, _)| id),
                 });
             }
             return Err(CherryPickError::Other {
@@ -367,6 +367,78 @@ impl Driver for GitCliDriver {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("reset failed for {reference}: {stderr}").into());
         }
+        Ok(())
+    }
+
+    fn update_ref(&self, reference: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let reference = String::from_utf8_lossy(reference).into_owned();
+        let update_refs_path = self.workdir.join(".git").join("rebase-merge").join("update-refs");
+        if let Some(parent) = update_refs_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let old_output = Command::new("git")
+            .args(["rev-parse", "--verify", &reference])
+            .current_dir(&self.workdir)
+            .output()?;
+        let old_id = if old_output.status.success() {
+            String::from_utf8(old_output.stdout)?.trim().to_string()
+        } else {
+            "0000000000000000000000000000000000000000".to_string()
+        };
+        let new_id = head_oid(&self.workdir).to_hex().to_string();
+
+        let mut entries = Vec::new();
+        if update_refs_path.exists() {
+            let content = std::fs::read_to_string(&update_refs_path)?;
+            let mut lines = content.lines();
+            while let (Some(name), Some(old), Some(new)) = (lines.next(), lines.next(), lines.next()) {
+                entries.push((name.to_string(), old.to_string(), new.to_string()));
+            }
+        }
+
+        if let Some(entry) = entries.iter_mut().find(|(name, _, _)| name == &reference) {
+            entry.2 = new_id;
+        } else {
+            entries.push((reference, old_id, new_id));
+        }
+
+        let mut content = String::new();
+        for (name, old, new) in entries {
+            content.push_str(&name);
+            content.push('\n');
+            content.push_str(&old);
+            content.push('\n');
+            content.push_str(&new);
+            content.push('\n');
+        }
+        std::fs::write(update_refs_path, content)?;
+        Ok(())
+    }
+
+    fn finish(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let update_refs_path = self.workdir.join(".git").join("rebase-merge").join("update-refs");
+        if !update_refs_path.exists() {
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(&update_refs_path)?;
+        let mut lines = content.lines();
+        while let (Some(name), Some(old), Some(new)) = (lines.next(), lines.next(), lines.next()) {
+            if new == "0000000000000000000000000000000000000000" {
+                continue;
+            }
+            let output = Command::new("git")
+                .args(["update-ref", name, new, old])
+                .current_dir(&self.workdir)
+                .output()?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("update-ref failed for {name}: {stderr}").into());
+            }
+        }
+
+        std::fs::remove_file(update_refs_path)?;
         Ok(())
     }
 }
@@ -1747,6 +1819,67 @@ mod mixed_operations {
             parents.split_whitespace().count(),
             3,
             "merge operation should create a two-parent merge commit"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_ref_is_applied_when_rebase_finishes() -> Result<(), Box<dyn std::error::Error>> {
+        let fix = RebaseFixture::new_no_conflict();
+        let driver = fix.driver();
+        let rebase_dir = fix.rebase_dir();
+        let side_name = "refs/heads/side";
+        let side_start = fix.oid("C");
+
+        git(&fix.workdir, &["branch", "side", &side_start.to_hex().to_string()]);
+        fix.detach_head_to("B");
+
+        let mut state = MergeState {
+            head_name: "refs/heads/feature".into(),
+            onto: fix.oid("B"),
+            orig_head: fix.oid("D"),
+            interactive: true,
+            todo: TodoList {
+                operations: vec![
+                    Operation::Pick {
+                        commit: fix.prefix("C"),
+                        summary: "C: add feature1.txt".into(),
+                    },
+                    Operation::UpdateRef {
+                        reference: side_name.into(),
+                    },
+                    Operation::Pick {
+                        commit: fix.prefix("D"),
+                        summary: "D: add feature2.txt".into(),
+                    },
+                ]
+                .into(),
+            },
+            done: TodoList {
+                operations: std::collections::VecDeque::new(),
+            },
+            current_step: 0,
+            total_steps: 3,
+            stopped_sha: None,
+            accumulated_squash_message: None,
+        };
+
+        assert!(matches!(state.step(&driver, &rebase_dir)?, StepOutcome::Applied { .. }));
+        let rewritten_side_target = head_oid(&fix.workdir);
+
+        assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
+        assert_eq!(
+            git(&fix.workdir, &["rev-parse", side_name]),
+            side_start.to_hex().to_string(),
+            "update-ref should not update the ref before the rebase finishes"
+        );
+
+        assert!(matches!(state.step(&driver, &rebase_dir)?, StepOutcome::Applied { .. }));
+        assert_eq!(
+            git(&fix.workdir, &["rev-parse", side_name]),
+            rewritten_side_target.to_hex().to_string(),
+            "finish should update the ref to the recorded position"
         );
 
         Ok(())
