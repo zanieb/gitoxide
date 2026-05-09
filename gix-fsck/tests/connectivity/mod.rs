@@ -1,6 +1,6 @@
 use gix_fsck::{Connectivity, Error, Options};
 use gix_hash::ObjectId;
-use gix_hashtable::HashMap;
+use gix_hashtable::{HashMap, HashSet};
 use gix_object::{Data, Kind};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -241,4 +241,28 @@ fn hash_validation_checks_reachable_blobs() {
         .expect_err("hash mismatch is rejected");
 
     assert!(matches!(err, Error::Checksum(_)));
+}
+
+#[test]
+fn skipped_objects_are_ignored() {
+    let mut db = MemoryDb::default();
+    let missing_blob = hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(missing_blob, Kind::Blob, "missing-blob"));
+    let skip_objects = [missing_blob].into_iter().collect::<HashSet>();
+
+    let mut missing = HashMap::default();
+    let mut check = Connectivity::new(&db, |oid: &ObjectId, kind: Kind| {
+        missing.insert(*oid, kind);
+    });
+    check
+        .check_tag_with_options(
+            &tag_id,
+            Options {
+                skip_objects: Some(&skip_objects),
+                ..Options::default()
+            },
+        )
+        .expect("skipped missing target is ignored");
+
+    assert_eq!(missing, HashMap::default());
 }
