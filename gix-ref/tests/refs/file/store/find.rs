@@ -165,6 +165,17 @@ mod loose {
     }
 
     #[test]
+    fn loose_refs_can_contain_sha256_ids() -> crate::Result {
+        let (_tmp, store) = store_writable("make_ref_repository.sh")?;
+        let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?;
+        std::fs::write(store.git_dir().join("refs/heads/sha256"), format!("{id}\n"))?;
+
+        assert_eq!(store.find_loose("sha256")?.target.into_id(), id);
+        assert_eq!(id.kind(), gix_hash::Kind::Sha256);
+        Ok(())
+    }
+
+    #[test]
     fn success() -> crate::Result {
         let store = store()?;
         for (partial_name, expected_path, expected_ref_kind) in &[

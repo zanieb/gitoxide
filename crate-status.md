@@ -1007,7 +1007,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 * [ ] all individual [checks available in `git fsck`](https://git-scm.com/docs/git-fsck#_fsck_messages) (*too many to print here*)
 
 ### gix-ref
-* [ ] Prepare code for arrival of longer hashes like Sha256. It's part of the [V2 proposal][reftable-v2] but should work for loose refs as well.
+* [x] Prepare code for arrival of longer hashes like Sha256. It's part of the [V2 proposal][reftable-v2] but should work for loose refs as well.
 * **Stores**
   * [ ] disable transactions during [quarantine]
   * [x] namespaces
