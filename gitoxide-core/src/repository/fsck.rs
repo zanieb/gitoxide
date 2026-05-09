@@ -24,10 +24,14 @@ pub fn function(mut repo: gix::Repository, spec: Option<String>, mut out: impl s
     };
 
     let mut check = gix_fsck::Connectivity::new(&repo.objects, on_missing);
+    let options = gix_fsck::Options {
+        verify_hashes: true,
+        ..Default::default()
+    };
     // Walk all commits, checking each one for connectivity
     for commit in commits {
         let commit = commit?;
-        check.check_commit(&commit.id)?;
+        check.check_commit_with_options(&commit.id, options)?;
         // Note that we leave parent-iteration to the commits iterator, as it will
         // correctly handle shallow repositories which are expected to have the commits
         // along the shallow boundary missing.

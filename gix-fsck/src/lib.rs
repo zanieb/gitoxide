@@ -9,7 +9,7 @@ use std::{
 
 use gix_hash::ObjectId;
 use gix_hashtable::HashSet;
-use gix_object::{Exists, FindExt, Kind, tree::EntryKind};
+use gix_object::{find::existing_object, tree::EntryKind, Data, Exists, Find, FindExt, Kind, ObjectRef};
 
 /// Options to use while performing a connectivity check.
 #[derive(Default, Clone, Copy)]
@@ -20,6 +20,8 @@ pub struct Options<'a> {
     pub should_interrupt: Option<&'a AtomicBool>,
     /// A counter to increment for each previously unseen object considered by the traversal.
     pub progress: Option<&'a AtomicUsize>,
+    /// If true, validate the checksum of each visited object against its object id.
+    pub verify_hashes: bool,
 }
 
 impl Options<'_> {
@@ -46,13 +48,15 @@ impl Options<'_> {
 #[derive(Debug)]
 pub enum Error {
     /// The object database failed to provide a required object.
-    Find(gix_object::find::existing_object::Error),
+    Find(existing_object::Error),
+    /// An object was found, but its content does not match its object id.
+    Checksum(gix_object::data::verify::Error),
     /// The traversal observed the configured interruption flag.
     Interrupted,
 }
 
-impl From<gix_object::find::existing_object::Error> for Error {
-    fn from(err: gix_object::find::existing_object::Error) -> Self {
+impl From<existing_object::Error> for Error {
+    fn from(err: existing_object::Error) -> Self {
         Error::Find(err)
     }
 }
@@ -61,6 +65,7 @@ impl fmt::Display for Error {
     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Find(err) => err.fmt(out),
+            Error::Checksum(err) => err.fmt(out),
             Error::Interrupted => out.write_str("connectivity check was interrupted"),
         }
     }
@@ -70,6 +75,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Find(err) => Some(err),
+            Error::Checksum(err) => Some(err),
             Error::Interrupted => None,
         }
     }
@@ -89,6 +95,8 @@ where
     seen: HashSet,
     /// A buffer to keep a single object at a time.
     buf: Vec<u8>,
+    /// A buffer for objects that have to be read while the main buffer is borrowed.
+    secondary_buf: Vec<u8>,
 }
 
 impl<T, F> Connectivity<T, F>
@@ -103,6 +111,7 @@ where
             missing_cb,
             seen: HashSet::default(),
             buf: Default::default(),
+            secondary_buf: Default::default(),
         }
     }
 
@@ -115,10 +124,11 @@ where
     /// Any referenced blobs that are not present in the ODB will result in a call to the  `missing_cb`.
     /// Missing commits or trees will cause an error to be returned.
     ///     - TODO: consider how to handle a missing commit (invoke `missing_cb`, or possibly return a Result?)
-    pub fn check_commit(&mut self, oid: &ObjectId) -> Result<(), gix_object::find::existing_object::Error> {
+    pub fn check_commit(&mut self, oid: &ObjectId) -> Result<(), existing_object::Error> {
         match self.check_commit_with_options(oid, Options::default()) {
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
+            Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -133,8 +143,11 @@ where
         }
         // Obtain the commit's tree ID
         let tree_id = {
-            let commit = self.db.find_commit(oid, &mut self.buf)?;
-            commit.tree()
+            let object = find_existing_object(&self.db, oid, &mut self.buf, Kind::Commit, options)?;
+            match decode_object(object, oid)? {
+                ObjectRef::Commit(commit) => commit.tree(),
+                _ => unreachable!("find_existing_object validates the object kind"),
+            }
         };
 
         self.check_tree_id(&tree_id, options)
@@ -144,10 +157,11 @@ where
     ///
     /// Tags may point to any object kind, including another tag. Missing objects
     /// referenced by the tag are reported through the missing-object callback.
-    pub fn check_tag(&mut self, oid: &ObjectId) -> Result<(), gix_object::find::existing_object::Error> {
+    pub fn check_tag(&mut self, oid: &ObjectId) -> Result<(), existing_object::Error> {
         match self.check_tag_with_options(oid, Options::default()) {
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
+            Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -161,8 +175,11 @@ where
         }
 
         let (target, target_kind) = {
-            let tag = self.db.find_tag(oid, &mut self.buf)?;
-            (tag.target(), tag.target_kind)
+            let object = find_existing_object(&self.db, oid, &mut self.buf, Kind::Tag, options)?;
+            match decode_object(object, oid)? {
+                ObjectRef::Tag(tag) => (tag.target(), tag.target_kind),
+                _ => unreachable!("find_existing_object validates the object kind"),
+            }
         };
 
         self.check_referenced_object(&target, target_kind, options)
@@ -172,7 +189,7 @@ where
         match kind {
             Kind::Blob => {
                 if insert_seen(&mut self.seen, *oid, options)? {
-                    check_blob(&self.db, oid, &mut self.missing_cb);
+                    check_blob(&self.db, oid, &mut self.buf, &mut self.missing_cb, options)?;
                 }
                 Ok(())
             }
@@ -218,9 +235,13 @@ where
         tree_ids: &mut VecDeque<ObjectId>,
         options: Options<'_>,
     ) -> Result<(), Error> {
-        let Ok(tree) = self.db.find_tree(oid, &mut self.buf) else {
+        let Some(object) = find_optional_object(&self.db, oid, &mut self.buf, Kind::Tree, options)? else {
             (self.missing_cb)(oid, Kind::Tree);
             return Ok(());
+        };
+        let tree = match decode_object(object, oid)? {
+            ObjectRef::Tree(tree) => tree,
+            _ => unreachable!("find_optional_object validates the object kind"),
         };
 
         for entry_ref in tree.entries.iter() {
@@ -233,7 +254,13 @@ where
                 EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => {
                     let blob_id = entry_ref.oid.to_owned();
                     if insert_seen(&mut self.seen, blob_id, options)? {
-                        check_blob(&self.db, &blob_id, &mut self.missing_cb);
+                        check_blob(
+                            &self.db,
+                            &blob_id,
+                            &mut self.secondary_buf,
+                            &mut self.missing_cb,
+                            options,
+                        )?;
                     }
                 }
                 EntryKind::Commit => {
@@ -254,11 +281,87 @@ fn insert_seen(seen: &mut HashSet, oid: ObjectId, options: Options<'_>) -> Resul
     Ok(was_inserted)
 }
 
-fn check_blob<F>(db: impl Exists, oid: &ObjectId, mut missing_cb: F)
+fn check_blob<T, F>(
+    db: &T,
+    oid: &ObjectId,
+    buf: &mut Vec<u8>,
+    mut missing_cb: F,
+    options: Options<'_>,
+) -> Result<(), Error>
 where
+    T: FindExt + Exists,
     F: FnMut(&ObjectId, Kind),
 {
-    if !db.exists(oid) {
+    if options.verify_hashes {
+        if find_optional_object(db, oid, buf, Kind::Blob, options)?.is_none() {
+            missing_cb(oid, Kind::Blob);
+        }
+    } else if !db.exists(oid) {
         missing_cb(oid, Kind::Blob);
     }
+    Ok(())
+}
+
+fn find_existing_object<'a, T>(
+    db: &T,
+    oid: &ObjectId,
+    buf: &'a mut Vec<u8>,
+    expected: Kind,
+    options: Options<'_>,
+) -> Result<Data<'a>, Error>
+where
+    T: Find,
+{
+    find_optional_object(db, oid, buf, expected, options)?.ok_or_else(|| {
+        existing_object::Error::NotFound {
+            oid: oid.as_ref().to_owned(),
+        }
+        .into()
+    })
+}
+
+fn find_optional_object<'a, T>(
+    db: &T,
+    oid: &ObjectId,
+    buf: &'a mut Vec<u8>,
+    expected: Kind,
+    options: Options<'_>,
+) -> Result<Option<Data<'a>>, Error>
+where
+    T: Find,
+{
+    let expected_empty_id = match expected {
+        Kind::Tree => Some(ObjectId::empty_tree(oid.kind())),
+        Kind::Blob => Some(ObjectId::empty_blob(oid.kind())),
+        Kind::Commit | Kind::Tag => None,
+    };
+    if expected_empty_id.as_ref().is_some_and(|empty_id| empty_id == oid) {
+        return Ok(Some(Data::new(expected, &[])));
+    }
+
+    let Some(object) = db.try_find(oid, buf).map_err(existing_object::Error::Find)? else {
+        return Ok(None);
+    };
+    if options.verify_hashes {
+        object.verify_checksum(oid).map_err(Error::Checksum)?;
+    }
+    if object.kind != expected {
+        return Err(existing_object::Error::ObjectKind {
+            oid: oid.as_ref().to_owned(),
+            actual: object.kind,
+            expected,
+        }
+        .into());
+    }
+    Ok(Some(object))
+}
+
+fn decode_object<'a>(object: Data<'a>, oid: &ObjectId) -> Result<ObjectRef<'a>, Error> {
+    object.decode().map_err(|source| {
+        existing_object::Error::Decode {
+            oid: oid.as_ref().to_owned(),
+            source,
+        }
+        .into()
+    })
 }
