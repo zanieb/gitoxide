@@ -901,7 +901,7 @@ The git staging area.
     * [ ] 'sdir' sparse directory entries
 * [x] add and remove entries
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-commitgraph
 
