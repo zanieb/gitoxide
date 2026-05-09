@@ -444,7 +444,7 @@ Check out the [performance discussion][gix-traverse-performance] as well.
 * **commits**
   * [x] ancestor graph traversal similar to `git revlog`
   * [ ] (performance) stop descending hidden ancestry early instead of prepainting it all
-  * [ ] `commitgraph` support
+  * [x] `commitgraph` support
 * [x] API documentation
     * [ ] Examples
 
