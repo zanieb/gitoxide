@@ -14,4 +14,12 @@ include = ["/src/**/*", "/LICENSE-*"]
 [lib]
 doctest = false
 
+[features]
+default = ["sha1"]
+## Support SHA-1 object ids in FETCH_HEAD entries.
+sha1 = ["gix-hash/sha1"]
+## Support SHA-256 object ids in FETCH_HEAD entries.
+sha256 = ["gix-hash/sha256"]
+
 [dependencies]
+gix-hash = { version = "^0.25.0", path = "../gix-hash" }

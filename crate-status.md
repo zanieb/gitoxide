@@ -631,8 +631,8 @@ A mechanism to associate metadata with any object, and keep revisions of it usin
   - [x] `skipping`
 
 ### gix-fetchhead
-* [ ] parse [`FETCH_HEAD`](https://git-scm.com/docs/gitrepository-layout) information back entirely
-* [ ] write typical fetch-head lines
+* [x] parse [`FETCH_HEAD`](https://git-scm.com/docs/gitrepository-layout) information back entirely
+* [x] write typical fetch-head lines
 
 ### gix-discover
 
