@@ -199,6 +199,9 @@ impl State {
 
 impl State {
     fn detect_required_version(&self) -> Version {
+        if self.version == Version::V4 {
+            return Version::V4;
+        }
         self.entries
             .iter()
             .find_map(|e| e.flags.contains(entry::Flags::EXTENDED).then_some(Version::V3))
@@ -233,12 +236,17 @@ fn entries<T: std::io::Write>(
         if entry.flags.contains(entry::Flags::REMOVE) {
             continue;
         }
-        entry.write_to(&mut *out, state)?;
-        match (out.count - header_size) % 8 {
-            0 => {}
-            n => {
-                let eight_null_bytes = [0u8; 8];
-                out.write_all(&eight_null_bytes[n as usize..])?;
+        if version == Version::V4 {
+            entry.write_v4_to(&mut *out, state, previous_path)?;
+            previous_path = Some(entry.path(state));
+        } else {
+            entry.write_to(&mut *out, state)?;
+            match (out.count - header_size) % 8 {
+                0 => {}
+                n => {
+                    let eight_null_bytes = [0u8; 8];
+                    out.write_all(&eight_null_bytes[n as usize..])?;
+                }
             }
         }
     }

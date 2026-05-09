@@ -4,7 +4,7 @@ use gix_hash::ObjectId;
 use crate::{
     entry,
     extension::{Signature, UntrackedCache},
-    util::{read_u32, split_at_byte_exclusive, var_int},
+    util::{read_u32, split_at_byte_exclusive, var_int, write_var_int},
 };
 
 impl UntrackedCache {
