@@ -358,7 +358,7 @@ fn write_bitmap(
 
 #[cfg(test)]
 mod tests {
-    use super::write_bitmap;
+    use super::{decode, write_bitmap, write_oid_stat};
     use crate::util::write_var_int;
 
     #[test]
@@ -387,5 +387,29 @@ mod tests {
             })
             .unwrap();
         assert_eq!(actual, [0, 64, 129]);
+    }
+
+    #[test]
+    fn decode_rejects_truncated_stat_data_selected_by_bitmap() {
+        let object_hash = gix_hash::Kind::Sha1;
+        let mut data = Vec::new();
+
+        write_var_int(0, &mut data).unwrap();
+        write_oid_stat(None, object_hash, &mut data).unwrap();
+        write_oid_stat(None, object_hash, &mut data).unwrap();
+        data.extend_from_slice(&0_u32.to_be_bytes());
+        data.push(0);
+        write_var_int(1, &mut data).unwrap();
+
+        write_var_int(0, &mut data).unwrap();
+        write_var_int(0, &mut data).unwrap();
+        data.push(0);
+
+        write_bitmap(1, [0], &mut data).unwrap();
+        write_bitmap(1, [], &mut data).unwrap();
+        write_bitmap(1, [], &mut data).unwrap();
+        data.push(0);
+
+        assert!(decode(&data, object_hash).is_none());
     }
 }
