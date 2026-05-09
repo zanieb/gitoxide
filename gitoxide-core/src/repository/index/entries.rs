@@ -242,7 +242,7 @@ pub(crate) mod function {
                             .or_error()?;
                         }
                         #[cfg(feature = "serde")]
-                        OutputFormat::Json => to_json(out, &index, entry, attrs, entries.peek().is_none(), prefix)?,
+                        OutputFormat::Json => to_json(out, &index, entry, attrs, is_last_entry, prefix)?,
                     }
                 }
             }
