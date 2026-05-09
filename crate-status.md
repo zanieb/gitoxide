@@ -927,7 +927,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
     * [x] boolean
     * [x] integer
     * [x] color
-       * [ ] ANSI code output for terminal colors
+       * [x] ANSI code output for terminal colors
     * [x] path (incl. resolution)
     * [x] date
     * [ ] [permission][https://github.com/git/git/blob/71a8fab31b70c417e8f5b5f716581f89955a7082/setup.c#L1526:L1526]

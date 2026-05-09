@@ -196,3 +196,48 @@ mod from_git {
         Ok(Color::try_from(name.into())?.to_string())
     }
 }
+
+mod ansi {
+    use bstr::BStr;
+    use gix_config_value::Color;
+
+    #[test]
+    fn standard_names() {
+        assert_eq!(ansi("normal"), "");
+        assert_eq!(ansi("default default"), "\x1b[39;49m");
+        assert_eq!(ansi("red"), "\x1b[31m");
+        assert_eq!(ansi("brightred"), "\x1b[91m");
+        assert_eq!(ansi("black brightblack"), "\x1b[30;100m");
+    }
+
+    #[test]
+    fn extended_colors() {
+        assert_eq!(ansi("254 #010203"), "\x1b[38;5;254;48;2;1;2;3m");
+        assert_eq!(ansi("red 200"), "\x1b[31;48;5;200m");
+        assert_eq!(ansi("red #010203"), "\x1b[31;48;2;1;2;3m");
+    }
+
+    #[test]
+    fn attributes_precede_colors() {
+        assert_eq!(ansi("red bold"), "\x1b[1;31m");
+        assert_eq!(ansi("bold dim italic ul blink reverse strike"), "\x1b[1;2;3;4;5;7;9m");
+        assert_eq!(ansi("bold nobold dim nodim"), "\x1b[1;2;22m");
+        assert_eq!(
+            ansi("254 #010203 no-bold no-dim no-ul no-blink no-reverse no-italic no-strike"),
+            "\x1b[22;23;24;25;27;29;38;5;254;48;2;1;2;3m"
+        );
+    }
+
+    #[test]
+    fn reset_is_an_empty_sgr_code() {
+        assert_eq!(ansi("reset"), "\x1b[m");
+        assert_eq!(ansi("reset red"), "\x1b[;31m");
+        assert_eq!(ansi("red reset bold"), "\x1b[;1;31m");
+    }
+
+    fn ansi<'a>(name: impl Into<&'a BStr>) -> String {
+        Color::try_from(name.into())
+            .expect("input color is expected to be valid")
+            .to_ansi_sequence()
+    }
+}
