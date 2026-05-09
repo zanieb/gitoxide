@@ -1,7 +1,7 @@
 //! Low-level operations on individual commits.
 use crate::{
     File, Position,
-    file::{self, EXTENDED_EDGES_MASK, LAST_EXTENDED_EDGE_MASK, NO_PARENT},
+    file::{self, EXTENDED_EDGES_MASK, LAST_EXTENDED_EDGE_MASK, NO_PARENT, bloom},
 };
 use gix_error::{Message, message};
 use std::{
@@ -60,6 +60,11 @@ impl<'a> Commit<'a> {
         self.file
             .corrected_commit_date_offset(self.pos)
             .and_then(|offset| self.commit_timestamp.checked_add(offset))
+    }
+
+    /// Returns the changed-path Bloom filter for this commit if Bloom data is available.
+    pub fn changed_path_filter(&self) -> Option<bloom::Filter<'a>> {
+        self.file.bloom_filter_at(self.pos)
     }
 
     /// Returns the generation number of this commit.

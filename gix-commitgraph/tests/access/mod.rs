@@ -34,6 +34,27 @@ fn corrected_commit_dates_are_available() {
 }
 
 #[test]
+fn changed_path_filters_are_available() {
+    let (cg, refs) = graph_and_expected("changed_path_filters.sh", &["base", "child"]);
+    check_common(&cg, &refs);
+
+    let base = cg.commit_at(refs["base"].pos());
+    let child = cg.commit_at(refs["child"].pos());
+    let base_filter = base.changed_path_filter().expect("base commit has a Bloom filter");
+    let child_filter = child.changed_path_filter().expect("child commit has a Bloom filter");
+
+    assert_eq!(base_filter.settings.hash_version, 1);
+    assert!(base_filter.settings.num_hashes > 0);
+    assert!(base_filter.settings.bits_per_entry > 0);
+    assert_eq!(
+        child_filter.settings, base_filter.settings,
+        "all filters in one file share settings"
+    );
+    assert!(!base_filter.bytes().is_empty());
+    assert!(!child_filter.bytes().is_empty());
+}
+
+#[test]
 fn single_commit_huge_dates_generation_v2_also_do_not_allow_huge_dates() {
     let (cg, refs) = graph_and_expected_named("single_commit_huge_dates.sh", "v2", &["HEAD"]);
     let info = &refs["HEAD"];

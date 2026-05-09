@@ -25,6 +25,9 @@ use std::path::Path;
 pub struct File {
     base_graph_count: u8,
     base_graphs_list_offset: Option<usize>,
+    bloom_filter_data_range: Option<std::ops::Range<usize>>,
+    bloom_filter_index_range: Option<std::ops::Range<usize>>,
+    bloom_filter_settings: Option<file::bloom::Settings>,
     commit_data_offset: usize,
     data: memmap2::Mmap,
     extra_edges_list_range: Option<std::ops::Range<usize>>,

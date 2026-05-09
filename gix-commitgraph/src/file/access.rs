@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     File,
-    file::{self, COMMIT_DATA_ENTRY_SIZE_SANS_HASH, GENERATION_DATA_OVERFLOW_MASK, commit::Commit},
+    file::{self, COMMIT_DATA_ENTRY_SIZE_SANS_HASH, GENERATION_DATA_OVERFLOW_MASK, bloom, commit::Commit},
 };
 
 /// Access
@@ -135,6 +135,44 @@ impl File {
     /// Return true if this file contains corrected commit date offsets.
     pub fn has_corrected_commit_dates(&self) -> bool {
         self.generation_data_range.is_some()
+    }
+
+    /// Return the changed-path Bloom filter settings, if this file contains Bloom filters.
+    pub fn bloom_filter_settings(&self) -> Option<bloom::Settings> {
+        self.bloom_filter_settings
+    }
+
+    pub(crate) fn bloom_filter_at(&self, pos: file::Position) -> Option<bloom::Filter<'_>> {
+        assert!(
+            pos.0 < self.num_commits(),
+            "expected lexicographical position less than {}, got {}",
+            self.num_commits(),
+            pos.0
+        );
+        let index_range = self.bloom_filter_index_range.clone()?;
+        let data_range = self.bloom_filter_data_range.clone()?;
+        let settings = self.bloom_filter_settings?;
+        let pos: usize = pos
+            .0
+            .try_into()
+            .expect("an architecture able to hold 32 bits of integer");
+        let end = usize::try_from(u32::from_be_bytes(
+            self.data[index_range.start + pos * 4..][..4].try_into().unwrap(),
+        ))
+        .expect("u32 fits usize");
+        let start = if pos == 0 {
+            0
+        } else {
+            usize::try_from(u32::from_be_bytes(
+                self.data[index_range.start + (pos - 1) * 4..][..4].try_into().unwrap(),
+            ))
+            .expect("u32 fits usize")
+        };
+        let filter_data_start = data_range.start + 12;
+        Some(bloom::Filter::new(
+            settings,
+            &self.data[filter_data_start + start..filter_data_start + end],
+        ))
     }
 
     pub(crate) fn corrected_commit_date_offset(&self, pos: file::Position) -> Option<u64> {

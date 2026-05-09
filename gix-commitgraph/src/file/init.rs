@@ -5,9 +5,10 @@ use gix_error::{ErrorExt, Exn, Message, ResultExt, message};
 use crate::{
     File,
     file::{
-        BASE_GRAPHS_LIST_CHUNK_ID, COMMIT_DATA_CHUNK_ID, COMMIT_DATA_ENTRY_SIZE_SANS_HASH,
-        EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN, GENERATION_DATA_CHUNK_ID, GENERATION_DATA_OVERFLOW_CHUNK_ID,
-        GENERATION_DATA_OVERFLOW_MASK, HEADER_LEN, OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
+        bloom, BASE_GRAPHS_LIST_CHUNK_ID, BLOOM_FILTER_DATA_CHUNK_ID, BLOOM_FILTER_INDEX_CHUNK_ID,
+        COMMIT_DATA_CHUNK_ID, COMMIT_DATA_ENTRY_SIZE_SANS_HASH, EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN,
+        GENERATION_DATA_CHUNK_ID, GENERATION_DATA_OVERFLOW_CHUNK_ID, GENERATION_DATA_OVERFLOW_MASK, HEADER_LEN,
+        OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
     },
 };
 
@@ -130,6 +131,80 @@ impl File {
             .or_raise(|| message("Error getting offset for OID lookup chunk"))?;
 
         let extra_edges_list_range = chunks.usize_offset_by_id(EXTENDED_EDGES_LIST_CHUNK_ID).ok();
+        let bloom_filter_index_range = chunks
+            .validated_usize_offset_by_id(BLOOM_FILTER_INDEX_CHUNK_ID, |chunk_range| {
+                let expected_size = usize::try_from(commit_data_count).expect("commit count fits usize") * 4;
+                if chunk_range.len() != expected_size {
+                    return Err(message!(
+                        "Commit-graph chunk {BLOOM_FILTER_INDEX_CHUNK_ID:?} has invalid size: expected chunk length {expected_size}, got {}",
+                        chunk_range.len()
+                    )
+                    .raise());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        let bloom_filter_data_range = chunks
+            .validated_usize_offset_by_id(BLOOM_FILTER_DATA_CHUNK_ID, |chunk_range| {
+                if chunk_range.len() < 12 {
+                    return Err(message!(
+                        "Commit-graph chunk {BLOOM_FILTER_DATA_CHUNK_ID:?} has invalid size: expected at least 12 bytes, got {}",
+                        chunk_range.len()
+                    )
+                    .raise());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        let bloom_filter_settings = match (&bloom_filter_index_range, &bloom_filter_data_range) {
+            (Some(index_range), Some(data_range)) => {
+                let bloom_data = &data[data_range.clone()];
+                let settings = bloom::Settings {
+                    hash_version: read_u32(&bloom_data[..4]),
+                    num_hashes: read_u32(&bloom_data[4..8]),
+                    bits_per_entry: read_u32(&bloom_data[8..12]),
+                };
+                if settings.hash_version != 1 {
+                    return Err(message!(
+                        "Commit-graph chunk {BLOOM_FILTER_DATA_CHUNK_ID:?} uses unsupported Bloom filter hash version {}",
+                        settings.hash_version
+                    )
+                    .raise());
+                }
+
+                let filter_data_len = bloom_data.len() - 12;
+                let mut previous_end = 0usize;
+                for raw_end in data[index_range.clone()].chunks_exact(4).map(read_u32) {
+                    let end = usize::try_from(raw_end).expect("u32 fits usize");
+                    if end < previous_end {
+                        return Err(message!(
+                            "Commit-graph chunk {BLOOM_FILTER_INDEX_CHUNK_ID:?} contains a decreasing Bloom filter offset"
+                        )
+                        .raise());
+                    }
+                    if end > filter_data_len {
+                        return Err(message!(
+                            "Commit-graph chunk {BLOOM_FILTER_INDEX_CHUNK_ID:?} references Bloom filter byte {end}, but {BLOOM_FILTER_DATA_CHUNK_ID:?} has {filter_data_len} filter bytes"
+                        )
+                        .raise());
+                    }
+                    previous_end = end;
+                }
+                Some(settings)
+            }
+            (Some(_), None) => None,
+            (None, Some(_)) => {
+                return Err(message!(
+                    "Chunk named {BLOOM_FILTER_DATA_CHUNK_ID:?} requires {BLOOM_FILTER_INDEX_CHUNK_ID:?}"
+                )
+                .raise());
+            }
+            (None, None) => None,
+        };
+        let bloom_filter_index_range = bloom_filter_settings.and(bloom_filter_index_range);
+        let bloom_filter_data_range = bloom_filter_settings.and(bloom_filter_data_range);
         let generation_data_range = chunks
             .validated_usize_offset_by_id(GENERATION_DATA_CHUNK_ID, |chunk_range| {
                 let expected_size = usize::try_from(commit_data_count).expect("commit count fits usize") * 4;
@@ -213,6 +288,9 @@ impl File {
         Ok(File {
             base_graph_count,
             base_graphs_list_offset,
+            bloom_filter_data_range,
+            bloom_filter_index_range,
+            bloom_filter_settings,
             commit_data_offset,
             data,
             extra_edges_list_range,
