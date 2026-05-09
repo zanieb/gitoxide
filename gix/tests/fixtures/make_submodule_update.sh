@@ -94,6 +94,17 @@ git clone -q super update-rebase-ff
   )
 )
 
+# --- Scenario: update-command ---
+# The submodule is already initialized and a local !command performs the update.
+git clone -q super update-command
+(cd update-command
+  git submodule update --init
+  git config submodule.submodule.update '!sh -c '\''git checkout -q "$1" && printf "%s\n" "$1" > custom-update-ran'\'' - "$@"'
+  (cd submodule
+    git checkout -q HEAD~1
+  )
+)
+
 # --- Scenario: dirty-submodule ---
 # Submodule has local changes that should block checkout update.
 git clone -q super dirty-submodule

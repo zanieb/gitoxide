@@ -27,7 +27,7 @@ impl Submodule<'_> {
     ///   This matches git's `determine_submodule_update_strategy()`.
     /// - The update strategy `none` causes this method to silently skip the submodule.
     /// - The `merge` and `rebase` strategies support already-up-to-date and fast-forward updates.
-    /// - The `!command` strategy requires running an external command and returns an error.
+    /// - The `!command` strategy runs the locally configured command with the target commit as its argument.
     pub fn update_submodule<P>(
         &self,
         mut progress: P,
@@ -231,9 +231,7 @@ impl Submodule<'_> {
             gix_submodule::config::Update::None => {
                 return Ok(None);
             }
-            gix_submodule::config::Update::Command(cmd) => {
-                return Err(super::update::Error::CommandUnsupported { command: cmd.clone() });
-            }
+            gix_submodule::config::Update::Command(_) => {}
             gix_submodule::config::Update::Rebase | gix_submodule::config::Update::Merge => {}
             gix_submodule::config::Update::Checkout => {}
         }
@@ -259,8 +257,12 @@ impl Submodule<'_> {
             gix_submodule::config::Update::Rebase | gix_submodule::config::Update::Merge => {
                 update_current_branch_strategy(&sm_repo, target_commit, effective_strategy.clone(), should_interrupt)?
             }
-            gix_submodule::config::Update::None | gix_submodule::config::Update::Command(_) => {
-                unreachable!("none and command strategies are handled before applying the update")
+            gix_submodule::config::Update::Command(command) => {
+                run_custom_update_command(&sm_repo, command, target_commit)?;
+                None
+            }
+            gix_submodule::config::Update::None => {
+                unreachable!("none strategy is handled before applying the update")
             }
         };
 
@@ -356,6 +358,41 @@ fn update_current_branch_strategy(
             }),
         }
     }
+}
+
+fn run_custom_update_command(
+    repo: &Repository,
+    command: &crate::bstr::BString,
+    target_commit: gix_hash::ObjectId,
+) -> Result<(), super::update::Error> {
+    let command_path = gix_path::from_bstring(command.clone());
+    let mut cmd: std::process::Command = gix_command::prepare(command_path.into_os_string())
+        .command_may_be_shell_script()
+        .with_context(repo.command_context()?)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .arg(target_commit.to_string())
+        .into();
+
+    if let Some(workdir) = repo.workdir() {
+        cmd.current_dir(workdir);
+    } else {
+        cmd.current_dir(repo.git_dir());
+    }
+
+    let status = cmd.status().map_err(|err| super::update::Error::CommandSpawn {
+        command: command.clone(),
+        source: err,
+    })?;
+    if !status.success() {
+        return Err(super::update::Error::CommandFailed {
+            command: command.clone(),
+            status,
+        });
+    }
+
+    Ok(())
 }
 
 /// Checkout the given `commit_id` in the submodule repository by detaching HEAD and checking out the tree.

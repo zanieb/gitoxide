@@ -216,10 +216,21 @@ pub mod update {
         #[cfg(feature = "revision")]
         #[error(transparent)]
         MergeBase(#[from] crate::repository::merge_base::Error),
-        #[error("The submodule update strategy is '{command}' which requires running an external command, but this is not yet supported")]
-        CommandUnsupported {
+        #[error(transparent)]
+        CommandContext(#[from] crate::config::command_context::Error),
+        #[error("Failed to spawn submodule update command '{command}'")]
+        CommandSpawn {
             /// The command that was configured.
             command: crate::bstr::BString,
+            /// The underlying IO error.
+            source: std::io::Error,
+        },
+        #[error("Submodule update command '{command}' exited with status {status}")]
+        CommandFailed {
+            /// The command that was configured.
+            command: crate::bstr::BString,
+            /// The failing process status.
+            status: std::process::ExitStatus,
         },
         #[error(
             "The submodule update strategy '{strategy:?}' requires the 'revision' feature to compare commit ancestry"
