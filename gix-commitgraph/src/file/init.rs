@@ -6,9 +6,10 @@ use gix_error::{ResultExt, bail, corruption, message};
 use crate::{
     File,
     file::{
-        BASE_GRAPHS_LIST_CHUNK_ID, COMMIT_DATA_CHUNK_ID, COMMIT_DATA_ENTRY_SIZE_SANS_HASH,
-        EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN, GENERATION_DATA_CHUNK_ID, GENERATION_DATA_OVERFLOW_CHUNK_ID,
-        GENERATION_DATA_OVERFLOW_MASK, HEADER_LEN, OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
+        bloom, BASE_GRAPHS_LIST_CHUNK_ID, BLOOM_FILTER_DATA_CHUNK_ID, BLOOM_FILTER_INDEX_CHUNK_ID,
+        COMMIT_DATA_CHUNK_ID, COMMIT_DATA_ENTRY_SIZE_SANS_HASH, EXTENDED_EDGES_LIST_CHUNK_ID, FAN_LEN,
+        GENERATION_DATA_CHUNK_ID, GENERATION_DATA_OVERFLOW_CHUNK_ID, GENERATION_DATA_OVERFLOW_MASK, HEADER_LEN,
+        OID_FAN_CHUNK_ID, OID_LOOKUP_CHUNK_ID, SIGNATURE,
     },
 };
 
@@ -172,6 +173,9 @@ impl File {
         Ok(File {
             base_graph_count,
             base_graphs_list_offset,
+            bloom_filter_data_range,
+            bloom_filter_index_range,
+            bloom_filter_settings,
             commit_data_offset,
             data,
             extra_edges_list_range,

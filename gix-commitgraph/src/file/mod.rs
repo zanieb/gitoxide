@@ -5,6 +5,8 @@ use std::fmt::{Display, Formatter};
 pub use self::commit::Commit;
 
 mod access;
+/// Changed-path Bloom filters stored in commit-graph files.
+pub mod bloom;
 pub mod commit;
 mod init;
 pub mod verify;
@@ -17,6 +19,8 @@ const SIGNATURE: &[u8] = b"CGPH";
 
 type ChunkId = gix_chunk::Id;
 const BASE_GRAPHS_LIST_CHUNK_ID: ChunkId = *b"BASE";
+const BLOOM_FILTER_DATA_CHUNK_ID: ChunkId = *b"BDAT";
+const BLOOM_FILTER_INDEX_CHUNK_ID: ChunkId = *b"BIDX";
 const COMMIT_DATA_CHUNK_ID: ChunkId = *b"CDAT";
 const EXTENDED_EDGES_LIST_CHUNK_ID: ChunkId = *b"EDGE";
 const GENERATION_DATA_CHUNK_ID: ChunkId = *b"GDA2";
