@@ -175,9 +175,14 @@ pub fn write_ref_block_at(
     let block_len = (header_off + block.len()) as u32;
     put_be24((&mut block[1..4]).try_into().expect("3 bytes for BE24"), block_len);
 
-    // Pad to block_size if needed
-    if block_size > 0 && block.len() < block_size as usize {
-        block.resize(block_size as usize, 0);
+    // Pad to block alignment if needed. The first ref block shares the file's
+    // first block with the file header, so only the bytes after `header_off`
+    // are emitted here.
+    if block_size > 0 {
+        let target_len = (block_size as usize).saturating_sub(header_off);
+        if block.len() < target_len {
+            block.resize(target_len, 0);
+        }
     }
 
     Ok(block)
@@ -322,6 +327,25 @@ mod tests {
         assert!(
             block_len < 256,
             "block_len ({block_len}) should be less than padded size"
+        );
+    }
+
+    #[test]
+    fn write_first_ref_block_pads_to_remaining_file_block() {
+        let records = vec![make_val1("refs/heads/main", 0xAA, 1)];
+        let header_off = crate::HEADER_SIZE_V1;
+        let block = write_ref_block_at(&records, 1, 20, 256, header_off).expect("should write");
+
+        assert_eq!(
+            header_off + block.len(),
+            256,
+            "first ref block should share the first file block with the header"
+        );
+
+        let block_len = crate::get_be24(block[1..4].try_into().expect("3 bytes"));
+        assert!(
+            block_len < 256,
+            "block_len ({block_len}) should exclude padding while still including the header offset"
         );
     }
 

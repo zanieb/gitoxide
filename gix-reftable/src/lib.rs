@@ -222,6 +222,8 @@ pub enum Error {
     InvalidVarint,
     #[error("invalid ref record value type: {value_type}")]
     InvalidRefValueType { value_type: u8 },
+    #[error("invalid object id byte length: {len}")]
+    InvalidObjectIdLength { len: usize },
     #[error("CRC32 checksum mismatch: expected {expected:#010x}, got {actual:#010x}")]
     Crc32Mismatch { expected: u32, actual: u32 },
     #[error("zlib decompression error")]
@@ -334,9 +336,15 @@ pub fn parse_header(data: &[u8]) -> Result<Header, Error> {
         return Err(Error::InvalidMagic);
     }
     let version = Version::from_byte(data[4]).ok_or(Error::UnsupportedVersion { version: data[4] })?;
+    if data.len() < header_size(version) {
+        return Err(Error::UnexpectedEof);
+    }
 
     // Bytes 5-7: 3-byte big-endian block_size
     let block_size = get_be24(data[5..8].try_into().expect("3 bytes for BE24"));
+    if block_size != 0 && block_size < MIN_BLOCK_SIZE {
+        return Err(Error::BlockSizeTooSmall { size: block_size });
+    }
     let min_update_index = u64::from_be_bytes(data[8..16].try_into().expect("8 bytes"));
     let max_update_index = u64::from_be_bytes(data[16..24].try_into().expect("8 bytes"));
 
@@ -514,7 +522,7 @@ pub fn parse_ref_record(
             if pos + hash_size > data.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let target = ObjectId::from_bytes_or_panic(&data[pos..pos + hash_size]);
+            let target = object_id_from_bytes(&data[pos..pos + hash_size])?;
             pos += hash_size;
             RefRecordValue::Val1 { target }
         }
@@ -523,9 +531,9 @@ pub fn parse_ref_record(
             if pos + 2 * hash_size > data.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let target = ObjectId::from_bytes_or_panic(&data[pos..pos + hash_size]);
+            let target = object_id_from_bytes(&data[pos..pos + hash_size])?;
             pos += hash_size;
-            let target_value = ObjectId::from_bytes_or_panic(&data[pos..pos + hash_size]);
+            let target_value = object_id_from_bytes(&data[pos..pos + hash_size])?;
             pos += hash_size;
             RefRecordValue::Val2 { target, target_value }
         }
@@ -552,6 +560,10 @@ pub fn parse_ref_record(
         },
         pos,
     ))
+}
+
+fn object_id_from_bytes(bytes: &[u8]) -> Result<ObjectId, Error> {
+    ObjectId::try_from(bytes).map_err(|_| Error::InvalidObjectIdLength { len: bytes.len() })
 }
 
 #[cfg(test)]
@@ -701,6 +713,46 @@ mod tests {
     fn parse_header_too_short() {
         let data = vec![0u8; 10];
         assert!(matches!(parse_header(&data), Err(Error::UnexpectedEof)));
+    }
+
+    #[test]
+    fn parse_header_v2_requires_v2_header_size() {
+        let mut data = vec![0u8; HEADER_SIZE_V1];
+        data[0..4].copy_from_slice(MAGIC);
+        data[4] = Version::V2.as_u8();
+        put_be24((&mut data[5..8]).try_into().expect("3 bytes"), 4096);
+
+        assert!(matches!(parse_header(&data), Err(Error::UnexpectedEof)));
+    }
+
+    #[test]
+    fn parse_header_rejects_too_small_nonzero_block_size() {
+        let mut data = vec![0u8; HEADER_SIZE_V1];
+        data[0..4].copy_from_slice(MAGIC);
+        data[4] = Version::V1.as_u8();
+        put_be24((&mut data[5..8]).try_into().expect("3 bytes"), MIN_BLOCK_SIZE - 1);
+
+        assert!(matches!(
+            parse_header(&data),
+            Err(Error::BlockSizeTooSmall {
+                size
+            }) if size == MIN_BLOCK_SIZE - 1
+        ));
+    }
+
+    #[test]
+    fn parse_ref_record_rejects_invalid_hash_size() {
+        let mut data = Vec::new();
+        write_varint(0, &mut data);
+        write_varint(("refs/heads/main".len() as u64) << 3 | 1, &mut data);
+        data.extend_from_slice(b"refs/heads/main");
+        write_varint(0, &mut data);
+        data.extend_from_slice(&[0; 21]);
+
+        assert!(matches!(
+            parse_ref_record(&data, &[], 21, 1),
+            Err(Error::InvalidObjectIdLength { len: 21 })
+        ));
     }
 
     #[test]
