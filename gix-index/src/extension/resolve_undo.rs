@@ -5,8 +5,7 @@ use crate::{extension::Signature, util::split_at_byte_exclusive};
 
 pub type Paths = Vec<ResolvePath>;
 
-#[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvePath {
     /// relative to the root of the repository, or what would be stored in the index
     name: BString,
@@ -15,8 +14,7 @@ pub struct ResolvePath {
     stages: [Option<Stage>; 3],
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stage {
     mode: u32,
     id: ObjectId,
@@ -58,4 +56,26 @@ pub fn decode(mut data: &[u8], object_hash: gix_hash::Kind) -> Option<Paths> {
         });
     }
     out.into()
+}
+
+/// Serialize a resolve-undo extension to `out`.
+pub fn write_to(paths: &Paths, mut out: impl std::io::Write) -> Result<(), std::io::Error> {
+    use std::io::Write as _;
+
+    let mut entries = Vec::new();
+    for path in paths {
+        entries.write_all(&path.name)?;
+        entries.write_all(b"\0")?;
+        for stage in &path.stages {
+            let mode = stage.map_or(0, |stage| stage.mode);
+            write!(entries, "{mode:o}\0")?;
+        }
+        for stage in path.stages.iter().flatten() {
+            entries.write_all(stage.id.as_bytes())?;
+        }
+    }
+
+    out.write_all(&SIGNATURE)?;
+    out.write_all(&(u32::try_from(entries.len()).expect("less than 4GB resolve-undo extension")).to_be_bytes())?;
+    out.write_all(&entries)
 }

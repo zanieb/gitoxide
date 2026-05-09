@@ -14,9 +14,11 @@ fn roundtrips() -> crate::Result {
             Generated("v2"),
             options_with(write::Extensions::Given {
                 tree_cache: true,
+                resolve_undo: false,
                 end_of_index_entry: true,
             }),
         ),
+        (Loose("REUC"), tree_and_resolve_undo_ext()),
         (Generated("v2_empty"), only_tree_ext()),
         (Generated("v2_more_files"), only_tree_ext()),
         (Generated("v2_all_file_kinds"), only_tree_ext()),
@@ -150,11 +152,18 @@ fn state_comparisons_with_various_extension_configurations() {
             options_with(write::Extensions::All),
             options_with(write::Extensions::Given {
                 tree_cache: true,
+                resolve_undo: false,
                 end_of_index_entry: false,
             }),
             options_with(write::Extensions::Given {
                 tree_cache: false,
+                resolve_undo: false,
                 end_of_index_entry: true,
+            }),
+            options_with(write::Extensions::Given {
+                tree_cache: false,
+                resolve_undo: true,
+                end_of_index_entry: false,
             }),
         ] {
             let expected = fixture.open();
@@ -245,6 +254,11 @@ fn compare_states(actual: &State, actual_version: Version, expected: &State, opt
             .and_then(|_| expected.tree()),
         "tree extension mismatch, actual vs option in {fixture:?}"
     );
+    assert_eq!(
+        actual.resolve_undo(),
+        writes_resolve_undo(options).then(|| expected.resolve_undo()).flatten(),
+        "resolve-undo extension mismatch, actual vs option in {fixture:?}"
+    );
 
     // As `write_to` does / should not mutate we can test those properties here.
     // Anything that can be configured has to be tested separately when comparing against baseline
@@ -294,6 +308,19 @@ fn only_tree_ext() -> Options {
     Options {
         extensions: write::Extensions::Given {
             end_of_index_entry: false,
+            resolve_undo: false,
+            tree_cache: true,
+        },
+        skip_hash: false,
+        skip_stale_tree_cache: false,
+    }
+}
+
+fn tree_and_resolve_undo_ext() -> Options {
+    Options {
+        extensions: write::Extensions::Given {
+            end_of_index_entry: false,
+            resolve_undo: true,
             tree_cache: true,
         },
         skip_hash: false,
@@ -307,4 +334,11 @@ fn options_with(extensions: write::Extensions) -> Options {
         skip_hash: false,
         skip_stale_tree_cache: false,
     }
+}
+
+fn writes_resolve_undo(options: Options) -> bool {
+    matches!(
+        options.extensions,
+        write::Extensions::All | write::Extensions::Given { resolve_undo: true, .. }
+    )
 }
