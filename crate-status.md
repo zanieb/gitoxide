@@ -973,7 +973,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
     * [x] `tar` and `tar.gz`
     * [x] `zip`
 * [x] add prefix and modification date
-* [ ] API documentation
+* [x] API documentation
     * [ ] Some examples
 
 ### gix-bundle
