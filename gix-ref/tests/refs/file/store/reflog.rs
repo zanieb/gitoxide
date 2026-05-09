@@ -68,3 +68,50 @@ mod iter_rev {
         Ok(())
     }
 }
+
+mod expire {
+    use gix_lock::acquire::Fail;
+    use gix_object::bstr::BString;
+
+    use crate::file::store_writable;
+
+    fn messages(store: &gix_ref::file::Store, name: &str) -> crate::Result<Vec<BString>> {
+        let mut buf = Vec::new();
+        Ok(store
+            .reflog_iter(name, &mut buf)?
+            .expect("existing reflog")
+            .map(|line| line.map(|line| line.message.to_owned()))
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    #[test]
+    fn rewrites_reflog_with_retained_entries() -> crate::Result {
+        let (_keep, store) = store_writable("make_repo_for_reflog.sh")?;
+        let before = messages(&store, "HEAD")?;
+        assert_eq!(before.len(), 5);
+
+        let mut index = 0;
+        let removed = store.reflog_expire("HEAD", Fail::Immediately, |_| {
+            index += 1;
+            index % 2 == 1
+        })?;
+
+        assert_eq!(removed, 2);
+        assert_eq!(
+            messages(&store, "HEAD")?,
+            before.into_iter().step_by(2).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn missing_reflog_is_unchanged() -> crate::Result {
+        let (_keep, store) = store_writable("make_repo_for_reflog.sh")?;
+        let removed = store.reflog_expire("FAILURE_NONEXISTING", Fail::Immediately, |_| {
+            unreachable!("missing reflog has no entries")
+        })?;
+
+        assert_eq!(removed, 0);
+        Ok(())
+    }
+}

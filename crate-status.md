@@ -1034,7 +1034,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
     * **log**
       * [x] forward iteration
       * [x] backward iteration
-      * [ ] expire
+      * [x] expire
     * **ref**
       * [x] peel to id
     * **packed**
