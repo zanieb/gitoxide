@@ -36,6 +36,8 @@ pub struct Options<'a> {
     /// If true, report tree entries that are not sorted according to Git's tree order,
     /// along with duplicate entry names.
     pub validate_tree_order: bool,
+    /// If true, report tree entries whose modes are not canonical Git tree modes.
+    pub validate_tree_modes: bool,
 }
 
 impl Options<'_> {
@@ -90,6 +92,15 @@ pub enum Error {
         /// The current entry name.
         current: BString,
     },
+    /// A tree entry uses a non-canonical mode.
+    InvalidTreeEntryMode {
+        /// The tree containing the invalid entry.
+        tree_id: ObjectId,
+        /// The entry name.
+        filename: BString,
+        /// The invalid entry mode.
+        mode: EntryMode,
+    },
     /// The traversal observed the configured interruption flag.
     Interrupted,
 }
@@ -124,6 +135,14 @@ impl fmt::Display for Error {
                 out,
                 "Tree {tree_id} contains out-of-order entries {previous:?} and {current:?}"
             ),
+            Error::InvalidTreeEntryMode {
+                tree_id,
+                filename,
+                mode,
+            } => write!(
+                out,
+                "Tree {tree_id} contains entry {filename:?} with invalid mode {mode:o}"
+            ),
             Error::Interrupted => out.write_str("connectivity check was interrupted"),
         }
     }
@@ -135,7 +154,7 @@ impl std::error::Error for Error {
             Error::Find(err) => Some(err),
             Error::Checksum(err) => Some(err),
             Error::StrictMode { .. } => None,
-            Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } => None,
+            Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. } => None,
             Error::Interrupted => None,
         }
     }
@@ -193,9 +212,9 @@ where
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
-            Err(Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. }) => {
-                unreachable!("tree order validation needs to be configured")
-            }
+            Err(
+                Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. },
+            ) => unreachable!("tree entry validation needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -234,9 +253,9 @@ where
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
-            Err(Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. }) => {
-                unreachable!("tree order validation needs to be configured")
-            }
+            Err(
+                Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. },
+            ) => unreachable!("tree entry validation needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -276,9 +295,9 @@ where
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
-            Err(Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. }) => {
-                unreachable!("tree order validation needs to be configured")
-            }
+            Err(
+                Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. },
+            ) => unreachable!("tree entry validation needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -364,9 +383,9 @@ where
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
-            Err(Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. }) => {
-                unreachable!("tree order validation needs to be configured")
-            }
+            Err(
+                Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. },
+            ) => unreachable!("tree entry validation needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -403,9 +422,9 @@ where
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
-            Err(Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. }) => {
-                unreachable!("tree order validation needs to be configured")
-            }
+            Err(
+                Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. },
+            ) => unreachable!("tree entry validation needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -436,9 +455,9 @@ where
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
             Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
-            Err(Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. }) => {
-                unreachable!("tree order validation needs to be configured")
-            }
+            Err(
+                Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. },
+            ) => unreachable!("tree entry validation needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -590,6 +609,16 @@ where
                     }
                 }
                 previous_entry = Some(*entry_ref);
+            }
+            if options.validate_tree_modes {
+                let canonical_mode: EntryMode = entry_ref.mode.kind().into();
+                if entry_ref.mode != canonical_mode {
+                    return Err(Error::InvalidTreeEntryMode {
+                        tree_id: *oid,
+                        filename: entry_ref.filename.into(),
+                        mode: entry_ref.mode,
+                    });
+                }
             }
             if options.strict && entry_ref.mode.value() & 0o020 != 0 {
                 return Err(Error::StrictMode {
