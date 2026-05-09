@@ -104,6 +104,11 @@ pub enum StepError {
     ReadCommitMessage(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("could not update HEAD")]
     UpdateHead(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("exec command failed: {command}")]
+    Exec {
+        command: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 /// An error originating from the [`Driver::cherry_pick()`] callback.
@@ -178,6 +183,15 @@ pub trait Driver {
 
     /// Update HEAD (and the branch it points to, if any) to the given commit.
     fn update_head(&self, commit_id: ObjectId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Execute a shell command from an `exec` todo operation.
+    fn execute(&self, command: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err(format!(
+            "exec operation is not supported by this driver: {}",
+            String::from_utf8_lossy(command)
+        )
+        .into())
+    }
 }
 
 impl MergeState {
@@ -320,7 +334,8 @@ impl MergeState {
     /// Returns [`StepError::WriteState`] if the rebase state cannot be written to disk.
     /// Returns [`StepError::ReadCommitMessage`] if a commit message cannot be read
     /// (needed for squash/fixup operations).
-    /// Also returns `StepError::ResolvePrefix` for unsupported operations (exec, label,
+    /// Returns [`StepError::Exec`] if an `exec` command fails.
+    /// Also returns `StepError::ResolvePrefix` for unsupported operations (label,
     /// reset, update-ref, revert, merge) rather than silently skipping them.
     pub fn step(&mut self, driver: &dyn Driver, rebase_merge_dir: &Path) -> Result<StepOutcome, StepError> {
         if self.todo.operations.is_empty() {
@@ -498,9 +513,13 @@ impl MergeState {
                 commit_id: None,
                 original_message: None,
             }),
-            Operation::Exec { command, .. } => Err(StepError::ResolvePrefix(
-                format!("exec operation not yet supported: {}", String::from_utf8_lossy(command)).into(),
-            )),
+            Operation::Exec { command, .. } => {
+                driver.execute(command).map_err(|source| StepError::Exec {
+                    command: String::from_utf8_lossy(command).into_owned(),
+                    source,
+                })?;
+                Ok(StepOutcome::Skipped)
+            }
             Operation::Label { .. }
             | Operation::Reset { .. }
             | Operation::UpdateRef { .. }
