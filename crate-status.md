@@ -565,7 +565,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 * [ ] bundle-uri protocol integration
 * [ ] remote helper protocol and integration
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-attributes
 * [x] parse `.gitattribute` files
