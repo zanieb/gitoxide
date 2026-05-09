@@ -57,6 +57,13 @@ impl MemoryDb {
     fn tag_data(target: ObjectId, target_kind: Kind, name: &str) -> Vec<u8> {
         format!("object {target}\ntype {target_kind}\ntag {name}\n\n{name}\n").into_bytes()
     }
+
+    fn tree_data(mode: &str, filename: &str, oid: ObjectId) -> Vec<u8> {
+        let mut data = format!("{mode} {filename}").into_bytes();
+        data.push(0);
+        data.extend_from_slice(oid.as_bytes());
+        data
+    }
 }
 
 impl gix_object::Find for MemoryDb {
@@ -265,4 +272,35 @@ fn skipped_objects_are_ignored() {
         .expect("skipped missing target is ignored");
 
     assert_eq!(missing, HashMap::default());
+}
+
+#[test]
+fn strict_mode_rejects_group_writable_tree_entries() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"hello".to_vec());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100664", "file", blob_id));
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(tree_id, Kind::Tree, "tree-tag"));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    check.check_tag(&tag_id).expect("non-strict mode accepts the tree");
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    let err = check
+        .check_tag_with_options(
+            &tag_id,
+            Options {
+                strict: true,
+                ..Options::default()
+            },
+        )
+        .expect_err("strict mode rejects group-writable entries");
+
+    assert!(matches!(
+        err,
+        Error::StrictMode {
+            tree_id: actual_tree_id,
+            mode,
+            ..
+        } if actual_tree_id == tree_id && mode.value() == 0o100664
+    ));
 }

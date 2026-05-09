@@ -9,7 +9,12 @@ use std::{
 
 use gix_hash::ObjectId;
 use gix_hashtable::HashSet;
-use gix_object::{find::existing_object, tree::EntryKind, Data, Exists, Find, FindExt, Kind, ObjectRef};
+use gix_object::{
+    bstr::BString,
+    find::existing_object,
+    tree::{EntryKind, EntryMode},
+    Data, Exists, Find, FindExt, Kind, ObjectRef,
+};
 
 /// Options to use while performing a connectivity check.
 #[derive(Default, Clone, Copy)]
@@ -24,6 +29,8 @@ pub struct Options<'a> {
     pub verify_hashes: bool,
     /// Objects to skip entirely as they are known to be broken.
     pub skip_objects: Option<&'a HashSet>,
+    /// If true, report tree entries with group-writable modes.
+    pub strict: bool,
 }
 
 impl Options<'_> {
@@ -53,6 +60,15 @@ pub enum Error {
     Find(existing_object::Error),
     /// An object was found, but its content does not match its object id.
     Checksum(gix_object::data::verify::Error),
+    /// Strict mode rejected a group-writable tree entry.
+    StrictMode {
+        /// The tree containing the offending entry.
+        tree_id: ObjectId,
+        /// The entry name.
+        filename: BString,
+        /// The offending entry mode.
+        mode: EntryMode,
+    },
     /// The traversal observed the configured interruption flag.
     Interrupted,
 }
@@ -68,6 +84,14 @@ impl fmt::Display for Error {
         match self {
             Error::Find(err) => err.fmt(out),
             Error::Checksum(err) => err.fmt(out),
+            Error::StrictMode {
+                tree_id,
+                filename,
+                mode,
+            } => write!(
+                out,
+                "Tree {tree_id} contains group-writable entry {filename:?} with mode {mode:o}"
+            ),
             Error::Interrupted => out.write_str("connectivity check was interrupted"),
         }
     }
@@ -78,6 +102,7 @@ impl std::error::Error for Error {
         match self {
             Error::Find(err) => Some(err),
             Error::Checksum(err) => Some(err),
+            Error::StrictMode { .. } => None,
             Error::Interrupted => None,
         }
     }
@@ -131,6 +156,7 @@ where
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
+            Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -164,6 +190,7 @@ where
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
             Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
+            Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
             Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
         }
     }
@@ -248,6 +275,13 @@ where
 
         for entry_ref in tree.entries.iter() {
             options.check_interrupted()?;
+            if options.strict && entry_ref.mode.value() & 0o020 != 0 {
+                return Err(Error::StrictMode {
+                    tree_id: *oid,
+                    filename: entry_ref.filename.into(),
+                    mode: entry_ref.mode,
+                });
+            }
             match entry_ref.mode.kind() {
                 EntryKind::Tree => {
                     let tree_id = entry_ref.oid.to_owned();
