@@ -1,8 +1,11 @@
-use gix_fsck::Connectivity;
+use gix_fsck::{Connectivity, Error, Options};
 use gix_hash::ObjectId;
 use gix_hashtable::HashMap;
 use gix_object::{Data, Kind};
-use std::sync::LazyLock;
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    LazyLock,
+};
 
 use crate::hex_to_id;
 
@@ -158,4 +161,54 @@ fn tags_report_missing_targets() {
             .into_iter()
             .collect()
     );
+}
+
+#[test]
+fn progress_counts_previously_unseen_objects() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"hello".to_vec());
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(blob_id, Kind::Blob, "blob-tag"));
+    let outer_tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(tag_id, Kind::Tag, "outer-tag"));
+
+    let progress = AtomicUsize::default();
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    check
+        .check_tag_with_options(
+            &outer_tag_id,
+            Options {
+                progress: Some(&progress),
+                ..Options::default()
+            },
+        )
+        .expect("tag chain is present");
+    check
+        .check_tag_with_options(
+            &outer_tag_id,
+            Options {
+                progress: Some(&progress),
+                ..Options::default()
+            },
+        )
+        .expect("seen tag chain is skipped");
+
+    assert_eq!(progress.load(Ordering::Relaxed), 3);
+}
+
+#[test]
+fn interruption_stops_connectivity_checks() {
+    let should_interrupt = AtomicBool::new(true);
+    let tag_id = hex_to_id("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+    let mut check = Connectivity::new(MemoryDb::default(), |_, _| unreachable!("interrupted before lookup"));
+    let err = check
+        .check_tag_with_options(
+            &tag_id,
+            Options {
+                should_interrupt: Some(&should_interrupt),
+                ..Options::default()
+            },
+        )
+        .expect_err("interrupt flag stops traversal");
+
+    assert!(matches!(err, Error::Interrupted));
 }
