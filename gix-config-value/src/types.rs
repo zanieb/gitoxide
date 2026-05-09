@@ -38,6 +38,13 @@ pub struct Integer {
 #[allow(missing_docs)]
 pub struct Boolean(pub bool);
 
+/// Any value that can be interpreted as a date.
+///
+/// The parser accepts the same formats as [`gix_date::parse()`].
+#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Date(pub gix_date::Time);
+
 /// Any value that can be interpreted as a path to a resource on disk.
 ///
 /// Git represents file paths as byte arrays, modeled here as owned or borrowed byte sequences.

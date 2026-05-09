@@ -13,5 +13,6 @@ pub fn cow_str(s: &str) -> Cow<'_, BStr> {
 
 mod boolean;
 mod color;
+mod date;
 mod integer;
 mod path;
