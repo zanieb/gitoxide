@@ -679,6 +679,8 @@ impl Repository {
             return Err(ApplyError::Conflict { paths: joined });
         }
 
+        let index_before_apply = current_index.clone();
+
         // Apply changes to the current index using binary search for lookups.
         for (path, new_id, new_mode) in &changed {
             use crate::bstr::ByteSlice;
@@ -712,8 +714,16 @@ impl Repository {
             .write(Default::default())
             .map_err(ApplyError::WriteIndex)?;
 
-        // Check out affected files to the worktree.
-        self.checkout_index_to_worktree_impl(&mut current_index, &workdir)?;
+        // Remove files that disappeared from the applied tree before checkout writes
+        // the remaining entries. Checkout itself doesn't delete files absent from
+        // the target index.
+        Self::remove_worktree_files_not_in_index(&index_before_apply, &current_index, &workdir, true);
+
+        // Check out affected files to the worktree. If the resulting index is
+        // empty, there is nothing for checkout to materialize.
+        if !current_index.entries().is_empty() {
+            self.checkout_index_to_worktree_impl(&mut current_index, &workdir)?;
+        }
 
         // Restore untracked files from the third parent.
         for (path, blob_id) in &untracked_files {
@@ -1088,6 +1098,7 @@ impl Repository {
 
         let stat_options = gix_index::entry::stat::Options::default();
         let mut worktree_overrides: HashMap<Vec<u8>, ObjectId> = HashMap::new();
+        let mut worktree_deletions: Vec<Vec<u8>> = Vec::new();
 
         for entry in index.entries() {
             if entry.stage() != gix_index::entry::Stage::Unconflicted {
@@ -1105,7 +1116,8 @@ impl Repository {
             let fs_meta = match gix_index::fs::Metadata::from_path_no_follow(&file_path) {
                 Ok(m) => m,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // File deleted from worktree but still in index - use index version.
+                    let path_bytes: &[u8] = path;
+                    worktree_deletions.push(path_bytes.to_vec());
                     continue;
                 }
                 Err(e) => return Err(SaveError::ReadWorktreeFile(e)),
@@ -1122,7 +1134,11 @@ impl Repository {
             // Stat differs, read and hash the file to confirm it actually changed.
             let content = match std::fs::read(&file_path) {
                 Ok(c) => c,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let path_bytes: &[u8] = path;
+                    worktree_deletions.push(path_bytes.to_vec());
+                    continue;
+                }
                 Err(e) => return Err(SaveError::ReadWorktreeFile(e)),
             };
 
@@ -1171,12 +1187,20 @@ impl Repository {
             }
         }
 
-        if worktree_overrides.is_empty() {
+        if worktree_overrides.is_empty() && worktree_deletions.is_empty() {
             return Ok(index_tree_id);
         }
 
         // Build a modified index with the worktree blobs, then write it as a tree.
         let mut worktree_index = self.index_from_tree(&index_tree_id)?;
+        if !worktree_deletions.is_empty() {
+            worktree_index.remove_entries(|_, path, _entry| {
+                let path_bytes: &[u8] = path;
+                worktree_deletions
+                    .iter()
+                    .any(|deleted| deleted.as_slice() == path_bytes)
+            });
+        }
         for (entry, entry_path) in worktree_index.entries_mut_with_paths() {
             let path_bytes: &[u8] = entry_path;
             if let Some(&new_oid) = worktree_overrides.get(path_bytes) {
