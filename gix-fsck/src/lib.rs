@@ -22,6 +22,8 @@ pub struct Options<'a> {
     pub progress: Option<&'a AtomicUsize>,
     /// If true, validate the checksum of each visited object against its object id.
     pub verify_hashes: bool,
+    /// Objects to skip entirely as they are known to be broken.
+    pub skip_objects: Option<&'a HashSet>,
 }
 
 impl Options<'_> {
@@ -274,6 +276,13 @@ where
 
 fn insert_seen(seen: &mut HashSet, oid: ObjectId, options: Options<'_>) -> Result<bool, Error> {
     options.check_interrupted()?;
+    if options
+        .skip_objects
+        .map(|skip_objects| skip_objects.contains(&oid))
+        .unwrap_or_default()
+    {
+        return Ok(false);
+    }
     let was_inserted = seen.insert(oid);
     if was_inserted {
         options.record_progress();
