@@ -132,35 +132,27 @@ mod access {
             let mut index = 0usize;
             let mut iter = self.bits.iter();
             while let Some(word) = iter.next() {
+                if index >= num_bits {
+                    return Some(());
+                }
+
+                let running_len = usize::try_from(rlw_running_len_bits(word)).ok()?;
+                let run_end = index.checked_add(running_len)?;
                 if rlw_runbit_is_set(word) {
-                    let len = usize::try_from(rlw_running_len_bits(word)).ok()?;
-                    let end = index.checked_add(len)?;
-                    if end > num_bits {
-                        return None;
-                    }
-                    for _ in 0..len {
+                    while index < run_end && index < num_bits {
                         f(index)?;
                         index += 1;
                     }
                 } else {
-                    let len = usize::try_from(rlw_running_len_bits(word)).ok()?;
-                    let end = index.checked_add(len)?;
-                    if end > num_bits {
-                        return None;
-                    }
-                    index = end;
+                    index = run_end;
                 }
 
                 for _ in 0..rlw_literal_words(word) {
+                    if index >= num_bits {
+                        return Some(());
+                    }
                     let word = iter.next()?;
-                    let remaining = num_bits.checked_sub(index)?;
-                    if remaining == 0 {
-                        return None;
-                    }
-                    let bits_in_word = remaining.min(64);
-                    if bits_in_word < 64 && (word >> bits_in_word) != 0 {
-                        return None;
-                    }
+                    let bits_in_word = num_bits.checked_sub(index)?.min(64);
                     for bit_index in 0..bits_in_word {
                         if word & (1 << bit_index) != 0 {
                             f(index)?;
@@ -267,5 +259,43 @@ mod tests {
         let mut out = StdVec::new();
         bitmap.write_to(&mut out).unwrap();
         assert_eq!(out, input[..input.len() - rest.len()]);
+    }
+
+    #[test]
+    fn set_bit_iteration_ignores_literal_padding_beyond_declared_bits() {
+        let bitmap = Vec {
+            num_bits: 2,
+            bits: vec![1 << 33, u64::MAX],
+            rlw: 0,
+        };
+
+        let mut set_bits = StdVec::new();
+        bitmap
+            .for_each_set_bit(|index| {
+                set_bits.push(index);
+                Some(())
+            })
+            .unwrap();
+
+        assert_eq!(set_bits, [0, 1]);
+    }
+
+    #[test]
+    fn set_bit_iteration_ignores_run_padding_beyond_declared_bits() {
+        let bitmap = Vec {
+            num_bits: 3,
+            bits: vec![0b11],
+            rlw: 0,
+        };
+
+        let mut set_bits = StdVec::new();
+        bitmap
+            .for_each_set_bit(|index| {
+                set_bits.push(index);
+                Some(())
+            })
+            .unwrap();
+
+        assert_eq!(set_bits, [0, 1, 2]);
     }
 }
