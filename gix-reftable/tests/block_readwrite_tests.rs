@@ -6,7 +6,7 @@
 
 use bstr::BString;
 use gix_hash::ObjectId;
-use gix_reftable::block::{parse_block_header, read_ref_records};
+use gix_reftable::block::{parse_block_header, read_ref_records, read_table_ref_records};
 use gix_reftable::write::{serialize_ref_record, write_ref_block, write_ref_blocks_at, Options};
 use gix_reftable::{
     parse_footer, parse_header, serialize_footer, serialize_header, BlockType, Error, Footer, Header, RefRecord,
@@ -694,6 +694,59 @@ fn block_capacity_limit() {
     }
 
     assert_eq!(parsed.len(), 100);
+    assert_eq!(parsed, records);
+}
+
+#[test]
+fn full_file_multiple_ref_blocks() {
+    let opts = Options {
+        block_size: 256,
+        min_update_index: 1,
+        max_update_index: 1,
+        version: Version::V1,
+    };
+    let hash_size = 20;
+    let records: Vec<RefRecord> = (0..100)
+        .map(|i| {
+            let name = format!("refs/heads/branch{i:04}");
+            make_val1(&name, i as u8, opts.min_update_index)
+        })
+        .collect();
+
+    let header = gix_reftable::write::write_header(&opts);
+    let blocks = write_ref_blocks_at(
+        &records,
+        opts.min_update_index,
+        hash_size,
+        opts.block_size,
+        header.len(),
+    )
+    .expect("records should split across table blocks");
+    assert!(blocks.len() > 1, "records should require multiple table blocks");
+
+    let footer = Footer {
+        header: Header {
+            version: opts.version,
+            block_size: opts.block_size,
+            min_update_index: opts.min_update_index,
+            max_update_index: opts.max_update_index,
+        },
+        ref_index_offset: 0,
+        obj_offset: 0,
+        obj_id_len: 0,
+        obj_index_offset: 0,
+        log_offset: 0,
+        log_index_offset: 0,
+    };
+
+    let mut table = Vec::new();
+    table.extend_from_slice(&header);
+    for block in blocks {
+        table.extend_from_slice(&block);
+    }
+    table.extend_from_slice(&serialize_footer(&footer));
+
+    let parsed = read_table_ref_records(&table).expect("full table should read");
     assert_eq!(parsed, records);
 }
 
