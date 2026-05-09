@@ -105,6 +105,69 @@ pub fn write_ref_block(
     write_ref_block_at(records, min_update_index, hash_size, block_size, 0)
 }
 
+/// Write ref records into one or more blocks at a given first-block file offset.
+///
+/// If `block_size` is non-zero, records are split so each emitted block fits
+/// the requested size after accounting for `first_header_off` in the first
+/// block. If `block_size` is zero, all records are written as one unaligned
+/// block.
+pub fn write_ref_blocks_at(
+    records: &[RefRecord],
+    min_update_index: u64,
+    hash_size: usize,
+    block_size: u32,
+    first_header_off: usize,
+) -> Result<Vec<Vec<u8>>, Error> {
+    if records.is_empty() || block_size == 0 {
+        return Ok(vec![write_ref_block_at(
+            records,
+            min_update_index,
+            hash_size,
+            block_size,
+            first_header_off,
+        )?]);
+    }
+
+    let mut blocks = Vec::new();
+    let mut start = 0usize;
+    let mut header_off = first_header_off;
+
+    while start < records.len() {
+        let mut best: Option<(usize, Vec<u8>)> = None;
+        for end in start + 1..=records.len() {
+            match write_ref_block_at(
+                &records[start..end],
+                min_update_index,
+                hash_size,
+                block_size,
+                header_off,
+            ) {
+                Ok(block) => best = Some((end, block)),
+                Err(Error::BlockTooLarge { .. }) => break,
+                Err(err) => return Err(err),
+            }
+        }
+
+        let Some((next_start, block)) = best else {
+            let block = write_ref_block_at(
+                &records[start..start + 1],
+                min_update_index,
+                hash_size,
+                block_size,
+                header_off,
+            )?;
+            blocks.push(block);
+            return Ok(blocks);
+        };
+
+        blocks.push(block);
+        start = next_start;
+        header_off = 0;
+    }
+
+    Ok(blocks)
+}
+
 /// Write a single ref block at a given file offset, producing C Git-compatible output.
 ///
 /// `header_off` is the byte offset of this block within the reftable file.
@@ -180,6 +243,12 @@ pub fn write_ref_block_at(
     // are emitted here.
     if block_size > 0 {
         let target_len = (block_size as usize).saturating_sub(header_off);
+        if block.len() > target_len {
+            return Err(Error::BlockTooLarge {
+                block_len: block.len(),
+                max_len: target_len,
+            });
+        }
         if block.len() < target_len {
             block.resize(target_len, 0);
         }
