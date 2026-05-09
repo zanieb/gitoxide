@@ -135,7 +135,7 @@ pub fn read_ref_records_at(
                 records.push(record);
                 pos += consumed;
             }
-            Err(_) => break,
+            Err(err) => return Err(err),
         }
     }
 
@@ -297,6 +297,24 @@ mod tests {
     fn parse_block_header_too_short() {
         let data = [b'r', 0];
         assert!(parse_block_header(&data).is_err());
+    }
+
+    #[test]
+    fn read_ref_records_propagates_record_errors() {
+        let mut block = Vec::new();
+        block.push(b'r');
+        block.extend_from_slice(&[0, 0, 0]);
+        crate::write_varint(0, &mut block);
+        crate::write_varint(7, &mut block);
+        crate::write_varint(0, &mut block);
+        block.extend_from_slice(&0u16.to_be_bytes());
+        let block_len = block.len() as u32;
+        crate::put_be24((&mut block[1..4]).try_into().expect("3 bytes"), block_len);
+
+        assert!(matches!(
+            read_ref_records(&block, 20, 1),
+            Err(Error::InvalidRefValueType { value_type: 7 })
+        ));
     }
 
     #[test]
