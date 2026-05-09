@@ -10,9 +10,9 @@ use std::{
 };
 
 use gix_hash::ObjectId;
-use gix_hashtable::HashSet;
+use gix_hashtable::{HashMap, HashSet};
 use gix_object::{
-    bstr::BString,
+    bstr::{BStr, BString},
     find::{existing, existing_object},
     tree::{EntryKind, EntryMode},
     Data, Exists, Find, FindExt, Kind, ObjectRef,
@@ -122,6 +122,8 @@ where
     missing_cb: F,
     /// Set of Object IDs already (or about to be) scanned during the check
     seen: HashSet,
+    /// The first path through which each seen object became reachable.
+    reachable_paths: HashMap<ObjectId, BString>,
     /// A buffer to keep a single object at a time.
     buf: Vec<u8>,
     /// A buffer for objects that have to be read while the main buffer is borrowed.
@@ -139,6 +141,7 @@ where
             db,
             missing_cb,
             seen: HashSet::default(),
+            reachable_paths: HashMap::default(),
             buf: Default::default(),
             secondary_buf: Default::default(),
         }
@@ -167,8 +170,12 @@ where
     ///
     /// This is like [`Connectivity::check_commit`], but can report progress and be interrupted.
     pub fn check_commit_with_options(&mut self, oid: &ObjectId, options: Options<'_>) -> Result<(), Error> {
+        self.check_commit_at(oid, options, root_path("commit", oid))
+    }
+
+    fn check_commit_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
         // Attempt to insert the commit ID in the set, and if already present, return immediately
-        if !insert_seen(&mut self.seen, *oid, options)? {
+        if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
             return Ok(());
         }
         // Obtain the commit's tree ID
@@ -180,7 +187,7 @@ where
             }
         };
 
-        self.check_tree_id(&tree_id, options)
+        self.check_tree_id_at(&tree_id, options, child_path(&path, "tree", &tree_id))
     }
 
     /// Run the connectivity check on the provided annotated tag `oid`.
@@ -201,7 +208,11 @@ where
     ///
     /// This is like [`Connectivity::check_tag`], but can report progress and be interrupted.
     pub fn check_tag_with_options(&mut self, oid: &ObjectId, options: Options<'_>) -> Result<(), Error> {
-        if !insert_seen(&mut self.seen, *oid, options)? {
+        self.check_tag_at(oid, options, root_path("tag", oid))
+    }
+
+    fn check_tag_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
+        if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
             return Ok(());
         }
 
@@ -213,7 +224,12 @@ where
             }
         };
 
-        self.check_referenced_object(&target, target_kind, options)
+        self.check_referenced_object_at(
+            &target,
+            target_kind,
+            options,
+            child_path(&path, kind_label(target_kind), &target),
+        )
     }
 
     /// Run the connectivity check on the provided object `oid`, detecting its kind from the object database.
@@ -231,7 +247,11 @@ where
     ///
     /// This is useful for roots whose kind is not known ahead of time, such as object ids collected from reflog entries.
     pub fn check_object_with_options(&mut self, oid: &ObjectId, options: Options<'_>) -> Result<(), Error> {
-        if !insert_seen(&mut self.seen, *oid, options)? {
+        self.check_object_at(oid, options, root_path("object", oid))
+    }
+
+    fn check_object_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
+        if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
             return Ok(());
         }
 
@@ -268,16 +288,27 @@ where
             Root::Blob => Ok(()),
             Root::Tree => {
                 let mut tree_ids = VecDeque::new();
-                self.check_tree(oid, &mut tree_ids, options)?;
-                while let Some(tree_id) = tree_ids.pop_front() {
-                    if insert_seen(&mut self.seen, tree_id, options)? {
-                        self.check_tree(&tree_id, &mut tree_ids, options)?;
+                self.check_tree(oid, &path, &mut tree_ids, options)?;
+                while let Some((tree_id, tree_path)) = tree_ids.pop_front() {
+                    if insert_seen_at(
+                        &mut self.seen,
+                        &mut self.reachable_paths,
+                        tree_id,
+                        options,
+                        tree_path.clone(),
+                    )? {
+                        self.check_tree(&tree_id, &tree_path, &mut tree_ids, options)?;
                     }
                 }
                 Ok(())
             }
-            Root::Commit(tree_id) => self.check_tree_id(&tree_id, options),
-            Root::Tag(target, target_kind) => self.check_referenced_object(&target, target_kind, options),
+            Root::Commit(tree_id) => self.check_tree_id_at(&tree_id, options, child_path(&path, "tree", &tree_id)),
+            Root::Tag(target, target_kind) => self.check_referenced_object_at(
+                &target,
+                target_kind,
+                options,
+                child_path(&path, kind_label(target_kind), &target),
+            ),
         }
     }
 
@@ -307,10 +338,10 @@ where
     ) -> Result<(), Error> {
         for (old_id, new_id) in entries {
             if !old_id.is_null() {
-                self.check_object_with_options(&old_id, options)?;
+                self.check_object_at(&old_id, options, root_path("reflog-old", &old_id))?;
             }
             if !new_id.is_null() {
-                self.check_object_with_options(&new_id, options)?;
+                self.check_object_at(&new_id, options, root_path("reflog-new", &new_id))?;
             }
         }
         Ok(())
@@ -343,7 +374,7 @@ where
     ) -> Result<(), Error> {
         for (oid, kind) in entries {
             if !oid.is_null() {
-                self.check_index_entry_with_options(&oid, kind, options)?;
+                self.check_index_entry_with_options(&oid, kind, options, root_path("index-entry", &oid))?;
             }
         }
         Ok(())
@@ -371,7 +402,7 @@ where
     ) -> Result<(), Error> {
         for tree_id in tree_ids {
             if !tree_id.is_null() {
-                self.check_tree_id(&tree_id, options)?;
+                self.check_tree_id_at(&tree_id, options, root_path("index-tree-cache", &tree_id))?;
             }
         }
         Ok(())
@@ -389,38 +420,55 @@ where
             .collect()
     }
 
+    /// Return the first recorded reachability path for `oid`.
+    pub fn path_to(&self, oid: &ObjectId) -> Option<&BString> {
+        self.reachable_paths.get(oid)
+    }
+
+    /// Iterate over all seen object ids and their first recorded reachability paths.
+    pub fn reachable_paths(&self) -> impl Iterator<Item = (&ObjectId, &BString)> {
+        self.reachable_paths.iter()
+    }
+
     fn check_index_entry_with_options(
         &mut self,
         oid: &ObjectId,
         kind: EntryKind,
         options: Options<'_>,
+        path: BString,
     ) -> Result<(), Error> {
         match kind {
             EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => {
-                if insert_seen(&mut self.seen, *oid, options)? {
+                if insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path)? {
                     check_blob(&self.db, oid, &mut self.buf, &mut self.missing_cb, options)?;
                 }
                 Ok(())
             }
-            EntryKind::Tree => self.check_tree_id(oid, options),
+            EntryKind::Tree => self.check_tree_id_at(oid, options, path),
             EntryKind::Commit => Ok(()),
         }
     }
 
-    fn check_referenced_object(&mut self, oid: &ObjectId, kind: Kind, options: Options<'_>) -> Result<(), Error> {
+    fn check_referenced_object_at(
+        &mut self,
+        oid: &ObjectId,
+        kind: Kind,
+        options: Options<'_>,
+        path: BString,
+    ) -> Result<(), Error> {
         match kind {
             Kind::Blob => {
-                if insert_seen(&mut self.seen, *oid, options)? {
+                if insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path)? {
                     check_blob(&self.db, oid, &mut self.buf, &mut self.missing_cb, options)?;
                 }
                 Ok(())
             }
-            Kind::Tree => self.check_tree_id(oid, options),
+            Kind::Tree => self.check_tree_id_at(oid, options, path),
             Kind::Commit => {
                 if self.db.exists(oid) {
-                    self.check_commit_with_options(oid, options)
+                    self.check_commit_at(oid, options, path)
                 } else {
-                    if insert_seen(&mut self.seen, *oid, options)? {
+                    if insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path)? {
                         (self.missing_cb)(oid, Kind::Commit);
                     }
                     Ok(())
@@ -428,9 +476,9 @@ where
             }
             Kind::Tag => {
                 if self.db.exists(oid) {
-                    self.check_tag_with_options(oid, options)
+                    self.check_tag_at(oid, options, path)
                 } else {
-                    if insert_seen(&mut self.seen, *oid, options)? {
+                    if insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path)? {
                         (self.missing_cb)(oid, Kind::Tag);
                     }
                     Ok(())
@@ -439,11 +487,17 @@ where
         }
     }
 
-    fn check_tree_id(&mut self, oid: &ObjectId, options: Options<'_>) -> Result<(), Error> {
-        let mut tree_ids = VecDeque::from_iter(Some(*oid));
-        while let Some(tree_id) = tree_ids.pop_front() {
-            if insert_seen(&mut self.seen, tree_id, options)? {
-                self.check_tree(&tree_id, &mut tree_ids, options)?;
+    fn check_tree_id_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
+        let mut tree_ids = VecDeque::from_iter(Some((*oid, path)));
+        while let Some((tree_id, tree_path)) = tree_ids.pop_front() {
+            if insert_seen_at(
+                &mut self.seen,
+                &mut self.reachable_paths,
+                tree_id,
+                options,
+                tree_path.clone(),
+            )? {
+                self.check_tree(&tree_id, &tree_path, &mut tree_ids, options)?;
             }
         }
         Ok(())
@@ -454,7 +508,8 @@ where
     fn check_tree(
         &mut self,
         oid: &ObjectId,
-        tree_ids: &mut VecDeque<ObjectId>,
+        path: &BString,
+        tree_ids: &mut VecDeque<(ObjectId, BString)>,
         options: Options<'_>,
     ) -> Result<(), Error> {
         let Some(object) = find_optional_object(&self.db, oid, &mut self.buf, Kind::Tree, options)? else {
@@ -478,11 +533,17 @@ where
             match entry_ref.mode.kind() {
                 EntryKind::Tree => {
                     let tree_id = entry_ref.oid.to_owned();
-                    tree_ids.push_back(tree_id);
+                    tree_ids.push_back((tree_id, tree_entry_path(path, entry_ref.filename)));
                 }
                 EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => {
                     let blob_id = entry_ref.oid.to_owned();
-                    if insert_seen(&mut self.seen, blob_id, options)? {
+                    if insert_seen_at(
+                        &mut self.seen,
+                        &mut self.reachable_paths,
+                        blob_id,
+                        options,
+                        tree_entry_path(path, entry_ref.filename),
+                    )? {
                         check_blob(
                             &self.db,
                             &blob_id,
@@ -618,6 +679,49 @@ fn insert_seen(seen: &mut HashSet, oid: ObjectId, options: Options<'_>) -> Resul
         options.record_progress();
     }
     Ok(was_inserted)
+}
+
+fn insert_seen_at(
+    seen: &mut HashSet,
+    reachable_paths: &mut HashMap<ObjectId, BString>,
+    oid: ObjectId,
+    options: Options<'_>,
+    path: BString,
+) -> Result<bool, Error> {
+    let inserted = insert_seen(seen, oid, options)?;
+    if inserted {
+        reachable_paths.insert(oid, path);
+    }
+    Ok(inserted)
+}
+
+fn root_path(label: &str, oid: &ObjectId) -> BString {
+    format!("{label} {oid}").into()
+}
+
+fn child_path(parent: &BString, label: &str, oid: &ObjectId) -> BString {
+    let mut path: Vec<u8> = parent.clone().into();
+    path.extend_from_slice(b" -> ");
+    path.extend_from_slice(label.as_bytes());
+    path.push(b' ');
+    path.extend_from_slice(oid.to_string().as_bytes());
+    path.into()
+}
+
+fn tree_entry_path(parent: &BString, filename: &BStr) -> BString {
+    let mut path: Vec<u8> = parent.clone().into();
+    path.extend_from_slice(b" -> ");
+    path.extend_from_slice(filename);
+    path.into()
+}
+
+fn kind_label(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Tree => "tree",
+        Kind::Blob => "blob",
+        Kind::Commit => "commit",
+        Kind::Tag => "tag",
+    }
 }
 
 fn check_blob<T, F>(
