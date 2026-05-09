@@ -356,6 +356,110 @@ mod update {
         Ok(())
     }
 
+    /// `update=merge` should preserve the current submodule branch and create a
+    /// merge commit when the branch diverged from the superproject commit.
+    #[cfg(feature = "merge")]
+    #[test]
+    fn update_with_strategy_merge_merges_diverged_current_branch() -> crate::Result {
+        let (repo, _tmp) = repo_rw("update-merge-diverged")?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+
+        let index_id = sm.index_id()?.expect("submodule in index");
+        let sm_repo = sm.open()?.expect("submodule repo exists");
+        let local_head = sm_repo.head_id()?.detach();
+        assert_ne!(local_head, index_id, "fixture starts diverged");
+
+        let outcome = sm.update_submodule(
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+            &Default::default(),
+        )?;
+
+        let outcome = outcome.expect("update should succeed");
+        assert_eq!(outcome.strategy, gix::submodule::config::Update::Merge);
+        assert!(outcome.checkout.is_some(), "merge should update the worktree");
+
+        let sm_repo = sm.open()?.expect("submodule repo exists after update");
+        assert_eq!(
+            sm_repo.head_name()?.expect("symbolic head").as_bstr(),
+            "refs/heads/local",
+            "merge update should preserve the current submodule branch"
+        );
+
+        let merge_head = sm_repo.head_id()?.detach();
+        assert_ne!(merge_head, local_head, "merge should advance the local branch");
+        assert_ne!(merge_head, index_id, "merge should create a merge commit");
+        let merge_commit = sm_repo.find_commit(merge_head)?;
+        let parents: Vec<_> = merge_commit.parent_ids().map(gix::Id::detach).collect();
+        assert_eq!(
+            parents,
+            vec![local_head, index_id],
+            "merge parents should match git merge"
+        );
+        assert!(
+            sm_repo.workdir().expect("worktree").join("local-merge").is_file(),
+            "local branch content should remain after merge"
+        );
+        Ok(())
+    }
+
+    /// `update=rebase` should preserve the current submodule branch and replay a
+    /// clean linear local commit onto the superproject commit.
+    #[cfg(feature = "merge")]
+    #[test]
+    fn update_with_strategy_rebase_replays_diverged_current_branch() -> crate::Result {
+        let (repo, _tmp) = repo_rw("update-rebase-diverged")?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+
+        let index_id = sm.index_id()?.expect("submodule in index");
+        let sm_repo = sm.open()?.expect("submodule repo exists");
+        let local_head = sm_repo.head_id()?.detach();
+        assert_ne!(local_head, index_id, "fixture starts diverged");
+
+        let outcome = sm.update_submodule(
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+            &Default::default(),
+        )?;
+
+        let outcome = outcome.expect("update should succeed");
+        assert_eq!(outcome.strategy, gix::submodule::config::Update::Rebase);
+        assert!(outcome.checkout.is_some(), "rebase should update the worktree");
+
+        let sm_repo = sm.open()?.expect("submodule repo exists after update");
+        assert_eq!(
+            sm_repo.head_name()?.expect("symbolic head").as_bstr(),
+            "refs/heads/local",
+            "rebase update should preserve the current submodule branch"
+        );
+
+        let rebased_head = sm_repo.head_id()?.detach();
+        assert_ne!(rebased_head, local_head, "rebase should rewrite the local commit");
+        assert_ne!(rebased_head, index_id, "rebase should leave the local commit on top");
+        let rebased_commit = sm_repo.find_commit(rebased_head)?;
+        let parents: Vec<_> = rebased_commit.parent_ids().map(gix::Id::detach).collect();
+        assert_eq!(
+            parents,
+            vec![index_id],
+            "rebased commit should be based on the superproject commit"
+        );
+        assert!(
+            sm_repo.workdir().expect("worktree").join("local-rebase").is_file(),
+            "local branch content should remain after rebase"
+        );
+        Ok(())
+    }
+
     /// Ported from libgit2 test_submodule_update__uninitialized_submodule_no_init:
     /// Updating an uninitialized submodule without init=true should be skipped.
     /// Git skips uninitialized submodules silently; we return Ok(None).
