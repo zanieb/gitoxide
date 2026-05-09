@@ -216,6 +216,106 @@ where
         self.check_referenced_object(&target, target_kind, options)
     }
 
+    /// Run the connectivity check on the provided object `oid`, detecting its kind from the object database.
+    pub fn check_object(&mut self, oid: &ObjectId) -> Result<(), existing_object::Error> {
+        match self.check_object_with_options(oid, Options::default()) {
+            Ok(()) => Ok(()),
+            Err(Error::Find(err)) => Err(err),
+            Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
+            Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
+            Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
+        }
+    }
+
+    /// Run the connectivity check on the provided object `oid`, detecting its kind from the object database and using `options`.
+    ///
+    /// This is useful for roots whose kind is not known ahead of time, such as object ids collected from reflog entries.
+    pub fn check_object_with_options(&mut self, oid: &ObjectId, options: Options<'_>) -> Result<(), Error> {
+        if !insert_seen(&mut self.seen, *oid, options)? {
+            return Ok(());
+        }
+
+        enum Root {
+            Blob,
+            Tree,
+            Commit(ObjectId),
+            Tag(ObjectId, Kind),
+        }
+
+        let root = {
+            let object = find_existing_any_object(&self.db, oid, &mut self.buf, options)?;
+            match object.kind {
+                Kind::Blob => Root::Blob,
+                Kind::Tree => Root::Tree,
+                Kind::Commit => {
+                    let tree_id = match decode_object(object, oid)? {
+                        ObjectRef::Commit(commit) => commit.tree(),
+                        _ => unreachable!("object kind was matched before decoding"),
+                    };
+                    Root::Commit(tree_id)
+                }
+                Kind::Tag => {
+                    let (target, target_kind) = match decode_object(object, oid)? {
+                        ObjectRef::Tag(tag) => (tag.target(), tag.target_kind),
+                        _ => unreachable!("object kind was matched before decoding"),
+                    };
+                    Root::Tag(target, target_kind)
+                }
+            }
+        };
+
+        match root {
+            Root::Blob => Ok(()),
+            Root::Tree => {
+                let mut tree_ids = VecDeque::new();
+                self.check_tree(oid, &mut tree_ids, options)?;
+                while let Some(tree_id) = tree_ids.pop_front() {
+                    if insert_seen(&mut self.seen, tree_id, options)? {
+                        self.check_tree(&tree_id, &mut tree_ids, options)?;
+                    }
+                }
+                Ok(())
+            }
+            Root::Commit(tree_id) => self.check_tree_id(&tree_id, options),
+            Root::Tag(target, target_kind) => self.check_referenced_object(&target, target_kind, options),
+        }
+    }
+
+    /// Run connectivity checks on all non-null old and new ids in reflog entries.
+    ///
+    /// Each item is `(old_id, new_id)`. Null ids are skipped, as they represent creation or deletion boundaries.
+    pub fn check_reflog_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = (ObjectId, ObjectId)>,
+    ) -> Result<(), existing_object::Error> {
+        match self.check_reflog_entries_with_options(entries, Options::default()) {
+            Ok(()) => Ok(()),
+            Err(Error::Find(err)) => Err(err),
+            Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
+            Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
+            Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
+        }
+    }
+
+    /// Run connectivity checks on all non-null old and new ids in reflog entries, using `options`.
+    ///
+    /// Each item is `(old_id, new_id)`. Null ids are skipped, as they represent creation or deletion boundaries.
+    pub fn check_reflog_entries_with_options(
+        &mut self,
+        entries: impl IntoIterator<Item = (ObjectId, ObjectId)>,
+        options: Options<'_>,
+    ) -> Result<(), Error> {
+        for (old_id, new_id) in entries {
+            if !old_id.is_null() {
+                self.check_object_with_options(&old_id, options)?;
+            }
+            if !new_id.is_null() {
+                self.check_object_with_options(&new_id, options)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Return all objects from `object_ids` that were not reached by previous connectivity checks.
     ///
     /// The input should be the object ids known to exist in the object database. Missing objects reported while
@@ -478,6 +578,48 @@ where
         }
         .into()
     })
+}
+
+fn find_existing_any_object<'a, T>(
+    db: &T,
+    oid: &ObjectId,
+    buf: &'a mut Vec<u8>,
+    options: Options<'_>,
+) -> Result<Data<'a>, Error>
+where
+    T: Find,
+{
+    find_optional_any_object(db, oid, buf, options)?.ok_or_else(|| {
+        existing_object::Error::NotFound {
+            oid: oid.as_ref().to_owned(),
+        }
+        .into()
+    })
+}
+
+fn find_optional_any_object<'a, T>(
+    db: &T,
+    oid: &ObjectId,
+    buf: &'a mut Vec<u8>,
+    options: Options<'_>,
+) -> Result<Option<Data<'a>>, Error>
+where
+    T: Find,
+{
+    if *oid == ObjectId::empty_tree(oid.kind()) {
+        return Ok(Some(Data::new(Kind::Tree, &[])));
+    }
+    if *oid == ObjectId::empty_blob(oid.kind()) {
+        return Ok(Some(Data::new(Kind::Blob, &[])));
+    }
+
+    let Some(object) = db.try_find(oid, buf).map_err(existing_object::Error::Find)? else {
+        return Ok(None);
+    };
+    if options.verify_hashes {
+        object.verify_checksum(oid).map_err(Error::Checksum)?;
+    }
+    Ok(Some(object))
 }
 
 fn find_optional_object<'a, T>(
