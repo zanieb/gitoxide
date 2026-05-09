@@ -1047,7 +1047,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
     * [x] stack management (tables.list manifest)
     * see [here for a Go/C implementation][reftable-impl]
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-reftable
 
