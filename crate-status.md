@@ -186,10 +186,10 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * **worktrees**
         * [x] open a repository with worktrees
             * [x] read locked state
-            * [ ] obtain 'prunable' information
+            * [x] obtain 'prunable' information
         * [x] proper handling of worktree related refs
         * [x] create a byte stream and create archives for such a stream, including worktree filters and conversions
-        * [ ] create, move, remove, and repair
+        * [x] create, lock/unlock, move, remove, prune, and repair
         * [x] access exclude information
         * [x] access attribute information
         * [x] respect `core.worktree` configuration
@@ -214,6 +214,8 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * **submodules**
         * [x] handle 'old' form for reading and detect old form
         * [x] list
+        * [x] initialize
+        * [x] update, including recursive updates and checkout/merge/rebase/custom-command strategies
         * [ ] edit
 * [x] API documentation
     * [ ] Some examples
