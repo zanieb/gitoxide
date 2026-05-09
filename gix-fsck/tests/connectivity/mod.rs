@@ -304,3 +304,16 @@ fn strict_mode_rejects_group_writable_tree_entries() {
         } if actual_tree_id == tree_id && mode.value() == 0o100664
     ));
 }
+
+#[test]
+fn unreachable_objects_are_reported_after_traversal() {
+    let mut db = MemoryDb::default();
+    let reachable_blob = db.insert(Kind::Blob, b"reachable".to_vec());
+    let unreachable_blob = db.insert(Kind::Blob, b"unreachable".to_vec());
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(reachable_blob, Kind::Blob, "blob-tag"));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
+    check.check_tag(&tag_id).expect("reachable tag is present");
+
+    assert_eq!(check.unreachable(db.objects.keys()), vec![unreachable_blob]);
+}
