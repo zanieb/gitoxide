@@ -125,8 +125,11 @@ pub(crate) mod function {
         };
         if let Some(entries) = index.prefixed_entries(pathspec.common_prefix()) {
             stats.entries_after_prune = entries.len();
-            let mut entries = entries.iter().peekable();
-            while let Some(entry) = entries.next() {
+            for (entry_index, entry) in entries.iter().enumerate() {
+                #[cfg(not(feature = "serde"))]
+                let _ = entry_index;
+                #[cfg(feature = "serde")]
+                let is_last_entry = entry_index + 1 == entries.len();
                 let mut last_match = None;
                 let attrs = cache
                     .as_mut()
@@ -229,7 +232,7 @@ pub(crate) mod function {
                             }?;
                         }
                         #[cfg(feature = "serde")]
-                        OutputFormat::Json => to_json(out, &index, entry, attrs, entries.peek().is_none(), prefix)?,
+                        OutputFormat::Json => to_json(out, &index, entry, attrs, is_last_entry, prefix)?,
                     }
                 }
             }
