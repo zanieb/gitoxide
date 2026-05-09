@@ -212,3 +212,33 @@ fn interruption_stops_connectivity_checks() {
 
     assert!(matches!(err, Error::Interrupted));
 }
+
+#[test]
+fn hash_validation_checks_reachable_blobs() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"hello".to_vec());
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(blob_id, Kind::Blob, "blob-tag"));
+    db.objects
+        .get_mut(&blob_id)
+        .expect("blob exists")
+        .1
+        .copy_from_slice(b"jello");
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("the corrupt blob is still present"));
+    check
+        .check_tag(&tag_id)
+        .expect("unchecked connectivity only needs presence");
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("the corrupt blob is still present"));
+    let err = check
+        .check_tag_with_options(
+            &tag_id,
+            Options {
+                verify_hashes: true,
+                ..Options::default()
+            },
+        )
+        .expect_err("hash mismatch is rejected");
+
+    assert!(matches!(err, Error::Checksum(_)));
+}
