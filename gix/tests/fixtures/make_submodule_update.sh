@@ -70,6 +70,30 @@ git clone -q super update-none
   )
 )
 
+# --- Scenario: update-merge-ff ---
+# The submodule is on a local branch that can be fast-forwarded to the
+# superproject's recorded commit using update=merge.
+git clone -q super update-merge-ff
+(cd update-merge-ff
+  git submodule update --init
+  git config submodule.submodule.update merge
+  (cd submodule
+    git checkout -q -b local HEAD~1
+  )
+)
+
+# --- Scenario: update-rebase-ff ---
+# The submodule is on a local branch that can be fast-forwarded to the
+# superproject's recorded commit using update=rebase.
+git clone -q super update-rebase-ff
+(cd update-rebase-ff
+  git submodule update --init
+  git config submodule.submodule.update rebase
+  (cd submodule
+    git checkout -q -b local HEAD~1
+  )
+)
+
 # --- Scenario: dirty-submodule ---
 # Submodule has local changes that should block checkout update.
 git clone -q super dirty-submodule
