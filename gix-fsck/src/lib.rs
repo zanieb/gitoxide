@@ -4,6 +4,8 @@
 use std::{
     collections::VecDeque,
     fmt,
+    io::Write,
+    path::Path,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
@@ -11,7 +13,7 @@ use gix_hash::ObjectId;
 use gix_hashtable::HashSet;
 use gix_object::{
     bstr::BString,
-    find::existing_object,
+    find::{existing, existing_object},
     tree::{EntryKind, EntryMode},
     Data, Exists, Find, FindExt, Kind, ObjectRef,
 };
@@ -317,6 +319,109 @@ where
             }
         }
         Ok(())
+    }
+}
+
+/// Write `object_ids` into the `lost-found` directories below `git_dir`.
+///
+/// Commit objects are written to `lost-found/commit/<object-id>`, all other object kinds to
+/// `lost-found/other/<object-id>`. Existing files are left unchanged.
+pub fn write_lost_found<'a, T>(
+    git_dir: impl AsRef<Path>,
+    objects: &T,
+    object_ids: impl IntoIterator<Item = &'a ObjectId>,
+) -> Result<usize, lost_found::Error>
+where
+    T: Find,
+{
+    let git_dir = git_dir.as_ref();
+    let mut buf = Vec::new();
+    let mut written = 0;
+    for oid in object_ids {
+        let object = objects
+            .try_find(oid, &mut buf)
+            .map_err(existing::Error::Find)?
+            .ok_or_else(|| existing::Error::NotFound { oid: *oid })?;
+        let dir = git_dir
+            .join("lost-found")
+            .join(if object.kind == Kind::Commit { "commit" } else { "other" });
+        std::fs::create_dir_all(&dir).map_err(|source| lost_found::Error::CreateDirectory {
+            source,
+            directory: dir.clone(),
+        })?;
+        let path = dir.join(oid.to_string());
+        let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(source) => return Err(lost_found::Error::CreateFile { source, path }),
+        };
+        file.write_all(object.data)
+            .map_err(|source| lost_found::Error::Write { source, path })?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Errors and support types for writing dangling objects into `lost-found`.
+pub mod lost_found {
+    use std::{fmt, path::PathBuf};
+
+    /// The error returned by [`crate::write_lost_found()`].
+    #[derive(Debug)]
+    pub enum Error {
+        /// The object database failed to provide a dangling object.
+        Find(gix_object::find::existing::Error),
+        /// A directory in the `lost-found` hierarchy could not be created.
+        CreateDirectory {
+            /// The underlying IO error.
+            source: std::io::Error,
+            /// The directory that could not be created.
+            directory: PathBuf,
+        },
+        /// A file in the `lost-found` hierarchy could not be created.
+        CreateFile {
+            /// The underlying IO error.
+            source: std::io::Error,
+            /// The file that could not be created.
+            path: PathBuf,
+        },
+        /// The dangling object data could not be written.
+        Write {
+            /// The underlying IO error.
+            source: std::io::Error,
+            /// The file that could not be written.
+            path: PathBuf,
+        },
+    }
+
+    impl From<gix_object::find::existing::Error> for Error {
+        fn from(err: gix_object::find::existing::Error) -> Self {
+            Error::Find(err)
+        }
+    }
+
+    impl fmt::Display for Error {
+        fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Error::Find(err) => err.fmt(out),
+                Error::CreateDirectory { directory, .. } => {
+                    write!(out, "Could not create lost-found directory {}", directory.display())
+                }
+                Error::CreateFile { path, .. } => write!(out, "Could not create lost-found file {}", path.display()),
+                Error::Write { path, .. } => write!(out, "Could not write lost-found file {}", path.display()),
+            }
+        }
+    }
+
+    impl std::error::Error for Error {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            match self {
+                Error::Find(err) => Some(err),
+                Error::CreateDirectory { source, .. }
+                | Error::CreateFile { source, .. }
+                | Error::Write { source, .. } => Some(source),
+            }
+        }
     }
 }
 

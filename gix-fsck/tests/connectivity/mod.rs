@@ -1,4 +1,4 @@
-use gix_fsck::{Connectivity, Error, Options};
+use gix_fsck::{write_lost_found, Connectivity, Error, Options};
 use gix_hash::ObjectId;
 use gix_hashtable::{HashMap, HashSet};
 use gix_object::{Data, Kind};
@@ -316,4 +316,41 @@ fn unreachable_objects_are_reported_after_traversal() {
     check.check_tag(&tag_id).expect("reachable tag is present");
 
     assert_eq!(check.unreachable(db.objects.keys()), vec![unreachable_blob]);
+}
+
+#[test]
+fn dangling_objects_are_written_to_lost_found() -> gix_testtools::Result {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"dangling blob".to_vec());
+    let commit_data = format!("tree {}\n\norphaned\n", ObjectId::empty_tree(gix_hash::Kind::Sha1));
+    let commit_id = db.insert(Kind::Commit, commit_data.as_bytes().to_owned());
+
+    let git_dir = gix_testtools::tempfile::TempDir::new()?;
+    let written = write_lost_found(git_dir.path(), &db, [&commit_id, &blob_id])?;
+
+    assert_eq!(written, 2);
+    assert_eq!(
+        std::fs::read(
+            git_dir
+                .path()
+                .join("lost-found")
+                .join("commit")
+                .join(commit_id.to_string())
+        )?,
+        commit_data.as_bytes()
+    );
+    assert_eq!(
+        std::fs::read(
+            git_dir
+                .path()
+                .join("lost-found")
+                .join("other")
+                .join(blob_id.to_string())
+        )?,
+        b"dangling blob"
+    );
+
+    let written = write_lost_found(git_dir.path(), &db, [&commit_id, &blob_id])?;
+    assert_eq!(written, 0, "existing lost-found files are left in place");
+    Ok(())
 }

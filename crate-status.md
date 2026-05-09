@@ -999,7 +999,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 * [x] skipList to exclude objects which are known to be broken
 * [x] validate blob hashes (connectivity check
 * [x] identify objects that exist but are not reachable (i.e. what remains after a full graph traversal from all valid starting points)
-* [ ] write dangling objects to the `.git/log-found` directory structure
+* [x] write dangling objects to the `.git/lost-found` directory structure
 * [x] `strict` mode, to check for tree objects with `g+w` permissions
 * [ ] consider reflog entries from `ref` starting points
 * [ ] when reporting reachable objects, provide the path through which they are reachable, i.e. ref-log@{3} -> commit -> tree -> path-in-tree
