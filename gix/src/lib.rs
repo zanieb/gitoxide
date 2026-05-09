@@ -95,8 +95,8 @@
 //!
 //! `git2` by default performs integrity checks via [`strict_hash_verification()`](https://docs.rs/git2/latest/git2/opts/fn.strict_hash_verification.html) and
 //! [`strict_object_creation`](https://docs.rs/git2/latest/git2/opts/fn.strict_object_creation.html). `gitoxide` provides
-//! strict object creation with [`Repository::write_object_checked()`], while strict hash verification is available in lower-level
-//! validation APIs such as `gix-fsck`.
+//! strict hash verification with [`Repository::try_find_object_verified()`] and strict object creation with
+//! [`Repository::write_object_checked()`].
 //!
 //! ### Feature Flags
 #![cfg_attr(

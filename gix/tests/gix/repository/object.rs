@@ -525,8 +525,8 @@ fn writes_avoid_io_using_duplicate_check() -> crate::Result {
 mod find {
     use gix_pack::Find;
 
-    use crate::basic_repo;
-    use crate::repository::object::empty_bare_in_memory_repo;
+    use crate::repository::object::{empty_bare_in_memory_repo, empty_bare_repo};
+    use crate::{basic_repo, util::hex_to_id};
 
     #[test]
     fn find_and_try_find_with_and_without_object_cache() -> crate::Result {
@@ -602,6 +602,54 @@ mod find {
         assert!(
             repo.objects.try_find(&empty_tree, &mut buf)?.is_none(),
             "the lower level has no such special case so one can determine if this object exists or not"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn try_find_object_verified_returns_only_objects_with_matching_checksums() -> crate::Result {
+        let repo = basic_repo()?;
+        let commit = repo.head()?.into_peeled_id()?;
+        assert_eq!(
+            repo.try_find_object_verified(commit)?.expect("present").kind,
+            gix_object::Kind::Commit
+        );
+
+        let empty_tree = gix::hash::ObjectId::empty_tree(repo.object_hash());
+        assert_eq!(
+            repo.try_find_object_verified(empty_tree)?
+                .expect("present")
+                .into_tree()
+                .iter()
+                .count(),
+            0
+        );
+        assert!(repo
+            .try_find_object_verified(hex_to_id("1111111111111111111111111111111111111111"))?
+            .is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn try_find_object_verified_rejects_objects_stored_under_the_wrong_id() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo()?;
+        let actual_id = repo.write_blob(b"content")?;
+        let expected_id = hex_to_id("1111111111111111111111111111111111111111");
+        let store = gix::odb::loose::Store::at(repo.git_dir().join("objects"), repo.object_hash());
+        let expected_path = store.object_path(&expected_id);
+        std::fs::create_dir_all(expected_path.parent().expect("loose objects have a directory"))?;
+        std::fs::copy(store.object_path(&actual_id), expected_path)?;
+
+        assert_eq!(
+            repo.try_find_object(expected_id)?
+                .expect("object exists under its wrong path")
+                .data,
+            b"content",
+            "regular lookup keeps the historical unchecked behavior"
+        );
+        assert_eq!(
+            repo.try_find_object_verified(expected_id).unwrap_err().to_string(),
+            format!("Hash was {actual_id}, but should have been {expected_id}")
         );
         Ok(())
     }

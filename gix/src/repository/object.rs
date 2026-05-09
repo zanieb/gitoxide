@@ -240,6 +240,35 @@ impl crate::Repository {
             None => Ok(None),
         }
     }
+
+    /// Try to find the object with `id` and verify that its content matches its checksum.
+    ///
+    /// Return `None` if the object wasn't found. The well-known empty tree is treated like [`Repository::try_find_object()`]
+    /// and is always available for the repository's object hash.
+    pub fn try_find_object_verified(
+        &self,
+        id: impl Into<ObjectId>,
+    ) -> Result<Option<Object<'_>>, object::verify::Error> {
+        let id = id.into();
+        if id == ObjectId::empty_tree(self.object_hash()) {
+            return Ok(Some(Object {
+                id,
+                kind: gix_object::Kind::Tree,
+                data: Vec::new(),
+                repo: self,
+            }));
+        }
+
+        let mut buf = self.free_buf();
+        match self.objects.try_find(&id, &mut buf).map_err(object::find::Error)? {
+            Some(obj) => {
+                obj.verify_checksum(&id)?;
+                let kind = obj.kind;
+                Ok(Some(Object::from_data(id, kind, buf, self)))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 /// Write objects of any type.

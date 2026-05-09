@@ -9,7 +9,7 @@ mod errors;
 pub(crate) mod cache {
     pub use gix_pack::cache::object::MemoryCappedHashmap;
 }
-pub use errors::{conversion, find, write};
+pub use errors::{conversion, find, verify, write};
 ///
 pub mod blob;
 ///

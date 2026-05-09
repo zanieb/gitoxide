@@ -48,3 +48,16 @@ pub mod write {
     #[error(transparent)]
     pub struct Error(#[from] pub gix_object::write::Error);
 }
+
+///
+pub mod verify {
+    /// An error to indicate finding or checksum verification of an object failed.
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error(transparent)]
+        Find(#[from] crate::object::find::Error),
+        #[error(transparent)]
+        Checksum(#[from] gix_object::data::verify::Error),
+    }
+}
