@@ -497,8 +497,8 @@ mod find {
     use gix_pack::Find;
     use gix_testtools::TestResult;
 
-    use crate::basic_repo;
-    use crate::repository::object::empty_bare_in_memory_repo;
+    use crate::repository::object::{empty_bare_in_memory_repo, empty_bare_repo};
+    use crate::{basic_repo, util::hex_to_id};
 
     #[test]
     fn find_and_try_find_with_and_without_object_cache() -> TestResult {
