@@ -569,7 +569,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 
 ### gix-attributes
 * [x] parse `.gitattribute` files
-* [ ] an attributes stack for matching paths to their attributes, with support for built-in `binary` macro for `-text -diff -merge`
+* [x] an attributes stack for matching paths to their attributes, with support for built-in `binary` macro for `-text -diff -merge`
 
 ### gix-ignore
 * [x] parse `.gitignore` files
