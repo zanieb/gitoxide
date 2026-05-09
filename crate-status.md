@@ -878,7 +878,7 @@ The git staging area.
   * extensions
       * [x] TREE
       * [x] REUC
-      * [ ] UNTR
+      * [x] UNTR
       * [x] FSMN
       * [x] EOIE
       * [x] 'sdir'

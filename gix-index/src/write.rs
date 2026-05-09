@@ -21,6 +21,8 @@ pub enum Extensions {
         resolve_undo: bool,
         /// Write the fsmonitor extension, if present.
         fs_monitor: bool,
+        /// Write the untracked-cache extension, if present.
+        untracked: bool,
         /// Write the end-of-index-entry extension.
         end_of_index_entry: bool,
     },
@@ -38,11 +40,13 @@ impl Extensions {
                 tree_cache,
                 resolve_undo,
                 fs_monitor,
+                untracked,
                 end_of_index_entry,
             } => match signature {
                 extension::tree::SIGNATURE => tree_cache,
                 extension::resolve_undo::SIGNATURE => resolve_undo,
                 extension::fs_monitor::SIGNATURE => fs_monitor,
+                extension::untracked_cache::SIGNATURE => untracked,
                 extension::end_of_index_entry::SIGNATURE => end_of_index_entry,
                 _ => &false,
             }
@@ -115,17 +119,20 @@ impl State {
                     tree_cache: false,
                     resolve_undo: true,
                     fs_monitor: true,
+                    untracked: true,
                     end_of_index_entry: true,
                 },
                 Extensions::Given {
                     resolve_undo,
                     fs_monitor,
+                    untracked,
                     end_of_index_entry,
                     ..
                 } => Extensions::Given {
                     tree_cache: false,
                     resolve_undo,
                     fs_monitor,
+                    untracked,
                     end_of_index_entry,
                 },
                 Extensions::None => Extensions::None,
@@ -178,6 +185,15 @@ impl State {
                     .and_then(|signature| {
                         self.fs_monitor()
                             .map(|fs_monitor| extension::fs_monitor::write_to(fs_monitor, write).map(|_| signature))
+                    })
+            },
+            &|write| {
+                extensions
+                    .should_write(extension::untracked_cache::SIGNATURE)
+                    .and_then(|signature| {
+                        self.untracked().map(|untracked| {
+                            extension::untracked_cache::write_to(untracked, self.object_hash, write).map(|_| signature)
+                        })
                     })
             },
             &|write| {

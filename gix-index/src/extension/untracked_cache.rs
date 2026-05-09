@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// A structure to track filesystem stat information along with an object id, linking a worktree file with what's in our ODB.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OidStat {
     /// The file system stat information
     pub stat: entry::Stat,
@@ -17,7 +17,7 @@ pub struct OidStat {
 }
 
 /// A directory with information about its untracked files, and its sub-directories
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Directory {
     /// The directories name, or an empty string if this is the root directory.
     pub name: BString,
@@ -185,4 +185,221 @@ fn decode_oid_stat(data: &[u8], hash_len: usize) -> Option<(OidStat, &[u8])> {
         },
         data,
     ))
+}
+
+/// Serialize an untracked-cache extension to `out`.
+pub fn write_to(
+    untracked: &UntrackedCache,
+    object_hash: gix_hash::Kind,
+    mut out: impl std::io::Write,
+) -> Result<(), std::io::Error> {
+    use std::io::Write as _;
+
+    let mut data = Vec::new();
+    write_var_int(
+        untracked
+            .identifier
+            .len()
+            .try_into()
+            .expect("identifier length fits u64"),
+        &mut data,
+    )?;
+    data.write_all(&untracked.identifier)?;
+    write_oid_stat(untracked.info_exclude.as_ref(), object_hash, &mut data)?;
+    write_oid_stat(untracked.excludes_file.as_ref(), object_hash, &mut data)?;
+    data.write_all(&untracked.dir_flags.to_be_bytes())?;
+    data.write_all(&untracked.exclude_filename_per_dir)?;
+    data.write_all(b"\0")?;
+    write_var_int(
+        untracked
+            .directories
+            .len()
+            .try_into()
+            .expect("directory count fits u64"),
+        &mut data,
+    )?;
+
+    if let Some(_root) = untracked.directories.first() {
+        write_directory_block(&untracked.directories, 0, &mut data)?;
+
+        let num_directories = untracked.directories.len();
+        write_bitmap(
+            num_directories,
+            untracked
+                .directories
+                .iter()
+                .enumerate()
+                .filter_map(|(index, dir)| dir.stat.is_some().then_some(index)),
+            &mut data,
+        )?;
+        write_bitmap(
+            num_directories,
+            untracked
+                .directories
+                .iter()
+                .enumerate()
+                .filter_map(|(index, dir)| dir.check_only.then_some(index)),
+            &mut data,
+        )?;
+        write_bitmap(
+            num_directories,
+            untracked
+                .directories
+                .iter()
+                .enumerate()
+                .filter_map(|(index, dir)| dir.exclude_file_oid.is_some().then_some(index)),
+            &mut data,
+        )?;
+
+        for stat in untracked.directories.iter().filter_map(|dir| dir.stat.as_ref()) {
+            write_stat(stat, &mut data)?;
+        }
+        for oid in untracked
+            .directories
+            .iter()
+            .filter_map(|dir| dir.exclude_file_oid.as_ref())
+        {
+            data.write_all(oid.as_bytes())?;
+        }
+        data.write_all(b"\0")?;
+    }
+
+    out.write_all(&SIGNATURE)?;
+    out.write_all(&(u32::try_from(data.len()).expect("less than 4GB untracked-cache extension")).to_be_bytes())?;
+    out.write_all(&data)
+}
+
+fn write_oid_stat(
+    stat: Option<&OidStat>,
+    object_hash: gix_hash::Kind,
+    out: &mut dyn std::io::Write,
+) -> Result<(), std::io::Error> {
+    match stat {
+        Some(stat) => {
+            write_stat(&stat.stat, out)?;
+            out.write_all(stat.id.as_bytes())
+        }
+        None => {
+            write_stat(&entry::Stat::default(), out)?;
+            out.write_all(ObjectId::null(object_hash).as_bytes())
+        }
+    }
+}
+
+fn write_stat(stat: &entry::Stat, out: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
+    out.write_all(&stat.mtime.secs.to_be_bytes())?;
+    out.write_all(&stat.mtime.nsecs.to_be_bytes())?;
+    out.write_all(&stat.ctime.secs.to_be_bytes())?;
+    out.write_all(&stat.ctime.nsecs.to_be_bytes())?;
+    out.write_all(&stat.dev.to_be_bytes())?;
+    out.write_all(&stat.ino.to_be_bytes())?;
+    out.write_all(&stat.uid.to_be_bytes())?;
+    out.write_all(&stat.gid.to_be_bytes())?;
+    out.write_all(&stat.size.to_be_bytes())
+}
+
+fn write_directory_block(
+    directories: &[Directory],
+    index: usize,
+    out: &mut dyn std::io::Write,
+) -> Result<(), std::io::Error> {
+    let directory = &directories[index];
+    write_var_int(
+        directory
+            .untracked_entries
+            .len()
+            .try_into()
+            .expect("untracked entry count fits u64"),
+        out,
+    )?;
+    write_var_int(
+        directory
+            .sub_directories
+            .len()
+            .try_into()
+            .expect("subdirectory count fits u64"),
+        out,
+    )?;
+    out.write_all(&directory.name)?;
+    out.write_all(b"\0")?;
+    for entry in &directory.untracked_entries {
+        out.write_all(entry)?;
+        out.write_all(b"\0")?;
+    }
+    for subdir_index in &directory.sub_directories {
+        write_directory_block(directories, *subdir_index, out)?;
+    }
+    Ok(())
+}
+
+fn write_bitmap(
+    num_bits: usize,
+    set_indices: impl IntoIterator<Item = usize>,
+    out: &mut dyn std::io::Write,
+) -> Result<(), std::io::Error> {
+    let num_words = num_bits.div_ceil(64);
+    let mut words = vec![0_u64; num_words];
+    for index in set_indices {
+        words[index / 64] |= 1_u64 << (index % 64);
+    }
+
+    out.write_all(&u32::try_from(num_bits).expect("less than 2^32 bits").to_be_bytes())?;
+    out.write_all(
+        &u32::try_from(num_words + 1)
+            .expect("less than 2^32 EWAH words")
+            .to_be_bytes(),
+    )?;
+    out.write_all(&((u64::try_from(num_words).expect("word count fits u64")) << 33).to_be_bytes())?;
+    for word in words {
+        out.write_all(&word.to_be_bytes())?;
+    }
+    out.write_all(&0_u32.to_be_bytes())
+}
+
+fn write_var_int(mut value: u64, out: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
+    let mut bytes = vec![(value & 0x7f) as u8];
+    while {
+        value >>= 7;
+        value != 0
+    } {
+        value -= 1;
+        bytes.push(((value & 0x7f) as u8) | 0x80);
+    }
+    for byte in bytes.iter().rev() {
+        out.write_all(&[*byte])?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{write_bitmap, write_var_int};
+
+    #[test]
+    fn var_int_roundtrips_through_the_decoder() {
+        for value in [0, 1, 42, 127, 128, 255, 16_383, 16_384, 1_000_000] {
+            let mut out = Vec::new();
+            write_var_int(value, &mut out).unwrap();
+            let (actual, rest) = crate::util::var_int(&out).unwrap();
+            assert_eq!(actual, value);
+            assert!(rest.is_empty());
+        }
+    }
+
+    #[test]
+    fn bitmap_writer_roundtrips_as_ewah() {
+        let mut out = Vec::new();
+        write_bitmap(130, [0, 64, 129], &mut out).unwrap();
+        let (bitmap, rest) = gix_bitmap::ewah::decode(&out).unwrap();
+        assert!(rest.is_empty());
+
+        let mut actual = Vec::new();
+        bitmap
+            .for_each_set_bit(|index| {
+                actual.push(index);
+                Some(())
+            })
+            .unwrap();
+        assert_eq!(actual, [0, 64, 129]);
+    }
 }
