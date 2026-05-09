@@ -5,4 +5,4 @@ pub use main::main;
 mod progress_impl;
 pub use progress_impl::show_progress;
 
-mod options;
+pub(crate) mod options;
