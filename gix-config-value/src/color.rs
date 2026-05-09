@@ -200,6 +200,43 @@ impl Display for Name {
     }
 }
 
+impl Name {
+    fn push_ansi_codes(self, is_background: bool, codes: &mut Vec<String>) {
+        match self {
+            Name::Normal => {}
+            Name::Default => codes.push(if is_background { 49 } else { 39 }.to_string()),
+            Name::Black => codes.push(if is_background { 40 } else { 30 }.to_string()),
+            Name::Red => codes.push(if is_background { 41 } else { 31 }.to_string()),
+            Name::Green => codes.push(if is_background { 42 } else { 32 }.to_string()),
+            Name::Yellow => codes.push(if is_background { 43 } else { 33 }.to_string()),
+            Name::Blue => codes.push(if is_background { 44 } else { 34 }.to_string()),
+            Name::Magenta => codes.push(if is_background { 45 } else { 35 }.to_string()),
+            Name::Cyan => codes.push(if is_background { 46 } else { 36 }.to_string()),
+            Name::White => codes.push(if is_background { 47 } else { 37 }.to_string()),
+            Name::BrightBlack => codes.push(if is_background { 100 } else { 90 }.to_string()),
+            Name::BrightRed => codes.push(if is_background { 101 } else { 91 }.to_string()),
+            Name::BrightGreen => codes.push(if is_background { 102 } else { 92 }.to_string()),
+            Name::BrightYellow => codes.push(if is_background { 103 } else { 93 }.to_string()),
+            Name::BrightBlue => codes.push(if is_background { 104 } else { 94 }.to_string()),
+            Name::BrightMagenta => codes.push(if is_background { 105 } else { 95 }.to_string()),
+            Name::BrightCyan => codes.push(if is_background { 106 } else { 96 }.to_string()),
+            Name::BrightWhite => codes.push(if is_background { 107 } else { 97 }.to_string()),
+            Name::Ansi(num) => codes.extend(
+                if is_background { ["48", "5"] } else { ["38", "5"] }
+                    .into_iter()
+                    .map(str::to_owned)
+                    .chain(std::iter::once(num.to_string())),
+            ),
+            Name::Rgb(r, g, b) => codes.extend(
+                if is_background { ["48", "2"] } else { ["38", "2"] }
+                    .into_iter()
+                    .map(str::to_owned)
+                    .chain([r.to_string(), g.to_string(), b.to_string()]),
+            ),
+        }
+    }
+}
+
 #[cfg(feature = "serde")]
 impl serde::Serialize for Name {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -367,6 +404,41 @@ impl Display for Attribute {
             }
         }
         Ok(())
+    }
+}
+
+impl Attribute {
+    fn push_ansi_codes(self, codes: &mut Vec<String>) {
+        if self.contains(Attribute::RESET) {
+            codes.push(String::new());
+        }
+        for (attr, code) in [
+            (Attribute::BOLD, 1),
+            (Attribute::DIM, 2),
+            (Attribute::ITALIC, 3),
+            (Attribute::UL, 4),
+            (Attribute::BLINK, 5),
+            (Attribute::REVERSE, 7),
+            (Attribute::STRIKE, 9),
+        ] {
+            if self.contains(attr) {
+                codes.push(code.to_string());
+            }
+        }
+        if self.intersects(Attribute::NO_BOLD | Attribute::NO_DIM) {
+            codes.push("22".to_owned());
+        }
+        for (attr, code) in [
+            (Attribute::NO_ITALIC, 23),
+            (Attribute::NO_UL, 24),
+            (Attribute::NO_BLINK, 25),
+            (Attribute::NO_REVERSE, 27),
+            (Attribute::NO_STRIKE, 29),
+        ] {
+            if self.contains(attr) {
+                codes.push(code.to_string());
+            }
+        }
     }
 }
 
