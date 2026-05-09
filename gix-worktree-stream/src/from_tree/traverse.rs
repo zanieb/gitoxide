@@ -61,6 +61,14 @@ where
     }
 
     fn handle_entry(&mut self, entry: &tree::EntryRef<'_>) -> Result<Action, Error> {
+        if entry.mode.kind() == tree::EntryKind::Commit {
+            (self.fetch_attributes)(self.path.as_ref(), entry.mode, &mut self.attrs)?;
+            if !self.ignore_state().is_set() {
+                protocol::write_entry_header_and_path(self.path.as_ref(), entry.oid, entry.mode, Some(0), self.out)
+                    .or_raise(|| message("Could not write submodule entry header"))?;
+            }
+            return Ok(std::ops::ControlFlow::Continue(true));
+        }
         if !entry.mode.is_blob_or_symlink() {
             return Ok(std::ops::ControlFlow::Continue(true));
         }

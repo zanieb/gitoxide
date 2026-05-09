@@ -9,6 +9,7 @@ fn hex_to_id(hex_sha1: &str, hex_sha256: &str) -> gix_hash::ObjectId {
 
 mod from_tree {
     use std::{
+        collections::HashMap,
         convert::Infallible,
         io::{Error, Read, Write},
         path::PathBuf,
@@ -16,8 +17,8 @@ mod from_tree {
     };
 
     use gix_attributes::glob::pattern::Case;
-    use gix_hash::oid;
-    use gix_object::{Data, bstr::ByteSlice, tree::EntryKind};
+    use gix_hash::{oid, ObjectId};
+    use gix_object::{bstr::ByteSlice, tree::EntryKind, Data, Kind};
     use gix_worktree::stack::state::attributes::Source;
     use std::sync::LazyLock;
 
@@ -60,6 +61,67 @@ mod from_tree {
             "Could not query attributes for path \".gitattributes\""
         );
         Ok(())
+    }
+
+    #[derive(Clone)]
+    struct MemoryDb {
+        objects: HashMap<ObjectId, (Kind, Vec<u8>)>,
+    }
+
+    impl MemoryDb {
+        fn with_tree(object_hash: gix_hash::Kind, data: Vec<u8>) -> (ObjectId, Self) {
+            let id = gix_object::compute_hash(object_hash, Kind::Tree, &data).expect("tree hash");
+            (
+                id,
+                MemoryDb {
+                    objects: HashMap::from([(id, (Kind::Tree, data))]),
+                },
+            )
+        }
+    }
+
+    impl gix_object::Find for MemoryDb {
+        fn try_find<'a>(&self, id: &oid, buffer: &'a mut Vec<u8>) -> Result<Option<Data<'a>>, gix_object::find::Error> {
+            Ok(self.objects.get(id).map(|(kind, data)| {
+                buffer.clear();
+                buffer.extend_from_slice(data);
+                Data::new(*kind, buffer)
+            }))
+        }
+    }
+
+    #[test]
+    fn includes_submodules_as_empty_entries() {
+        let object_hash = gix_testtools::object_hash();
+        let submodule_id = hex_to_id(
+            "1111111111111111111111111111111111111111",
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        );
+        let mut tree = b"160000 submodule\0".to_vec();
+        tree.extend_from_slice(submodule_id.as_bytes());
+        let (root, db) = MemoryDb::with_tree(object_hash, tree);
+
+        let mut stream = gix_worktree_stream::from_tree(
+            root,
+            db,
+            mutating_pipeline(false),
+            |_, _, _| -> Result<_, Infallible> { Ok(()) },
+        );
+
+        let mut entry = stream
+            .next_entry()
+            .expect("entry retrieval does not fail")
+            .expect("entry");
+        assert_eq!(entry.relative_path(), "submodule");
+        assert_eq!(entry.mode.kind(), EntryKind::Commit);
+        assert_eq!(entry.id, submodule_id);
+
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).expect("entry can always be read");
+        assert!(buf.is_empty());
+        drop(entry);
+
+        assert!(stream.next_entry().expect("entry retrieval does not fail").is_none());
     }
 
     #[test]

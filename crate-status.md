@@ -963,7 +963,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 * [x] add custom entries to the stream
 * [x] respect `export-ignore` git attribute
 * [x] apply standard worktree conversion to simulate an actual checkout
-* [ ] support for submodule inclusion
+* [x] support for submodule inclusion
 * [x] API documentation
     * [x] Some examples
 

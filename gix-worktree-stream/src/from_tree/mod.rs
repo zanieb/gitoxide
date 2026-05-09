@@ -14,8 +14,8 @@ use crate::{AdditionalEntry, SharedErrorSlot, Stream, entry, entry::Error, proto
 ///
 /// ### Types of entries in stream
 ///
-/// We only return blobs (with or without executable), which may be symlinks in which case their content will
-/// be target of the symlink.
+/// We return blobs (with or without executable), which may be symlinks in which case their content will
+/// be target of the symlink, and gitlinks to submodules as empty entries.
 /// Directories are never returned, but maybe added by the caller via [Stream::add_entry()].
 ///
 /// ### Progress and interruptions
