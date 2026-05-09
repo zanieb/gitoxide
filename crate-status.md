@@ -815,7 +815,7 @@ Make it the best-performing implementation and the most convenient one.
 * parse specifications
     * [x] parsing and navigation
     * [x] revision ranges
-    * [ ] full date parsing support (depends on `gix-date`)
+    * [x] full date parsing support (depends on `gix-date`)
 
 ### gix-revwalk
 * [x] primitives to help with graph traversal, along with commit-graph acceleration.

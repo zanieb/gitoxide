@@ -49,6 +49,35 @@ fn reflog_by_date_for_current_branch() {
 }
 
 #[test]
+fn reflog_by_date_accepts_full_git_date_formats_for_current_branch() {
+    for date in [
+        "2018-12-24",
+        "Thu, 18 Aug 2022 12:45:06 +0800",
+        "2022-08-17 22:04:58 +0200",
+        "2022-08-17T21:43:13+08:00",
+        "Thu Sep 04 2022 10:45:06 -0400",
+        "Thu Sep 4 10:45:06 2022 -0400",
+        "2018.12.24 01:02:03 +0000",
+        "20181224T010203+0000",
+        "1745582210 +0200",
+    ] {
+        let rec = parse(&format!("@{{{date}}}"));
+        let mut expected = Vec::new();
+        gix_date::parse(date, None)
+            .expect("date is valid")
+            .write_to(&mut expected)
+            .expect("date writes successfully");
+
+        assert_eq!(
+            rec.current_branch_reflog_entry[0],
+            Some(String::from_utf8(expected).expect("date writes ascii")),
+            "{date:?} should be parsed by gix-date before reaching the delegate"
+        );
+        assert_eq!(rec.calls, 1);
+    }
+}
+
+#[test]
 fn reflog_by_unix_timestamp_for_current_branch() {
     let rec = parse("@{100000000}");
 
