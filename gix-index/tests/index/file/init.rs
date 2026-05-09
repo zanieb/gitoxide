@@ -28,7 +28,7 @@ mod at_or_new {
 }
 
 mod from_state {
-    use gix_index::Version::{V2, V3};
+    use gix_index::Version::{V2, V3, V4};
 
     use crate::Fixture::*;
 
@@ -40,7 +40,7 @@ mod from_state {
             (Generated("v2_empty"), V2),
             (Generated("v2_more_files"), V2),
             (Generated("v2_all_file_kinds"), V2),
-            (Generated("v4_more_files_IEOT"), V2),
+            (Generated("v4_more_files_IEOT"), V4),
         ];
 
         for (fixture, expected_version) in fixtures {

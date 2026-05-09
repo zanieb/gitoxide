@@ -891,14 +891,14 @@ The git staging area.
     * [ ] multi-threaded lookup table generation with the same algorithm as the one used by Git
     * [ ] expand sparse folders (don't know how this relates to traversals right now)
 * maintain extensions when altering the cache
-    * [ ] TREE for speeding up tree generation
-    * [ ] REUC resolving undo
-    * [ ] UNTR untracked cache
-    * [ ] FSMN file system monitor cache V1 and V2
-    * [ ] EOIE end of index entry
-    * [ ] IEOT index entry offset table
-    * [ ] 'link' base indices to take information from, split index
-    * [ ] 'sdir' sparse directory entries
+    * [x] TREE for speeding up tree generation
+    * [x] REUC resolving undo
+    * [x] UNTR untracked cache
+    * [x] FSMN file system monitor cache V1 and V2
+    * [x] EOIE end of index entry
+    * [x] IEOT index entry offset table
+    * [x] 'link' base indices to take information from, split index
+    * [x] 'sdir' sparse directory entries
 * [x] add and remove entries
 * [x] API documentation
     * [x] Some examples

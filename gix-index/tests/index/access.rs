@@ -1,4 +1,5 @@
 use bstr::{BString, ByteSlice};
+use filetime::FileTime;
 use gix_index::entry::Stage;
 
 use crate::Fixture;
@@ -727,6 +728,72 @@ fn add_entry_invalidates_tree_extension_for_nested_path() {
         .find(|c| c.name.as_slice() == b"b")
         .expect("child b");
     assert_eq!(child_b.num_entries, None, "child b invalidated");
+}
+
+#[test]
+fn entry_mutations_drop_entry_cache_extensions() {
+    let stat = gix_index::entry::Stat::default();
+    let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+
+    let mut reuc = Fixture::Loose("REUC").open();
+    assert!(reuc.resolve_undo().is_some(), "fixture has REUC");
+    reuc.add_entry(
+        stat,
+        id,
+        gix_index::entry::Flags::empty(),
+        gix_index::entry::Mode::FILE,
+        "z-new".into(),
+    );
+    assert!(reuc.resolve_undo().is_none(), "REUC is stale after entry mutation");
+
+    let mut untr = Fixture::Loose("UNTR").open();
+    assert!(untr.untracked().is_some(), "fixture has UNTR");
+    untr.remove_entry_at_index(0);
+    assert!(untr.untracked().is_none(), "UNTR is stale after entry mutation");
+
+    let mut fsmn = Fixture::Loose("FSMN").open();
+    assert!(fsmn.fs_monitor().is_some(), "fixture has FSMN");
+    fsmn.remove_entries(|idx, _, _| idx == 0);
+    assert!(fsmn.fs_monitor().is_none(), "FSMN is stale after entry mutation");
+}
+
+#[test]
+fn entry_mutations_drop_link_and_decode_time_extensions() {
+    let bytes = std::fs::read(crate::fixture_index_path("v2_split_index")).expect("fixture index");
+    let (mut split, _) =
+        gix_index::State::from_bytes(&bytes, FileTime::now(), gix_hash::Kind::Sha1, Default::default()).unwrap();
+    assert!(split.link().is_some(), "raw split index has link extension");
+
+    split.remove_entry_at_index(0);
+
+    assert!(split.link().is_none(), "link bitmaps are stale after entry mutation");
+
+    let mut v4 = Fixture::Generated("v4_more_files_IEOT").open();
+    assert!(v4.had_end_of_index_marker(), "fixture has EOIE");
+    assert!(v4.had_offset_table(), "fixture has IEOT");
+
+    v4.sort_entries();
+
+    assert!(!v4.had_end_of_index_marker(), "EOIE is decode-time cache state");
+    assert!(!v4.had_offset_table(), "IEOT is stale after entry reordering");
+}
+
+#[test]
+fn removing_sparse_entries_refreshes_sparse_state() {
+    let mut sparse = Fixture::Generated("v3_sparse_index").open();
+    assert!(sparse.is_sparse(), "fixture starts as sparse");
+    assert!(
+        sparse.entries().iter().any(|entry| entry.mode.is_sparse()),
+        "fixture has sparse directory entries"
+    );
+
+    sparse.remove_entries(|_, _, entry| entry.mode.is_sparse());
+
+    assert!(
+        !sparse.entries().iter().any(|entry| entry.mode.is_sparse()),
+        "all sparse entries were removed"
+    );
+    assert!(!sparse.is_sparse(), "sparse state follows sparse entries");
 }
 
 #[test]

@@ -571,19 +571,28 @@ impl State {
             mode,
             path,
         });
+        self.invalidate_entry_cache_extensions();
+        if mode.is_sparse() {
+            self.is_sparse = true;
+        }
     }
 
     /// Unconditionally sort entries as needed to perform lookups quickly.
+    ///
+    /// Entry-order cache extensions are removed because entry offsets or positions may change.
     pub fn sort_entries(&mut self) {
         let path_backing = &self.path_backing;
         self.entries.sort_by(|a, b| {
             Entry::cmp_filepaths(a.path_in(path_backing), b.path_in(path_backing))
                 .then_with(|| a.stage().cmp(&b.stage()))
         });
+        self.invalidate_entry_cache_extensions();
     }
 
     /// Similar to [`sort_entries()`][State::sort_entries()], but applies `compare` after comparing
     /// by path and stage as a third criteria.
+    ///
+    /// Entry-order cache extensions are removed because entry offsets or positions may change.
     pub fn sort_entries_by(&mut self, mut compare: impl FnMut(&Entry, &Entry) -> Ordering) {
         let path_backing = &self.path_backing;
         self.entries.sort_by(|a, b| {
@@ -591,13 +600,15 @@ impl State {
                 .then_with(|| a.stage().cmp(&b.stage()))
                 .then_with(|| compare(a, b))
         });
+        self.invalidate_entry_cache_extensions();
     }
 
     /// Physically remove all entries for which `should_remove(idx, path, entry)` returns `true`, traversing them from first to last.
     ///
     /// Note that the memory used for the removed entries paths is not freed, as it's append-only.
     ///
-    /// If any entries are removed, the [TREE extension](extension::Tree) root is invalidated.
+    /// If any entries are removed, the [TREE extension](extension::Tree) root is invalidated and
+    /// entry-order or entry-path cache extensions are removed.
     ///
     /// ### Performance
     ///
@@ -606,19 +617,25 @@ impl State {
     pub fn remove_entries(&mut self, mut should_remove: impl FnMut(usize, &BStr, &mut Entry) -> bool) {
         let mut index = 0;
         let mut any_removed = false;
+        let mut removed_sparse_entry = false;
         let paths = &self.path_backing;
         self.entries.retain_mut(|e| {
             let path = e.path_in(paths);
             let res = !should_remove(index, path, e);
             if !res {
                 any_removed = true;
+                removed_sparse_entry |= e.mode.is_sparse();
             }
             index += 1;
             res
         });
         if any_removed {
+            self.invalidate_entry_cache_extensions();
             if let Some(ref mut tree) = self.tree {
                 tree.num_entries = None;
+            }
+            if removed_sparse_entry {
+                self.refresh_sparse_state();
             }
         }
     }
@@ -631,14 +648,20 @@ impl State {
     /// that some extensions might refer to paths which are now deleted.
     ///
     /// The [TREE extension](extension::Tree) is invalidated along the components of the
-    /// removed entry's path.
+    /// removed entry's path, and entry-order or entry-path cache extensions are removed.
     pub fn remove_entry_at_index(&mut self, index: usize) -> Entry {
+        let was_sparse = self.entries[index].mode.is_sparse();
         let path_range = self.entries[index].path.clone();
         let path_bytes = &self.path_backing[path_range];
         if let Some(ref mut tree) = self.tree {
             invalidate_tree_node_recursive(tree, path_bytes);
         }
-        self.entries.remove(index)
+        let removed = self.entries.remove(index);
+        self.invalidate_entry_cache_extensions();
+        if was_sparse {
+            self.refresh_sparse_state();
+        }
+        removed
     }
 
     /// Add a new entry with `stat`, `id`, `flags`, `mode` and `path`, inserting it at the correct
@@ -649,7 +672,7 @@ impl State {
     ///
     /// The [TREE extension](extension::Tree) is invalidated along the components of `path` so
     /// that a subsequent call to [`write_tree_to()`](Self::write_tree_to()) will recompute
-    /// the affected trees.
+    /// the affected trees. Entry-order or entry-path cache extensions are removed.
     ///
     /// Any entries that would be "under" this new path (if this is a file replacing a directory,
     /// or vice versa) are **not** removed by this method -- the caller is responsible for
@@ -666,10 +689,11 @@ impl State {
 
         let stage = flags.stage();
         let path_backing = &self.path_backing;
-        match self.entries.binary_search_by(|e| {
+        let replaced = match self.entries.binary_search_by(|e| {
             Entry::cmp_filepaths(e.path_in(path_backing), path).then_with(|| e.stage().cmp(&stage))
         }) {
             Ok(existing_idx) => {
+                let had_sparse_entry = self.entries[existing_idx].mode.is_sparse();
                 // Reuse the existing entry's path range to avoid growing path_backing
                 // with duplicate bytes.
                 let path_range = self.entries[existing_idx].path.clone();
@@ -681,6 +705,9 @@ impl State {
                     path: path_range,
                 };
                 let old = std::mem::replace(&mut self.entries[existing_idx], new_entry);
+                if had_sparse_entry && !mode.is_sparse() {
+                    self.refresh_sparse_state();
+                }
                 Some(old)
             }
             Err(insert_idx) => {
@@ -696,16 +723,28 @@ impl State {
                 self.entries.insert(insert_idx, new_entry);
                 None
             }
+        };
+        self.invalidate_entry_cache_extensions();
+        if mode.is_sparse() {
+            self.is_sparse = true;
         }
+        replaced
     }
 
     /// Remove the entry at `path` and `stage`, returning it if found.
     ///
-    /// The [TREE extension](extension::Tree) is invalidated along the components of `path`.
+    /// The [TREE extension](extension::Tree) is invalidated along the components of `path`, and
+    /// entry-order or entry-path cache extensions are removed.
     pub fn remove_entry_by_path_and_stage(&mut self, path: &BStr, stage: entry::Stage) -> Option<Entry> {
         let idx = self.entry_index_by_path_and_stage(path, stage)?;
         self.invalidate_tree_at_path(path);
-        Some(self.entries.remove(idx))
+        let was_sparse = self.entries[idx].mode.is_sparse();
+        let removed = self.entries.remove(idx);
+        self.invalidate_entry_cache_extensions();
+        if was_sparse {
+            self.refresh_sparse_state();
+        }
+        Some(removed)
     }
 
     /// Invalidate the [TREE extension](extension::Tree) for all directory components
@@ -717,6 +756,19 @@ impl State {
         if let Some(ref mut tree) = self.tree {
             invalidate_tree_node_recursive(tree, path.as_bytes());
         }
+    }
+
+    fn invalidate_entry_cache_extensions(&mut self) {
+        self.end_of_index_at_decode_time = false;
+        self.offset_table_at_decode_time = false;
+        self.link = None;
+        self.resolve_undo = None;
+        self.untracked = None;
+        self.fs_monitor = None;
+    }
+
+    fn refresh_sparse_state(&mut self) {
+        self.is_sparse = self.entries.iter().any(|e| e.mode.is_sparse());
     }
 }
 
