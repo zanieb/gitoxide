@@ -995,7 +995,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
     - [x] tags
     - [ ] tree-cache in the `index` or any entry within
 * [ ] validate object hashes during connectivity traversal
-* [ ] progress reporting and interruptability
+* [x] progress reporting and interruptability
 * [ ] skipList to exclude objects which are known to be broken
 * [ ] validate blob hashes (connectivity check
 * [ ] identify objects that exist but are not reachable (i.e. what remains after a full graph traversal from all valid starting points)
