@@ -223,13 +223,14 @@ fn gix_bundle_header_verified_by_c_git() -> gix_testtools::Result {
 
     let tip_oid = oid(&commits[2]);
 
-    // Write a bundle header with gix (no pack data, just header + empty pack)
+    // Write a bundle header with gix. `list-heads` only needs the header.
     let mut builder = Builder::new(Version::V2, gix_hash::Kind::Sha1);
     builder.add_ref("refs/heads/main", tip_oid);
 
     let mut buf = Vec::new();
-    builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
-        Ok(false)
+    builder.write_to(&mut buf, |writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        writer.write_all(b"PACK")?;
+        Ok(true)
     })?;
 
     std::fs::write(&bundle_path, &buf)?;
@@ -265,8 +266,9 @@ fn gix_v3_bundle_header_verified_by_c_git() -> gix_testtools::Result {
         .add_ref("refs/heads/main", tip_oid);
 
     let mut buf = Vec::new();
-    builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
-        Ok(false)
+    builder.write_to(&mut buf, |writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        writer.write_all(b"PACK")?;
+        Ok(true)
     })?;
 
     std::fs::write(&bundle_path, &buf)?;
@@ -309,8 +311,9 @@ fn gix_bundle_with_prerequisites_verified_by_c_git() -> gix_testtools::Result {
         .add_prerequisite(prereq_oid, Some(BString::from("second commit")));
 
     let mut buf = Vec::new();
-    builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
-        Ok(false)
+    builder.write_to(&mut buf, |writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        writer.write_all(b"PACK")?;
+        Ok(true)
     })?;
 
     std::fs::write(&bundle_path, &buf)?;
