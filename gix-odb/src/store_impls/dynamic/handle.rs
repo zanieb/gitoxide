@@ -352,6 +352,7 @@ impl TryFrom<&super::Store> for super::Store {
                 object_hash: s.object_hash,
                 use_multi_pack_index: false,
                 alloc_limit_bytes: s.alloc_limit_bytes,
+                use_alternates: s.use_alternates,
                 current_dir: s.current_dir.clone().into(),
             },
         )

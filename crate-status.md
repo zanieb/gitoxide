@@ -1003,7 +1003,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 * [x] `strict` mode, to check for tree objects with `g+w` permissions
 * [x] consider reflog entries from `ref` starting points
 * [ ] when reporting reachable objects, provide the path through which they are reachable, i.e. ref-log@{3} -> commit -> tree -> path-in-tree
-* [ ] limit search to ODB without alternates (default is equivalent to `git fsck --full` due to ODB implementation)
+* [x] limit search to ODB without alternates by opening a primary-only ODB
 * [ ] all individual [checks available in `git fsck`](https://git-scm.com/docs/git-fsck#_fsck_messages) (*too many to print here*)
 
 ### gix-ref

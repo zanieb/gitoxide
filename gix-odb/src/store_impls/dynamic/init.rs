@@ -20,6 +20,8 @@ pub struct Options {
     ///
     /// If `None`, no additional limit is enforced.
     pub alloc_limit_bytes: Option<usize>,
+    /// If false, ignore `info/alternates` and only use the primary object database.
+    pub use_alternates: bool,
     /// The current directory of the process at the time of instantiation.
     /// If unset, it will be retrieved using `gix_fs::current_dir(false)`.
     pub current_dir: Option<std::path::PathBuf>,
@@ -32,6 +34,7 @@ impl Default for Options {
             object_hash: Default::default(),
             use_multi_pack_index: true,
             alloc_limit_bytes: None,
+            use_alternates: true,
             current_dir: None,
         }
     }
@@ -82,6 +85,7 @@ impl Store {
             object_hash,
             use_multi_pack_index,
             alloc_limit_bytes,
+            use_alternates,
             current_dir,
         }: Options,
     ) -> std::io::Result<Self> {
@@ -102,13 +106,17 @@ impl Store {
         let slot_count = match slots {
             Slots::Given(n) => n as usize,
             Slots::AsNeededByDiskState { multiplier, minimum } => {
-                let mut db_paths =
-                    crate::alternate::resolve(objects_dir.clone(), &current_dir).map_err(std::io::Error::other)?;
-                db_paths.insert(0, objects_dir.clone());
-                let num_slots =
-                    Store::collect_indices_and_mtime_sorted_by_size(db_paths, None, None, alloc_limit_bytes)
-                        .map_err(std::io::Error::other)?
-                        .len();
+                let db_paths = if use_alternates {
+                    let mut db_paths =
+                        crate::alternate::resolve(objects_dir.clone(), &current_dir).map_err(std::io::Error::other)?;
+                    db_paths.insert(0, objects_dir.clone());
+                    db_paths
+                } else {
+                    vec![objects_dir.clone()]
+                };
+                let num_slots = Store::collect_indices_and_mtime_sorted_by_size(db_paths, None, None, alloc_limit_bytes)
+                    .map_err(std::io::Error::other)?
+                    .len();
 
                 let candidate = ((num_slots as f32 * multiplier) as usize).max(minimum);
                 if candidate > crate::store::types::PackId::max_indices() {
@@ -135,6 +143,7 @@ impl Store {
             path: objects_dir,
             files: Vec::from_iter(std::iter::repeat_with(MutableIndexAndPack::default).take(slot_count)),
             index: ArcSwap::new(Arc::new(SlotMapIndex::default())),
+            use_alternates,
             use_multi_pack_index,
             object_hash,
             alloc_limit_bytes,

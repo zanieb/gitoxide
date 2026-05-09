@@ -56,7 +56,7 @@ mod locate {
 
 mod init {
     use gix_hash::ObjectId;
-    use gix_object::Exists;
+    use gix_object::{Exists, Write};
 
     use crate::{alternate::alternate, db};
 
@@ -80,6 +80,40 @@ mod init {
         db.exists(&ObjectId::null(gix_hash::Kind::Sha1)); // trigger load
         assert_eq!(db.store_ref().metrics().loose_dbs, 1);
         assert_eq!(db.store_ref().path(), tmp.path());
+        Ok(())
+    }
+
+    #[test]
+    fn alternates_can_be_disabled() -> crate::Result {
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (object_path, linked_object_path) = alternate(tmp.path().join("a"), tmp.path().join("b"))?;
+        let alternate_store = gix_odb::loose::Store::at(linked_object_path, gix_hash::Kind::Sha1);
+        let alternate_id = alternate_store.write_buf(gix_object::Kind::Blob, b"alternate")?;
+
+        let db_with_alternates = gix_odb::at(object_path.clone())?;
+        assert!(
+            db_with_alternates.exists(&alternate_id),
+            "default stores see objects from alternates"
+        );
+
+        let db_without_alternates = gix_odb::at_opts(
+            object_path,
+            Vec::new(),
+            gix_odb::store::init::Options {
+                use_alternates: false,
+                ..Default::default()
+            },
+        )?;
+        assert!(
+            !db_without_alternates.exists(&alternate_id),
+            "primary-only stores ignore alternate objects"
+        );
+        assert_eq!(db_without_alternates.store_ref().metrics().loose_dbs, 1);
+        assert!(
+            db_without_alternates.store_ref().alternate_db_paths()?.is_empty(),
+            "alternate paths are not resolved"
+        );
+        assert!(!db_without_alternates.store_ref().use_alternates());
         Ok(())
     }
 

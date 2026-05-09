@@ -166,6 +166,8 @@ pub struct Store {
     pub(crate) num_disk_state_consolidation: AtomicUsize,
     /// If true, we are allowed to use multi-pack indices and they must have the `object_hash` or be ignored.
     use_multi_pack_index: bool,
+    /// If true, `info/alternates` is used to discover linked object databases.
+    use_alternates: bool,
     /// The hash kind to use for some operations
     object_hash: gix_hash::Kind,
     /// The maximum size of a single allocation caused by user-controlled on-disk pack data.
