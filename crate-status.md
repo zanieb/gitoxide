@@ -778,7 +778,7 @@ Make it the best-performing implementation and the most convenient one.
 * [x] differences between index and worktree to turn index into worktree
     - [x] rename tracking
     - [x] untracked files
-    - [ ] support for fs-monitor for modification checks
+    - [x] support for fs-monitor for modification checks
 * [x] differences between index and index to learn what changed
     - [x] rename tracking
 * [ ] sparse-index and split-index aware status acceleration

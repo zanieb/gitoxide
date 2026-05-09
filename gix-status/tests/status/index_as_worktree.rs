@@ -349,6 +349,29 @@ fn removed() {
 }
 
 #[test]
+fn fsmonitor_valid_entries_are_skipped() {
+    let out = fixture_with_index(
+        "status_removed",
+        |index| index.entries_mut()[0].flags.insert(Flags::FSMONITOR_VALID),
+        &[
+            (BStr::new(b"dir/sub-dir/symlink"), 1, status_removed()),
+            (BStr::new(b"empty"), 2, status_removed()),
+            (BStr::new(b"executable"), 3, status_removed()),
+        ],
+    );
+    assert_eq!(
+        out,
+        Outcome {
+            entries_to_process: 4,
+            entries_processed: 4,
+            entries_skipped_by_entry_flags: 1,
+            symlink_metadata_calls: 3,
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn removed_if_a_tracked_directory_is_replaced_with_a_symlink() {
     assert_eq!(
