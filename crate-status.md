@@ -324,7 +324,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] verify checksum
     * [x] streaming write for blobs
     * [x] buffer write for small in-memory objects/non-blobs to bring IO down to open-read-close == 3 syscalls
-    * [ ] read object header (size + kind) without full decompression
+    * [x] read object header (size + kind) without full decompression
 * **dynamic store**
     * [x] auto-refresh of on-disk state
     * [x] handles alternates
@@ -335,7 +335,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * [x] object replacements (`git replace`)
     * [x] high-speed packed object traversal without wasted CPU time
       - [ ] user defined filters
-    * [ ] read object header (size + kind) without full decompression
+    * [x] read object header (size + kind) without full decompression
 * **sink**
     * [x] write objects and obtain id
 * **alternates**
