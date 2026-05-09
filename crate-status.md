@@ -974,7 +974,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
     * [x] `zip`
 * [x] add prefix and modification date
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-bundle
 * [ ] create a bundle from an archive

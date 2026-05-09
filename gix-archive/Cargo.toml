@@ -9,7 +9,7 @@ description = "archive generation from of a worktree stream"
 authors = ["Sebastian Thiel <sebastian.thiel@icloud.com>"]
 edition = "2024"
 rust-version = "1.85"
-include = ["/src/**/*", "/LICENSE-*"]
+include = ["/src/**/*", "/examples/**/*", "/LICENSE-*"]
 
 [lib]
 doctest = false
