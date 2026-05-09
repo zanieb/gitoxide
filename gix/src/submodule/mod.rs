@@ -29,6 +29,7 @@ mod init_impl;
 #[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
 mod update_impl;
 
+#[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
 pub(crate) mod git_dir_layout;
 
 /// Validate that no component of the submodule path is a symbolic link.
@@ -170,6 +171,7 @@ impl Submodule<'_> {
     ///
     /// This is useful when the overridden URL (e.g. from `.git/config`) is stale or
     /// invalid and we need the original relative URL for fallback resolution.
+    #[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
     pub(crate) fn gitmodules_url(&self) -> Option<gix_url::Url> {
         let worktree = self.state.repo.workdir()?;
         let gitmodules_path = worktree.join(MODULES_FILE);
