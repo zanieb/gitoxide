@@ -180,6 +180,41 @@ impl Driver for GitCliDriver {
         })
     }
 
+    fn revert(&self, commit_id: ObjectId) -> Result<CherryPickOutcome, CherryPickError> {
+        let hex = commit_id.to_hex().to_string();
+        let output = Command::new("git")
+            .args(["revert", "--no-edit", &hex])
+            .current_dir(&self.workdir)
+            .env("GIT_AUTHOR_NAME", "Test Author")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test Committer")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .output()
+            .map_err(|e| CherryPickError::Other {
+                message: format!("failed to run git revert: {e}"),
+                source: Box::new(e),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("conflict") || stderr.contains("CONFLICT") {
+                let _ = Command::new("git")
+                    .args(["revert", "--abort"])
+                    .current_dir(&self.workdir)
+                    .output();
+                return Err(CherryPickError::Conflict { commit_id });
+            }
+            return Err(CherryPickError::Other {
+                message: format!("revert failed: {stderr}"),
+                source: "revert failed".to_string().into(),
+            });
+        }
+
+        Ok(CherryPickOutcome {
+            new_commit_id: head_oid(&self.workdir),
+        })
+    }
+
     fn read_commit_message(&self, commit_id: ObjectId) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         let hex = commit_id.to_hex().to_string();
         let output = Command::new("git")
@@ -1544,6 +1579,50 @@ mod mixed_operations {
         assert_eq!(state.step(&driver, &rebase_dir)?, StepOutcome::Skipped);
         assert_eq!(head_oid(&fix.workdir), feature_head);
         assert!(fix.workdir.join("feature1.txt").exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn revert_removes_commit_changes_in_real_repo() -> Result<(), Box<dyn std::error::Error>> {
+        let fix = RebaseFixture::new_no_conflict();
+        let driver = fix.driver();
+        let rebase_dir = fix.rebase_dir();
+
+        fix.detach_head_to("D");
+        assert!(fix.workdir.join("feature1.txt").exists());
+        assert!(fix.workdir.join("feature2.txt").exists());
+
+        let mut state = MergeState {
+            head_name: "refs/heads/feature".into(),
+            onto: fix.oid("D"),
+            orig_head: fix.oid("D"),
+            interactive: true,
+            todo: TodoList {
+                operations: vec![Operation::Revert {
+                    commit: fix.prefix("C"),
+                    summary: "C: add feature1.txt".into(),
+                }]
+                .into(),
+            },
+            done: TodoList {
+                operations: std::collections::VecDeque::new(),
+            },
+            current_step: 0,
+            total_steps: 1,
+            stopped_sha: None,
+            accumulated_squash_message: None,
+        };
+
+        assert!(matches!(state.step(&driver, &rebase_dir)?, StepOutcome::Applied { .. }));
+        assert!(
+            !fix.workdir.join("feature1.txt").exists(),
+            "reverting C should remove feature1.txt"
+        );
+        assert!(
+            fix.workdir.join("feature2.txt").exists(),
+            "reverting C should preserve later unrelated changes"
+        );
 
         Ok(())
     }

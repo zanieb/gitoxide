@@ -626,6 +626,8 @@ mod driver {
         messages: HashMap<ObjectId, Vec<u8>>,
         /// Tracks cherry_pick calls: (commit_id, message_override).
         cherry_pick_calls: RefCell<Vec<(ObjectId, Option<Vec<u8>>)>>,
+        /// Tracks revert calls.
+        revert_calls: RefCell<Vec<ObjectId>>,
         /// Tracks update_head calls.
         update_head_calls: RefCell<Vec<ObjectId>>,
         /// Tracks exec commands.
@@ -653,6 +655,7 @@ mod driver {
                 resolve_map: HashMap::new(),
                 messages: HashMap::new(),
                 cherry_pick_calls: RefCell::new(Vec::new()),
+                revert_calls: RefCell::new(Vec::new()),
                 update_head_calls: RefCell::new(Vec::new()),
                 execute_calls: RefCell::new(Vec::new()),
                 labels: RefCell::new(HashMap::new()),
@@ -712,6 +715,22 @@ mod driver {
             if self.fail_on.borrow().contains(&commit_id) {
                 return Err(CherryPickError::Other {
                     message: format!("simulated failure for {commit_id}"),
+                    source: "simulated failure".to_string().into(),
+                });
+            }
+            let new_id = self.next_fake_commit_id();
+            *self.current_head.borrow_mut() = new_id;
+            Ok(CherryPickOutcome { new_commit_id: new_id })
+        }
+
+        fn revert(&self, commit_id: ObjectId) -> Result<CherryPickOutcome, CherryPickError> {
+            self.revert_calls.borrow_mut().push(commit_id);
+            if self.conflict_on.borrow().contains(&commit_id) {
+                return Err(CherryPickError::Conflict { commit_id });
+            }
+            if self.fail_on.borrow().contains(&commit_id) {
+                return Err(CherryPickError::Other {
+                    message: format!("simulated revert failure for {commit_id}"),
                     source: "simulated failure".to_string().into(),
                 });
             }
@@ -1200,6 +1219,29 @@ mod driver {
         let on_disk = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
         assert!(matches!(on_disk.done.operations.front(), Some(Operation::Reset { .. })));
         assert!(matches!(on_disk.todo.operations.front(), Some(Operation::Noop)));
+    }
+
+    #[test]
+    fn step_revert_applies_driver_revert() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(hex, hex, b"Revert me\n");
+
+        let mut state = make_state_with_ops(vec![Operation::Revert {
+            commit: make_oid(hex).into(),
+            summary: "Revert me".into(),
+        }]);
+
+        let outcome = state.step(&driver, &rebase_dir).unwrap();
+        assert!(matches!(outcome, StepOutcome::Applied { .. }));
+        assert_eq!(driver.revert_calls.borrow().as_slice(), &[make_oid(hex)]);
+        assert!(
+            driver.cherry_pick_calls.borrow().is_empty(),
+            "revert should use the revert driver operation"
+        );
     }
 
     #[test]
