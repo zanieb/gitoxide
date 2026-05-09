@@ -21,7 +21,7 @@ impl Debug for ChainedError {
 
 impl Display for ChainedError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.err, f)?;
+        write!(f, "{}", self.err)?;
         if !f.alternate() {
             write_location(f, self.location)?;
         }
