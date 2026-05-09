@@ -218,7 +218,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] update, including recursive updates and checkout/merge/rebase/custom-command strategies
         * [ ] edit
 * [x] API documentation
-    * [ ] Some examples
+    * [x] Some examples
 
 ### gix-actor
 * [x] read and write a signature that uniquely identifies an actor within a git repository
