@@ -21,7 +21,7 @@ impl<'repo> Pathspec<'repo> {
     pub fn new(
         repo: &'repo Repository,
         empty_patterns_match_prefix: bool,
-        patterns: impl IntoIterator<Item = impl AsRef<BStr>>,
+        patterns: impl IntoIterator<Item = impl TryIntoPathspec>,
         inherit_ignore_case: bool,
         make_attributes: impl FnOnce() -> Result<gix_worktree::Stack>,
     ) -> Result<Self> {

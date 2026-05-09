@@ -18,7 +18,7 @@ impl Repository {
     pub fn pathspec(
         &self,
         empty_patterns_match_prefix: bool,
-        patterns: impl IntoIterator<Item = impl AsRef<BStr>>,
+        patterns: impl IntoIterator<Item = impl gix_pathspec::TryIntoPathspec>,
         inherit_ignore_case: bool,
         index: &gix_index::State,
         attributes_source: gix_worktree::stack::state::attributes::Source,
