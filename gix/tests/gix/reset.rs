@@ -481,6 +481,63 @@ mod reset {
         Ok(())
     }
 
+    #[test]
+    fn reset_paths_restores_file_missing_from_index() -> crate::Result {
+        use gix::bstr::ByteSlice;
+
+        let (repo, _tmp) = repo_rw_reset()?;
+        let head = repo.head_id()?.detach();
+
+        let mut index = repo.open_index()?;
+        index.remove_entries(|_, path, _| path == b"second".as_bstr());
+        index.write(Default::default())?;
+
+        repo.reset_paths(head, ["second"])?;
+
+        let index = repo.open_index()?;
+        assert!(
+            index
+                .entries()
+                .iter()
+                .any(|entry| entry.path(&index) == b"second".as_bstr()),
+            "reset_paths should add a target-tree entry that is missing from the index"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn reset_paths_matches_directory_prefixes() -> crate::Result {
+        use gix::bstr::ByteSlice;
+
+        let (_repo, tmp) = repo_rw_reset()?;
+        let workdir = tmp.path().to_owned();
+
+        std::fs::create_dir_all(workdir.join("dir"))?;
+        std::fs::write(workdir.join("dir/a.txt"), "a\n")?;
+        std::fs::write(workdir.join("dir/b.txt"), "b\n")?;
+        git_output(&workdir, &["add", "dir"]);
+        git_output(&workdir, &["commit", "-m", "add directory"]);
+
+        let repo = gix::open(&workdir)?;
+        let head = repo.head_id()?.detach();
+
+        let mut index = repo.open_index()?;
+        index.remove_entries(|_, path, _| path.starts_with(b"dir/"));
+        index.write(Default::default())?;
+
+        repo.reset_paths(head, ["dir"])?;
+
+        let index = repo.open_index()?;
+        let paths: Vec<_> = index.entries().iter().map(|entry| entry.path(&index)).collect();
+        assert!(
+            paths.contains(&b"dir/a.txt".as_bstr()) && paths.contains(&b"dir/b.txt".as_bstr()),
+            "reset_paths should restore all entries below a directory path"
+        );
+
+        Ok(())
+    }
+
     /// Test reset with detached HEAD: HEAD should be updated directly (not through a branch).
     #[test]
     fn reset_with_detached_head() -> crate::Result {
