@@ -619,10 +619,14 @@ fn cross_fs() -> TestResult {
         // Create an empty dmg file
         let dmg_location = tempfile::tempdir()?;
         let dmg_file = dmg_location.path().join("temp.dmg");
-        Command::new("hdiutil")
+        let status = Command::new("hdiutil")
             .args(["create", "-size", "1m"])
             .arg(&dmg_file)
             .status()?;
+        if !status.success() {
+            eprintln!("skipping cross-filesystem discovery test: hdiutil create failed with status {status}");
+            return Ok(());
+        }
 
         // Mount the separate filesystem directly inside the repository so physical parent
         // traversal reaches the repository when crossing filesystem boundaries is allowed.
@@ -633,16 +637,23 @@ fn cross_fs() -> TestResult {
             .arg(&mount_point)
             .arg(&dmg_file)
             .status()?;
+        if !status.success() {
+            eprintln!("skipping cross-filesystem discovery test: hdiutil attach failed with status {status}");
+            return Ok(());
+        }
 
         // Ensure that the mount point is always cleaned up
         defer::defer({
             let arg = mount_point;
             move || {
-                Command::new("hdiutil")
+                let status = Command::new("hdiutil")
                     .arg("detach")
                     .arg(arg)
                     .status()
-                    .expect("detach temporary test dmg filesystem successfully");
+                    .expect("hdiutil is still available to detach temporary test dmg filesystem");
+                if !status.success() {
+                    eprintln!("failed to detach temporary test dmg filesystem with status {status}");
+                }
             }
         })
     };
