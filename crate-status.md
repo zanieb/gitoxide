@@ -590,8 +590,8 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 * [x] virtual canonicalization for more concise paths via `absolutize()`
 * [x] more flexible canonicalization with symlink resolution for paths which are partially virtual via `realpath()`
 * **spec**
-    * [ ] parse
-    * [ ] check for match
+    * [x] parse
+    * [x] check for match
 
 ### gix-pathspec
 * [x] parse single
