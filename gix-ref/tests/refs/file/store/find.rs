@@ -102,7 +102,10 @@ mod existing {
 }
 
 mod loose {
-    use crate::{file::store, hex_to_id};
+    use crate::{
+        file::{store, store_writable},
+        hex_to_id,
+    };
 
     mod existing {
 
