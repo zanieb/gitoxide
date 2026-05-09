@@ -216,6 +216,33 @@ pub mod update {
         #[cfg(feature = "revision")]
         #[error(transparent)]
         MergeBase(#[from] crate::repository::merge_base::Error),
+        #[cfg(feature = "merge")]
+        #[error(transparent)]
+        FindCommit(#[from] crate::object::find::existing::with_conversion::Error),
+        #[cfg(feature = "merge")]
+        #[error(transparent)]
+        MergeCommits(#[from] crate::repository::merge_commits::Error),
+        #[cfg(feature = "merge")]
+        #[error(transparent)]
+        MergeTrees(#[from] crate::repository::merge_trees::Error),
+        #[cfg(feature = "merge")]
+        #[error(transparent)]
+        TreeMergeOptions(#[from] crate::repository::tree_merge_options::Error),
+        #[cfg(feature = "merge")]
+        #[error(transparent)]
+        WriteTree(#[from] crate::object::tree::editor::write::Error),
+        #[cfg(feature = "merge")]
+        #[error(transparent)]
+        WriteObject(#[from] crate::object::write::Error),
+        #[cfg(feature = "merge")]
+        #[error(transparent)]
+        DecodeCommit(#[from] gix_object::decode::Error),
+        #[cfg(all(feature = "revision", feature = "merge"))]
+        #[error(transparent)]
+        RevisionWalk(#[from] crate::revision::walk::Error),
+        #[cfg(all(feature = "revision", feature = "merge"))]
+        #[error(transparent)]
+        RevisionWalkIter(#[from] crate::revision::walk::iter::Error),
         #[error(transparent)]
         CommandContext(#[from] crate::config::command_context::Error),
         #[error("Failed to spawn submodule update command '{command}'")]
@@ -240,15 +267,27 @@ pub mod update {
             strategy: gix_submodule::config::Update,
         },
         #[error(
-            "The submodule update strategy '{strategy:?}' requires a non-fast-forward update from {head} to {target}"
+            "The submodule update strategy '{strategy:?}' requires the 'merge' feature for non-fast-forward updates"
         )]
-        StrategyNeedsNonFastForward {
-            /// The update strategy that cannot be completed as a fast-forward.
+        StrategyNeedsMergeFeature {
+            /// The update strategy that requires merge support.
+            strategy: gix_submodule::config::Update,
+        },
+        #[error("The submodule update strategy '{strategy:?}' has unresolved conflicts from {head} to {target}")]
+        StrategyConflict {
+            /// The update strategy that produced conflicts.
             strategy: gix_submodule::config::Update,
             /// The current submodule HEAD.
             head: gix_hash::ObjectId,
             /// The commit recorded in the superproject.
             target: gix_hash::ObjectId,
+        },
+        #[error("The submodule update strategy '{strategy:?}' cannot replay merge commit {commit}")]
+        StrategyNeedsLinearHistory {
+            /// The update strategy that requires a linear branch history.
+            strategy: gix_submodule::config::Update,
+            /// The local merge commit that could not be replayed.
+            commit: gix_hash::ObjectId,
         },
         #[error("Failed to create index from tree for submodule checkout")]
         IndexFromTree {

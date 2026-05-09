@@ -26,7 +26,7 @@ impl Submodule<'_> {
     /// - **Just-cloned submodules always use checkout**, even if configured for rebase/merge/none.
     ///   This matches git's `determine_submodule_update_strategy()`.
     /// - The update strategy `none` causes this method to silently skip the submodule.
-    /// - The `merge` and `rebase` strategies support already-up-to-date and fast-forward updates.
+    /// - The `merge` and `rebase` strategies support already-up-to-date, fast-forward, and clean diverged updates.
     /// - The `!command` strategy runs the locally configured command with the target commit as its argument.
     pub fn update_submodule<P>(
         &self,
@@ -351,13 +351,197 @@ fn update_current_branch_strategy(
                 )?;
                 checkout_commit_tree(repo, target_commit, should_interrupt).map(Some)
             }
-            Ancestry::Diverged => Err(super::update::Error::StrategyNeedsNonFastForward {
-                strategy,
-                head,
-                target: target_commit,
-            }),
+            Ancestry::Diverged => {
+                update_diverged_current_branch_strategy(repo, head, target_commit, strategy, should_interrupt)
+            }
         }
     }
+}
+
+#[cfg(all(feature = "revision", not(feature = "merge")))]
+fn update_diverged_current_branch_strategy(
+    _repo: &Repository,
+    _head: gix_hash::ObjectId,
+    _target_commit: gix_hash::ObjectId,
+    strategy: gix_submodule::config::Update,
+    _should_interrupt: &AtomicBool,
+) -> Result<Option<gix_worktree_state::checkout::Outcome>, super::update::Error> {
+    Err(super::update::Error::StrategyNeedsMergeFeature { strategy })
+}
+
+#[cfg(all(feature = "revision", feature = "merge"))]
+fn update_diverged_current_branch_strategy(
+    repo: &Repository,
+    head: gix_hash::ObjectId,
+    target_commit: gix_hash::ObjectId,
+    strategy: gix_submodule::config::Update,
+    should_interrupt: &AtomicBool,
+) -> Result<Option<gix_worktree_state::checkout::Outcome>, super::update::Error> {
+    match strategy {
+        gix_submodule::config::Update::Merge => {
+            merge_current_branch(repo, head, target_commit, should_interrupt).map(Some)
+        }
+        gix_submodule::config::Update::Rebase => {
+            rebase_current_branch(repo, head, target_commit, should_interrupt).map(Some)
+        }
+        _ => unreachable!("only branch-preserving strategies require diverged handling"),
+    }
+}
+
+#[cfg(all(feature = "revision", feature = "merge"))]
+fn merge_current_branch(
+    repo: &Repository,
+    head: gix_hash::ObjectId,
+    target_commit: gix_hash::ObjectId,
+    should_interrupt: &AtomicBool,
+) -> Result<gix_worktree_state::checkout::Outcome, super::update::Error> {
+    let labels = gix_merge::blob::builtin_driver::text::Labels {
+        ancestor: None,
+        current: Some("HEAD".into()),
+        other: Some("submodule".into()),
+    };
+    let mut outcome = repo.merge_commits(head, target_commit, labels, repo.tree_merge_options()?.into())?;
+    if outcome
+        .tree_merge
+        .has_unresolved_conflicts(crate::merge::tree::TreatAsUnresolved::default())
+    {
+        return Err(super::update::Error::StrategyConflict {
+            strategy: gix_submodule::config::Update::Merge,
+            head,
+            target: target_commit,
+        });
+    }
+
+    let tree_id = outcome.tree_merge.tree.write()?.detach();
+    let committer = committer_or_fallback(repo)?;
+    let commit = gix_object::Commit {
+        tree: tree_id,
+        parents: smallvec::smallvec![head, target_commit],
+        author: committer.clone(),
+        committer,
+        encoding: None,
+        message: format!("Merge commit '{target_commit}' into submodule\n").into(),
+        extra_headers: Default::default(),
+    };
+    let merge_commit = repo.write_object(&commit)?.detach();
+
+    set_head_to_commit(
+        repo,
+        merge_commit,
+        &format!("submodule update: merge {target_commit}"),
+        false,
+    )?;
+    checkout_commit_tree(repo, merge_commit, should_interrupt)
+}
+
+#[cfg(all(feature = "revision", feature = "merge"))]
+fn rebase_current_branch(
+    repo: &Repository,
+    head: gix_hash::ObjectId,
+    target_commit: gix_hash::ObjectId,
+    should_interrupt: &AtomicBool,
+) -> Result<gix_worktree_state::checkout::Outcome, super::update::Error> {
+    use crate::ext::ObjectIdExt;
+
+    let mut commits = head
+        .attach(repo)
+        .ancestors()
+        .with_hidden([target_commit])
+        .all()?
+        .map(|info| info.map(|info| info.id))
+        .collect::<Result<Vec<_>, _>>()?;
+    commits.reverse();
+
+    for commit in &commits {
+        let parent_count = repo.find_commit(*commit)?.parent_ids().count();
+        if parent_count > 1 {
+            return Err(super::update::Error::StrategyNeedsLinearHistory {
+                strategy: gix_submodule::config::Update::Rebase,
+                commit: *commit,
+            });
+        }
+    }
+
+    set_head_to_commit(
+        repo,
+        target_commit,
+        &format!("submodule update: rebase start {target_commit}"),
+        false,
+    )?;
+    let mut checkout = checkout_commit_tree(repo, target_commit, should_interrupt)?;
+
+    for commit in commits {
+        let rebased = replay_commit_onto_head(repo, commit, target_commit)?;
+        checkout = checkout_commit_tree(repo, rebased, should_interrupt)?;
+    }
+
+    Ok(checkout)
+}
+
+#[cfg(all(feature = "revision", feature = "merge"))]
+fn replay_commit_onto_head(
+    repo: &Repository,
+    commit_id: gix_hash::ObjectId,
+    target_commit: gix_hash::ObjectId,
+) -> Result<gix_hash::ObjectId, super::update::Error> {
+    let head = repo.head_id()?.detach();
+    let commit = repo.find_commit(commit_id)?;
+    let parent_ids: Vec<_> = commit.parent_ids().map(crate::Id::detach).collect();
+    if parent_ids.len() > 1 {
+        return Err(super::update::Error::StrategyNeedsLinearHistory {
+            strategy: gix_submodule::config::Update::Rebase,
+            commit: commit_id,
+        });
+    }
+
+    let parent_tree = match parent_ids.first().copied() {
+        Some(parent) => repo.find_commit(parent)?.tree_id()?.detach(),
+        None => gix_hash::ObjectId::empty_tree(repo.object_hash()),
+    };
+    let head_tree = repo.find_commit(head)?.tree_id()?.detach();
+    let commit_tree = commit.tree_id()?.detach();
+
+    let labels = gix_merge::blob::builtin_driver::text::Labels {
+        ancestor: Some("parent-of-rebased".into()),
+        current: Some("HEAD".into()),
+        other: Some("rebased".into()),
+    };
+    let mut outcome = repo.merge_trees(parent_tree, head_tree, commit_tree, labels, repo.tree_merge_options()?)?;
+    if outcome.has_unresolved_conflicts(crate::merge::tree::TreatAsUnresolved::default()) {
+        return Err(super::update::Error::StrategyConflict {
+            strategy: gix_submodule::config::Update::Rebase,
+            head,
+            target: target_commit,
+        });
+    }
+
+    let tree = outcome.tree.write()?.detach();
+    let author: gix_actor::Signature = commit.author()?.into();
+    let committer = committer_or_fallback(repo)?;
+    let rebased = gix_object::Commit {
+        tree,
+        parents: smallvec::smallvec![head],
+        author,
+        committer,
+        encoding: None,
+        message: commit.message_raw_sloppy().to_vec().into(),
+        extra_headers: Default::default(),
+    };
+    let rebased = repo.write_object(&rebased)?.detach();
+    set_head_to_commit(repo, rebased, &format!("submodule update: rebase {commit_id}"), false)?;
+    Ok(rebased)
+}
+
+#[cfg(all(feature = "revision", feature = "merge"))]
+fn committer_or_fallback(repo: &Repository) -> Result<gix_actor::Signature, super::update::Error> {
+    Ok(match repo.committer().and_then(std::result::Result::ok) {
+        Some(committer) => committer.into(),
+        None => gix_actor::Signature {
+            name: b"gitoxide".as_bstr().to_owned(),
+            email: b"gitoxide@localhost".as_bstr().to_owned(),
+            time: gix_date::Time::now_local_or_utc(),
+        },
+    })
 }
 
 fn run_custom_update_command(

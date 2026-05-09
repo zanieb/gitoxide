@@ -105,6 +105,36 @@ git clone -q super update-command
   )
 )
 
+# --- Scenario: update-merge-diverged ---
+# The submodule is on a local branch that diverged from the superproject's
+# recorded commit, but the merge is clean.
+git clone -q super update-merge-diverged
+(cd update-merge-diverged
+  git submodule update --init
+  git config submodule.submodule.update merge
+  (cd submodule
+    git checkout -q -b local HEAD~1
+    echo "local merge content" > local-merge
+    git add local-merge
+    git commit -q -m "local merge-side commit"
+  )
+)
+
+# --- Scenario: update-rebase-diverged ---
+# The submodule is on a local branch that diverged from the superproject's
+# recorded commit, but the local commit can be replayed cleanly.
+git clone -q super update-rebase-diverged
+(cd update-rebase-diverged
+  git submodule update --init
+  git config submodule.submodule.update rebase
+  (cd submodule
+    git checkout -q -b local HEAD~1
+    echo "local rebase content" > local-rebase
+    git add local-rebase
+    git commit -q -m "local rebase-side commit"
+  )
+)
+
 # --- Scenario: dirty-submodule ---
 # Submodule has local changes that should block checkout update.
 git clone -q super dirty-submodule
