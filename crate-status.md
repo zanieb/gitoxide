@@ -678,9 +678,9 @@ Provide discovery and execution of Git hooks for client and receive-side workflo
 
 Provide base-implementations for dealing with smudge and clean filters as well as filter processes, facilitating their development.
 
-* [ ] clean filter base
-* [ ] smudge filter base
-* [ ] filter process base
+* [x] clean filter base
+* [x] smudge filter base
+* [x] filter process base
 
 ### gix-sec
 
