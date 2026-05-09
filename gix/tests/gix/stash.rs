@@ -7,12 +7,7 @@ mod stash {
         repo_rw("make_stash_repo.sh")
     }
 
-    fn write_and_commit_file(
-        workdir: &std::path::Path,
-        path: &str,
-        content: &str,
-        message: &str,
-    ) -> crate::Result<()> {
+    fn write_and_commit_file(workdir: &std::path::Path, path: &str, content: &str, message: &str) -> crate::Result<()> {
         std::fs::write(workdir.join(path), content)?;
         let status = std::process::Command::new("git")
             .arg("-C")
