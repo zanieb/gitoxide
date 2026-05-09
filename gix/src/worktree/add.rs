@@ -113,8 +113,7 @@ impl crate::Repository {
 
         // Validate path doesn't exist or is empty
         if path.exists() {
-            let is_empty_dir =
-                path.is_dir() && std::fs::read_dir(path).map(|mut d| d.next().is_none()).unwrap_or(false);
+            let is_empty_dir = path.is_dir() && std::fs::read_dir(path).is_ok_and(|mut d| d.next().is_none());
             if !is_empty_dir {
                 return Err(Error::PathExists { path: path.to_owned() });
             }

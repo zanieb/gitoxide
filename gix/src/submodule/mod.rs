@@ -41,7 +41,7 @@ fn validate_submodule_path(sm_path: &std::path::Path, worktree: &std::path::Path
     let mut check = worktree.to_path_buf();
     for component in sm_path.components() {
         check.push(component);
-        if check.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
+        if check.symlink_metadata().is_ok_and(|m| m.is_symlink()) {
             return Err(SymlinkInPathError {
                 path: sm_path.to_owned(),
                 symlink: check,
