@@ -48,6 +48,29 @@ impl<'repo> Pathspec<'repo> {
             .into_iter()
             .map(move |p| parse(p.as_ref(), defaults))
             .collect::<Result<Vec<_>, _>>()?;
+        Self::from_patterns_inner(repo, empty_patterns_match_prefix, patterns, make_attributes)
+    }
+
+    /// Create a new instance from already parsed or otherwise programmatically constructed [`Pattern`] values.
+    /// `make_attribute` may be called if one of the patterns has an attribute element which requires attribute matching.
+    ///
+    /// Unlike [`Pathspec::new()`], this does not apply parsing defaults from configuration or environment variables.
+    pub fn from_patterns(
+        repo: &'repo Repository,
+        empty_patterns_match_prefix: bool,
+        patterns: impl IntoIterator<Item = Pattern>,
+        make_attributes: impl FnOnce() -> Result<gix_worktree::Stack, Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Result<Self, init::Error> {
+        let patterns = patterns.into_iter().collect::<Vec<_>>();
+        Self::from_patterns_inner(repo, empty_patterns_match_prefix, patterns, make_attributes)
+    }
+
+    fn from_patterns_inner(
+        repo: &'repo Repository,
+        empty_patterns_match_prefix: bool,
+        patterns: Vec<Pattern>,
+        make_attributes: impl FnOnce() -> Result<gix_worktree::Stack, Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Result<Self, init::Error> {
         let needs_cache = patterns.iter().any(|p| !p.attributes.is_empty());
         let prefix = if patterns.is_empty() && !empty_patterns_match_prefix {
             None

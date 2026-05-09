@@ -92,7 +92,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * [x] instantiation
     * [x] access to refs and objects
     * [x] create a pathspec-search from a set of strings
-        - [ ] allow to construct Pathspecs using data structure instead of enforcing them to be passed as strings.
+        - [x] allow to construct Pathspecs using data structure instead of enforcing them to be passed as strings.
     * **credentials**
         * [x] run `git credential` directly
         * [x] use credential helper configuration and to obtain credentials with `gix_credentials::helper::Cascade`
@@ -597,7 +597,7 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 * [x] parse single
 * [ ] parse file line by line (with or without quoting, NUL and LF/CRLF line separation) (see `--pathspec-from-file` and `--pathspec-file-nul`)
 * [x] matching of paths with git-attributes support
-* [ ] programmatic creation of pathspecs
+* [x] programmatic creation of pathspecs
 * [ ] `TryIntoPathspec` trait to parse strings or accept ready-made pathspecs as well, for use in APIs
 
 ### gix-refspec

@@ -27,6 +27,29 @@ fn baseline() {
     }
 }
 
+#[test]
+fn construct_programmatically() {
+    let pattern = Pattern::from_components(
+        "src/**",
+        MagicSignature::TOP | MagicSignature::ICASE,
+        SearchMode::PathAwareGlob,
+        Vec::new(),
+    );
+
+    assert_eq!(pattern.path(), "src/**");
+    assert_eq!(pattern.signature, MagicSignature::TOP | MagicSignature::ICASE);
+    assert_eq!(pattern.search_mode, SearchMode::PathAwareGlob);
+    assert_eq!(
+        gix_pathspec::parse(pattern.to_bstring().as_ref(), Default::default()).expect("valid display form"),
+        pattern,
+        "structured patterns still round-trip through the display form"
+    );
+
+    let nil = Pattern::nil();
+    assert!(nil.is_nil());
+    assert_eq!(nil.to_bstring(), ":");
+}
+
 mod invalid;
 mod valid;
 

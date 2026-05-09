@@ -31,6 +31,33 @@ pub enum Error {
 }
 
 impl Pattern {
+    /// Create a pattern from its individual fields without parsing a string.
+    ///
+    /// Use [`MagicSignature::MUST_BE_DIR`] to make the pattern directory-only instead of appending a trailing slash
+    /// to `path`.
+    pub fn from_components(
+        path: impl Into<BString>,
+        signature: MagicSignature,
+        search_mode: SearchMode,
+        attributes: Vec<gix_attributes::Assignment>,
+    ) -> Self {
+        Pattern {
+            path: path.into(),
+            signature,
+            search_mode,
+            attributes,
+            ..Default::default()
+        }
+    }
+
+    /// Create the special nil pattern `:`, which represents the absence of a pathspec.
+    pub fn nil() -> Self {
+        Pattern {
+            nil: true,
+            ..Default::default()
+        }
+    }
+
     /// Try to parse a path-spec pattern from the given `input` bytes.
     pub fn from_bytes(
         input: &[u8],
@@ -47,10 +74,7 @@ impl Pattern {
             return Ok(Self::from_literal(input, signature));
         }
         if input.as_bstr() == ":" {
-            return Ok(Pattern {
-                nil: true,
-                ..Default::default()
-            });
+            return Ok(Pattern::nil());
         }
 
         let mut p = Pattern {
