@@ -4,6 +4,13 @@ use gix_ref::Category;
 
 use crate::config::tree::Key;
 
+fn assure_compatible_object_hash(local: gix_hash::Kind, remote: gix_hash::Kind) -> Result<(), Error> {
+    if remote != local {
+        return Err(remote::fetch::Error::IncompatibleObjectHash { local, remote }.into());
+    }
+    Ok(())
+}
+
 /// Modification
 impl PrepareFetch {
     /// Fetch a pack and update local branches according to refspecs, providing `progress` and checking `should_interrupt` to stop
@@ -30,7 +37,7 @@ impl PrepareFetch {
         P: crate::NestedProgress,
         P::SubProgress: 'static,
     {
-        use crate::{bstr::ByteVec, remote, remote::fetch::RefLogMessage};
+        use crate::{bstr::ByteVec, remote::fetch::RefLogMessage};
 
         let mut repo = self
             .repo
@@ -352,6 +359,23 @@ impl PrepareFetch {
             },
             fetch_outcome,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn incompatible_object_hash_is_reported() {
+        let err = super::assure_compatible_object_hash(gix_hash::Kind::Sha1, gix_hash::Kind::Sha256)
+            .expect_err("mismatches are rejected");
+
+        assert!(matches!(
+            err,
+            super::Error::Fetch(crate::remote::fetch::Error::IncompatibleObjectHash {
+                local: gix_hash::Kind::Sha1,
+                remote: gix_hash::Kind::Sha256,
+            })
+        ));
     }
 }
 
