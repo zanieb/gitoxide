@@ -587,3 +587,55 @@ fn check_safe_directories(
         Err(Error::UnsafeGitDir { path: path_to_test })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::check_safe_directories;
+    use crate::bstr::BString;
+
+    fn path_to_bstring(path: &std::path::Path) -> BString {
+        gix_path::into_bstr(path.to_owned()).into_owned()
+    }
+
+    #[test]
+    fn safe_directory_matches_exact_paths() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = gix_testtools::tempfile::TempDir::new()?;
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo)?;
+        let repo = repo.canonicalize()?;
+        let temp_dir = temp.path().canonicalize()?;
+
+        assert!(check_safe_directories(&repo, None, &temp_dir, None, &[path_to_bstring(&repo)]).is_ok());
+        assert!(check_safe_directories(&repo, None, &temp_dir, None, &[path_to_bstring(&temp_dir)]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn safe_directory_supports_wildcards_and_reset() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = gix_testtools::tempfile::TempDir::new()?;
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo)?;
+        let repo = repo.canonicalize()?;
+        let temp_dir = temp.path().canonicalize()?;
+        let mut wildcard = path_to_bstring(&temp_dir);
+        wildcard.extend_from_slice(b"/*");
+
+        assert!(check_safe_directories(&repo, None, &temp_dir, None, &[wildcard]).is_ok());
+        assert!(
+            check_safe_directories(&repo, None, &temp_dir, None, &[BString::from("*"), BString::from("")]).is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn safe_directory_ignores_non_absolute_paths() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = gix_testtools::tempfile::TempDir::new()?;
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo)?;
+        let repo = repo.canonicalize()?;
+        let temp_dir = temp.path().canonicalize()?;
+
+        assert!(check_safe_directories(&repo, None, &temp_dir, None, &[BString::from("repo")]).is_err());
+        Ok(())
+    }
+}
