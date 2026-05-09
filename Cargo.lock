@@ -1921,6 +1921,9 @@ dependencies = [
 [[package]]
 name = "gix-fetchhead"
 version = "0.0.0"
+dependencies = [
+ "gix-hash",
+]
 
 [[package]]
 name = "gix-filter"
