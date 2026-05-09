@@ -16,6 +16,10 @@ impl Clone for Span {
     }
 }
 
+impl Drop for Span {
+    fn drop(&mut self) {}
+}
+
 impl Span {
     /// Create a disabled span.
     pub fn disabled() -> Self {

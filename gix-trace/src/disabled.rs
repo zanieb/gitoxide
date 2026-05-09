@@ -3,6 +3,10 @@
 #[derive(Clone)]
 pub struct Span;
 
+impl Drop for Span {
+    fn drop(&mut self) {}
+}
+
 impl Span {
     /// A no-op
     pub fn record<V>(&self, _field: &str, _value: V) -> &Self {
