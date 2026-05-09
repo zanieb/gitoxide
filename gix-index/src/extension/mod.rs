@@ -64,7 +64,7 @@ pub struct UntrackedCache {
 
 /// The extension for keeping state on recent information provided by the filesystem monitor.
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FsMonitor {
     token: fs_monitor::Token,
     /// if a bit is true, the respective entry is NOT valid as per the fs monitor.

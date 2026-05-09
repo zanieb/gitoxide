@@ -15,10 +15,12 @@ fn roundtrips() -> crate::Result {
             options_with(write::Extensions::Given {
                 tree_cache: true,
                 resolve_undo: false,
+                fs_monitor: false,
                 end_of_index_entry: true,
             }),
         ),
         (Loose("REUC"), tree_and_resolve_undo_ext()),
+        (Loose("FSMN"), tree_and_fs_monitor_ext()),
         (Generated("v2_empty"), only_tree_ext()),
         (Generated("v2_more_files"), only_tree_ext()),
         (Generated("v2_all_file_kinds"), only_tree_ext()),
@@ -153,16 +155,25 @@ fn state_comparisons_with_various_extension_configurations() {
             options_with(write::Extensions::Given {
                 tree_cache: true,
                 resolve_undo: false,
+                fs_monitor: false,
                 end_of_index_entry: false,
             }),
             options_with(write::Extensions::Given {
                 tree_cache: false,
                 resolve_undo: false,
+                fs_monitor: false,
                 end_of_index_entry: true,
             }),
             options_with(write::Extensions::Given {
                 tree_cache: false,
                 resolve_undo: true,
+                fs_monitor: false,
+                end_of_index_entry: false,
+            }),
+            options_with(write::Extensions::Given {
+                tree_cache: false,
+                resolve_undo: false,
+                fs_monitor: true,
                 end_of_index_entry: false,
             }),
         ] {
@@ -259,6 +270,11 @@ fn compare_states(actual: &State, actual_version: Version, expected: &State, opt
         writes_resolve_undo(options).then(|| expected.resolve_undo()).flatten(),
         "resolve-undo extension mismatch, actual vs option in {fixture:?}"
     );
+    assert_eq!(
+        actual.fs_monitor(),
+        writes_fs_monitor(options).then(|| expected.fs_monitor()).flatten(),
+        "fsmonitor extension mismatch, actual vs option in {fixture:?}"
+    );
 
     // As `write_to` does / should not mutate we can test those properties here.
     // Anything that can be configured has to be tested separately when comparing against baseline
@@ -308,6 +324,7 @@ fn only_tree_ext() -> Options {
     Options {
         extensions: write::Extensions::Given {
             end_of_index_entry: false,
+            fs_monitor: false,
             resolve_undo: false,
             tree_cache: true,
         },
@@ -320,7 +337,21 @@ fn tree_and_resolve_undo_ext() -> Options {
     Options {
         extensions: write::Extensions::Given {
             end_of_index_entry: false,
+            fs_monitor: false,
             resolve_undo: true,
+            tree_cache: true,
+        },
+        skip_hash: false,
+        skip_stale_tree_cache: false,
+    }
+}
+
+fn tree_and_fs_monitor_ext() -> Options {
+    Options {
+        extensions: write::Extensions::Given {
+            end_of_index_entry: false,
+            fs_monitor: true,
+            resolve_undo: false,
             tree_cache: true,
         },
         skip_hash: false,
@@ -340,5 +371,12 @@ fn writes_resolve_undo(options: Options) -> bool {
     matches!(
         options.extensions,
         write::Extensions::All | write::Extensions::Given { resolve_undo: true, .. }
+    )
+}
+
+fn writes_fs_monitor(options: Options) -> bool {
+    matches!(
+        options.extensions,
+        write::Extensions::All | write::Extensions::Given { fs_monitor: true, .. }
     )
 }
