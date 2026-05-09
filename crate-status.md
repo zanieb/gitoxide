@@ -387,7 +387,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
 * [ ] working with hunks of data
 * [ ] diff-heuristics match Git perfectly
 * [x] API documentation
-    * [ ] Examples
+    * [x] Examples
 
 [gix-diff-performance]: https://github.com/GitoxideLabs/gitoxide/discussions/74
 
