@@ -217,6 +217,17 @@ where
     Ok(Outcome::Written { bytes: object_size })
 }
 
+fn create_or_reuse_directory(path: &Path) -> std::io::Result<()> {
+    match std::fs::create_dir(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => match path.symlink_metadata() {
+            Ok(meta) if meta.is_dir() => Ok(()),
+            _ => Err(err),
+        },
+        Err(err) => Err(err),
+    }
+}
+
 /// Note that this works only because we assume to not race ourselves when symlinks are involved, and we do this by
 /// delaying symlink creation to the end and will always do that sequentially.
 /// Other actors replacing leading path components with symlinks can still race these operations.
