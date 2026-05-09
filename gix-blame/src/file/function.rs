@@ -343,7 +343,25 @@ pub fn file(
                     }
                 }
                 TreeDiffChange::Deletion => {
-                    unreachable!("We already found file_path in suspect^{{tree}}, so it can't be deleted")
+                    if more_than_one_parent {
+                        // The target path can represent a tree in the parent and a file in
+                        // the suspect. If rewrite detection didn't find a file source, keep
+                        // looking at other parents before attributing it to the merge commit.
+                    } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
+                        if let Some(ref mut blame_path) = blame_path {
+                            let blame_path_entry = BlamePathEntry {
+                                source_file_path: current_file_path.clone(),
+                                previous_source_file_path: None,
+                                commit_id: suspect,
+                                blob_id: entry_id,
+                                previous_blob_id: ObjectId::null(gix_hash::Kind::Sha1),
+                                parent_index: index,
+                            };
+                            blame_path.push(blame_path_entry);
+                        }
+
+                        break 'outer;
+                    }
                 }
                 TreeDiffChange::Modification { previous_id, id } => {
                     let changes = blob_changes(
@@ -705,6 +723,9 @@ fn tree_diff_without_rewrites_at_file_path(
 
             if self.inner.path() == self.interesting_path {
                 self.change = Some(match change {
+                    Deletion { entry_mode, .. } if !is_blameable_entry_mode(entry_mode) => {
+                        return std::ops::ControlFlow::Continue(());
+                    }
                     Deletion {
                         entry_mode,
                         oid,
@@ -715,6 +736,9 @@ fn tree_diff_without_rewrites_at_file_path(
                         path: self.inner.path_clone(),
                         relation,
                     },
+                    Addition { entry_mode, .. } if !is_blameable_entry_mode(entry_mode) => {
+                        return std::ops::ControlFlow::Continue(());
+                    }
                     Addition {
                         entry_mode,
                         oid,
@@ -724,6 +748,20 @@ fn tree_diff_without_rewrites_at_file_path(
                         oid,
                         path: self.inner.path_clone(),
                         relation,
+                    },
+                    Modification { entry_mode, .. } if !is_blameable_entry_mode(entry_mode) => {
+                        return std::ops::ControlFlow::Continue(());
+                    }
+                    Modification {
+                        previous_entry_mode,
+                        previous_oid: _,
+                        entry_mode,
+                        oid,
+                    } if !is_blameable_entry_mode(previous_entry_mode) => gix_diff::tree::recorder::Change::Addition {
+                        entry_mode,
+                        oid,
+                        path: self.inner.path_clone(),
+                        relation: None,
                     },
                     Modification {
                         previous_entry_mode,
@@ -781,8 +819,12 @@ fn tree_diff_with_rewrites_at_file_path(
         &odb,
         |change_ref| {
             if change_ref.location() == file_path {
-                change = Some(change_ref.into_owned());
-                Ok(std::ops::ControlFlow::Break(()))
+                if let Some(relevant_change) = blame_relevant_rewrite_change(change_ref) {
+                    change = Some(relevant_change);
+                    Ok(std::ops::ControlFlow::Break(()))
+                } else {
+                    Ok(std::ops::ControlFlow::Continue(()))
+                }
             } else {
                 Ok(std::ops::ControlFlow::Continue(()))
             }
@@ -980,7 +1022,7 @@ fn find_path_entry_in_commit(
         )
         .or_raise(|| message("Couldn't find commit or tree in the object database"))?;
     stats.trees_decoded -= 1;
-    Ok(res.map(|e| e.oid))
+    Ok(res.and_then(|e| is_blameable_entry_mode(e.mode).then_some(e.oid)))
 }
 
 type ParentIds = SmallVec<[(gix_hash::ObjectId, i64); 2]>;
