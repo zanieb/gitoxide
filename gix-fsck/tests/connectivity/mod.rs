@@ -1,7 +1,7 @@
 use gix_fsck::{write_lost_found, Connectivity, Error, Options};
 use gix_hash::ObjectId;
 use gix_hashtable::{HashMap, HashSet};
-use gix_object::{Data, Kind};
+use gix_object::{tree::EntryKind, Data, Kind};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     LazyLock,
@@ -204,6 +204,58 @@ fn reflog_entries_are_connectivity_roots() {
     check
         .check_reflog_entries([(null, first_commit_id), (second_commit_id, null)])
         .expect("reflog roots are present");
+
+    assert!(check.unreachable(db.objects.keys()).is_empty());
+}
+
+#[test]
+fn index_entries_are_connectivity_roots() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"index-blob".to_vec());
+    let nested_blob_id = db.insert(Kind::Blob, b"nested".to_vec());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "nested", nested_blob_id));
+    let null = ObjectId::null(gix_hash::Kind::Sha1);
+    let submodule_commit_id = hex_to_id("cccccccccccccccccccccccccccccccccccccccc");
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all in-repository objects are present"));
+    check
+        .check_index_entries([
+            (blob_id, EntryKind::Blob),
+            (tree_id, EntryKind::Tree),
+            (submodule_commit_id, EntryKind::Commit),
+            (null, EntryKind::Blob),
+        ])
+        .expect("index roots are present");
+
+    assert!(check.unreachable(db.objects.keys()).is_empty());
+}
+
+#[test]
+fn index_entries_report_missing_blobs() {
+    let missing_blob_id = hex_to_id("dddddddddddddddddddddddddddddddddddddddd");
+    let mut missing = HashMap::default();
+    let mut check = Connectivity::new(MemoryDb::default(), |oid: &ObjectId, kind: Kind| {
+        missing.insert(*oid, kind);
+    });
+
+    check
+        .check_index_entries([(missing_blob_id, EntryKind::BlobExecutable)])
+        .expect("missing index blobs are reported through the callback");
+
+    assert_eq!(missing, [(missing_blob_id, Kind::Blob)].into_iter().collect());
+}
+
+#[test]
+fn index_tree_cache_ids_are_connectivity_roots() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"cached".to_vec());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "cached", blob_id));
+    let null = ObjectId::null(gix_hash::Kind::Sha1);
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("all cached tree objects are present"));
+    check
+        .check_index_tree_cache([null, tree_id])
+        .expect("index tree-cache roots are present");
 
     assert!(check.unreachable(db.objects.keys()).is_empty());
 }
