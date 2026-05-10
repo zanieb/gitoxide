@@ -248,9 +248,10 @@ impl Pipeline {
                         })
                         .transpose()?
                 } else {
-                    let need_size_only = is_binary == Some(true);
-                    let size_in_bytes = (need_size_only
-                        || (is_binary != Some(false) && self.options.large_file_threshold_bytes > 0))
+                    let need_size_only = !retain_binary && is_binary == Some(true);
+                    let size_in_bytes = (!retain_binary
+                        && (need_size_only
+                            || (is_binary != Some(false) && self.options.large_file_threshold_bytes > 0)))
                         .then(|| {
                             none_if_missing(self.path.metadata().map(|md| md.len())).or_raise(|| {
                                 message!("Entry at {rela_path:?} could not be opened for reading or read from")
@@ -343,9 +344,16 @@ impl Pipeline {
                                                 })?;
                                             }
 
-                                            Some(if is_binary.unwrap_or_else(|| is_binary_buf(out)) {
+                                            let is_large = is_binary != Some(false)
+                                                && self.options.large_file_threshold_bytes > 0
+                                                && out.len() as u64 > self.options.large_file_threshold_bytes;
+                                            let is_binary = is_binary == Some(true)
+                                                || (is_binary != Some(false) && (is_large || is_binary_buf(out)));
+                                            Some(if is_binary {
                                                 let size = out.len() as u64;
-                                                out.clear();
+                                                if !retain_binary {
+                                                    out.clear();
+                                                }
                                                 Data::Binary { size }
                                             } else {
                                                 Data::Buffer { is_derived: false }
@@ -375,7 +383,7 @@ impl Pipeline {
                     {
                         is_binary = Some(true);
                     }
-                    let data = if is_binary == Some(true) {
+                    let data = if is_binary == Some(true) && !retain_binary {
                         Data::Binary { size: header.size }
                     } else {
                         objects
@@ -479,11 +487,21 @@ impl Pipeline {
                             }
                         }
 
+                        let is_large = is_binary != Some(false)
+                            && self.options.large_file_threshold_bytes > 0
+                            && out.len() as u64 > self.options.large_file_threshold_bytes;
                         if driver.is_none_or(|d| d.binary_to_text_command.is_none())
-                            && is_binary.unwrap_or_else(|| is_binary_buf(out))
+                            && (is_binary == Some(true)
+                                || (is_binary != Some(false) && (is_large || is_binary_buf(out))))
                         {
-                            let size = out.len() as u64;
-                            out.clear();
+                            let size = if is_binary == Some(true) {
+                                header.size
+                            } else {
+                                out.len() as u64
+                            };
+                            if !retain_binary {
+                                out.clear();
+                            }
                             Data::Binary { size }
                         } else {
                             Data::Buffer { is_derived }

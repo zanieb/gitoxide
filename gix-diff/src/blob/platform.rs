@@ -28,6 +28,8 @@ pub(crate) struct CacheValue {
     mode: gix_object::tree::EntryKind,
     /// A possibly empty buffer, depending on `conversion.data` which may indicate the data is considered binary.
     buffer: Vec<u8>,
+    /// If `true`, `buffer` contains the original bytes for a binary resource so it can be passed to an external command.
+    binary_buffer_is_available: bool,
 }
 
 impl std::hash::Hash for CacheKey {
@@ -164,7 +166,10 @@ pub mod resource {
                         buf: &value.buffer,
                         is_derived,
                     },
-                    pipeline::Data::Binary { size } => Data::Binary { size },
+                    pipeline::Data::Binary { size } => Data::Binary {
+                        size,
+                        data: value.binary_buffer_is_available.then_some(value.buffer.as_slice()),
+                    },
                 }),
                 mode: value.mode,
                 rela_path: key.location.as_ref(),
@@ -219,6 +224,8 @@ pub mod resource {
             /// content, as once it can be the size of the blob in git, and once it's the size of file
             /// in the worktree.
             size: u64,
+            /// The resource bytes, if they were retained while classifying this item as binary.
+            data: Option<&'a [u8]>,
         },
     }
 
@@ -510,9 +517,8 @@ impl Platform {
     ///
     /// ### Deviation
     ///
-    /// If one of the resources is binary, the operation reports an error as such resources don't make their data available
-    /// which is required for the external diff to run.
-    // TODO: fix this - the diff shouldn't fail if binary (or large) files are used, just copy them into tempfiles.
+    /// If one of the resources is binary and its data wasn't retained when it was set, the operation reports an error as
+    /// such resources don't make their data available which is required for the external diff to run.
     pub fn prepare_diff_command(
         &self,
         diff_command: BString,
@@ -795,6 +801,7 @@ impl Platform {
                         conversion: out,
                         mode,
                         buffer: buf,
+                        binary_buffer_is_available,
                     },
                 )
                 .is_none(),
