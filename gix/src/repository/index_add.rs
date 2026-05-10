@@ -63,13 +63,13 @@ impl Repository {
                 gix_dir::entry::Status::Pruned => {}
             }
         }
+        let ignored_pathspecs: Vec<_> = outcome
+            .ignored_entries
+            .iter()
+            .filter(|ignored| pathspecs.iter().any(|spec| spec.as_bstr() == ignored.as_bstr()))
+            .cloned()
+            .collect();
         if paths.is_empty() && !pathspecs.is_empty() {
-            let ignored_pathspecs: Vec<_> = outcome
-                .ignored_entries
-                .iter()
-                .filter(|ignored| pathspecs.iter().any(|spec| spec.as_bstr() == ignored.as_bstr()))
-                .cloned()
-                .collect();
             if !options.force_ignored && !ignored_pathspecs.is_empty() {
                 return Err(Error::Ignored {
                     paths: ignored_pathspecs,
@@ -108,6 +108,11 @@ impl Repository {
         }
 
         index.write(Default::default())?;
+        if !options.force_ignored && !ignored_pathspecs.is_empty() {
+            return Err(Error::Ignored {
+                paths: ignored_pathspecs,
+            });
+        }
         Ok(outcome)
     }
 }

@@ -103,10 +103,15 @@ mod index {
             std::fs::write(workdir.join("keep.txt"), "keep\n")?;
             std::fs::write(workdir.join("ignored.log"), "ignored\n")?;
 
-            let outcome = repo.add_to_index([b"keep.txt".as_bstr(), b"ignored.log".as_bstr()], Default::default())?;
-
-            assert_eq!(outcome.added_entries, 1);
-            assert_eq!(outcome.ignored_entries, [b"ignored.log".as_bstr()]);
+            let err = repo
+                .add_to_index([b"keep.txt".as_bstr(), b"ignored.log".as_bstr()], Default::default())
+                .unwrap_err();
+            match err {
+                gix::repository::add_to_index::Error::Ignored { paths } => {
+                    assert_eq!(paths, [b"ignored.log".as_bstr()]);
+                }
+                err => panic!("unexpected error: {err}"),
+            }
             let index = repo.open_index()?;
             assert!(index.entry_by_path(b"keep.txt".as_bstr()).is_some());
             assert!(index.entry_by_path(b"ignored.log".as_bstr()).is_none());
