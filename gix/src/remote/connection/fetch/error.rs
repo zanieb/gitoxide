@@ -27,6 +27,8 @@ pub enum Error {
         path: std::path::PathBuf,
         source: std::io::Error,
     },
+    #[error("Could not prepare temporary shallow file for dry-run fetch")]
+    DryRunShallowFile(#[source] std::io::Error),
     #[error("None of the refspec(s) {} matched any of the {num_remote_refs} refs on the remote", refspecs.iter().map(|r| r.to_ref().instruction().to_bstring().to_string()).collect::<Vec<_>>().join(", "))]
     NoMapping {
         refspecs: Vec<gix_refspec::RefSpec>,

@@ -91,6 +91,40 @@ mod blocking_io {
     }
 
     #[test]
+    fn fetch_shallow_dry_run_unshallow_keeps_shallow_file_unchanged() -> crate::Result {
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _out) = gix::prepare_clone_bare(remote::repo("base").path(), tmp.path())?
+            .with_shallow(Shallow::DepthAtRemote(2.try_into().expect("non-zero")))
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        let shallow_file = repo.shallow_file();
+        let shallow_before = std::fs::read(&shallow_file)?;
+        let remote = repo.head()?.into_remote(Direction::Fetch).expect("present")?;
+
+        let outcome = remote
+            .connect(Direction::Fetch)?
+            .prepare_fetch(gix::progress::Discard, Default::default())?
+            .with_shallow(Shallow::undo())
+            .with_dry_run(true)
+            .receive(gix::progress::Discard, &AtomicBool::default())?;
+
+        assert!(
+            matches!(
+                outcome.status,
+                gix::remote::fetch::Status::NoPackReceived { dry_run: true, .. }
+            ),
+            "dry-run mode reports the update without applying it"
+        );
+        assert_eq!(
+            std::fs::read(&shallow_file)?,
+            shallow_before,
+            "dry-run unshallow must not alter the real shallow boundary"
+        );
+        assert!(repo.is_shallow(), "the repository remains shallow after dry-run");
+        Ok(())
+    }
+
+    #[test]
     fn shallow_clone_uses_single_branch_refspec() -> crate::Result {
         let tmp = gix_testtools::tempfile::TempDir::new()?;
         let (repo, _out) = gix::prepare_clone_bare(remote::repo("base").path(), tmp.path())?
