@@ -34,6 +34,22 @@ fn git_bundle_create(dir: &std::path::Path, bundle_path: &std::path::Path) {
     );
 }
 
+fn git_bundle_create_main(dir: &std::path::Path, bundle_path: &std::path::Path) {
+    let output = Command::new("git")
+        .args(["bundle", "create"])
+        .arg(bundle_path)
+        .arg("refs/heads/main")
+        .current_dir(dir)
+        .output()
+        .expect("git must be on PATH for bundle interop tests");
+    assert!(
+        output.status.success(),
+        "git bundle create failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn unbundle_imports_c_git_bundle_pack_and_refs() -> crate::Result {
     let tmp = gix_testtools::tempfile::tempdir()?;
@@ -99,6 +115,59 @@ fn unbundle_imports_c_git_bundle_pack_and_refs() -> crate::Result {
             "pseudo refs advertised by the bundle should not be written"
         );
     }
+
+    Ok(())
+}
+
+#[test]
+fn unbundle_rejects_ref_targets_missing_from_pack() -> crate::Result {
+    let tmp = gix_testtools::tempfile::tempdir()?;
+    let source = tmp.path().join("source");
+    std::fs::create_dir(&source)?;
+
+    git_output(&source, &["init", "-q", "-b", "main"]);
+    git_output(&source, &["config", "user.name", "Bundle Test"]);
+    git_output(&source, &["config", "user.email", "bundle@example.com"]);
+    std::fs::write(source.join("file"), "content\n")?;
+    git_output(&source, &["add", "file"]);
+    git_output(&source, &["commit", "-q", "-m", "initial"]);
+    let real_head = git_output(&source, &["rev-parse", "HEAD"]);
+
+    let bundle_path = tmp.path().join("tampered.bundle");
+    git_bundle_create_main(&source, &bundle_path);
+
+    let missing_head = "1111111111111111111111111111111111111111";
+    assert_ne!(missing_head, real_head, "test object id must differ from HEAD");
+
+    let mut bundle = std::fs::read(&bundle_path)?;
+    let header_end = bundle
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .expect("bundle has a header terminator");
+    let oid_pos = bundle[..header_end]
+        .windows(real_head.len())
+        .position(|window| window == real_head.as_bytes())
+        .expect("bundle header contains HEAD id");
+    bundle[oid_pos..oid_pos + real_head.len()].copy_from_slice(missing_head.as_bytes());
+    std::fs::write(&bundle_path, bundle)?;
+
+    let target_path = tmp.path().join("target.git");
+    let target = gix::init_bare(&target_path)?;
+    let err = target
+        .bundle_unbundle(&bundle_path)
+        .expect_err("tampered bundle refs must not be imported");
+
+    match err {
+        gix::bundle::Error::MissingRefObject { name, id } => {
+            assert_eq!(name.as_bstr(), "refs/heads/main");
+            assert_eq!(id.to_string(), missing_head);
+        }
+        other => panic!("expected MissingRefObject, got {other:?}"),
+    }
+    assert!(
+        target.try_find_reference("refs/heads/main")?.is_none(),
+        "unbundle failure must not leave a ref pointing at the missing object"
+    );
 
     Ok(())
 }
