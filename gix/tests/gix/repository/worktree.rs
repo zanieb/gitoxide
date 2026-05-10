@@ -315,6 +315,17 @@ mod mutation {
         Ok((repo, dir))
     }
 
+    fn add_unbacklinked_worktree_entry(
+        repo: &gix::Repository,
+        id: &str,
+        base: &std::path::Path,
+    ) -> std::io::Result<std::path::PathBuf> {
+        let admin_dir = repo.common_dir().join("worktrees").join(id);
+        std::fs::create_dir_all(&admin_dir)?;
+        std::fs::write(admin_dir.join("gitdir"), format!("{}\n", base.join(".git").display()))?;
+        Ok(admin_dir)
+    }
+
     mod add {
         use std::path::PathBuf;
 
@@ -1096,6 +1107,28 @@ mod mutation {
             );
             Ok(())
         }
+
+        #[test]
+        fn refuses_to_remove_directory_without_gitfile_backlink() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let victim = repo.workdir().unwrap().parent().unwrap().join("not-a-worktree");
+            std::fs::create_dir_all(&victim)?;
+            std::fs::write(victim.join("important"), "keep me")?;
+            let admin_dir = add_unbacklinked_worktree_entry(&repo, "unbacklinked-remove", &victim)?;
+
+            let result = repo.worktree_remove(
+                b"unbacklinked-remove".as_bstr(),
+                gix::worktree::remove::Options { force: 2 },
+            );
+
+            assert!(
+                matches!(result, Err(gix::worktree::remove::Error::InvalidWorktreeLink { .. })),
+                "should refuse to remove a directory without a matching .git backlink, got {result:?}"
+            );
+            assert!(victim.join("important").exists(), "unrelated directory must remain");
+            assert!(admin_dir.exists(), "admin dir remains for repair or explicit cleanup");
+            Ok(())
+        }
     }
 
     mod lock_unlock {
@@ -1696,6 +1729,30 @@ mod mutation {
             repo.worktree_move(worktree_id.as_bstr(), &new_path)?;
 
             assert!(new_path.exists(), "worktree should be moved to nested path");
+            Ok(())
+        }
+
+        #[test]
+        fn refuses_to_move_directory_without_gitfile_backlink() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let victim = repo.workdir().unwrap().parent().unwrap().join("not-a-worktree-move");
+            let destination = repo.workdir().unwrap().parent().unwrap().join("moved-victim");
+            std::fs::create_dir_all(&victim)?;
+            std::fs::write(victim.join("important"), "keep me")?;
+            let admin_dir = add_unbacklinked_worktree_entry(&repo, "unbacklinked-move", &victim)?;
+
+            let result = repo.worktree_move(b"unbacklinked-move".as_bstr(), &destination);
+
+            assert!(
+                matches!(result, Err(gix::worktree::r#move::Error::InvalidWorktreeLink { .. })),
+                "should refuse to move a directory without a matching .git backlink, got {result:?}"
+            );
+            assert!(victim.join("important").exists(), "unrelated directory must remain");
+            assert!(
+                !destination.exists(),
+                "destination must not be created by a failed move"
+            );
+            assert!(admin_dir.exists(), "admin dir remains for repair or explicit cleanup");
             Ok(())
         }
     }

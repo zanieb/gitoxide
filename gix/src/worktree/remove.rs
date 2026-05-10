@@ -40,6 +40,13 @@ pub enum Error {
     OpenWorktree(#[source] crate::worktree::proxy::into_repo::Error),
     #[error("Failed to read worktree base path from gitdir file")]
     ReadBase(#[from] std::io::Error),
+    #[error("Worktree '{id}' has invalid gitdir linkage at '{path}'")]
+    InvalidWorktreeLink {
+        id: BString,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("Failed to remove worktree directory at '{path}'")]
     RemoveWorktreeDir {
         path: PathBuf,
@@ -100,11 +107,21 @@ impl crate::Repository {
             });
         }
 
+        let base_path = proxy.base().ok();
+
         // Check if the worktree is dirty (force >= 1 overrides)
         // Only check if the worktree base path exists
         if options.force < 1 {
-            if let Ok(base_path) = proxy.base() {
+            if let Some(base_path) = base_path.as_deref() {
                 if base_path.is_dir() {
+                    proxy
+                        .validate_gitfile_backlink(base_path)
+                        .map_err(|source| Error::InvalidWorktreeLink {
+                            id: id.to_owned(),
+                            path: base_path.to_owned(),
+                            source,
+                        })?;
+
                     // Try to open the worktree as a repository and check if it's dirty
                     let worktree_repo = proxy.clone().into_repo().map_err(Error::OpenWorktree)?;
 
@@ -145,8 +162,15 @@ impl crate::Repository {
 
         // Get the worktree base path and remove it if it exists
         // We don't fail if the base path cannot be read or doesn't exist
-        if let Ok(base_path) = proxy.base() {
+        if let Some(base_path) = base_path {
             if base_path.is_dir() {
+                proxy
+                    .validate_gitfile_backlink(&base_path)
+                    .map_err(|source| Error::InvalidWorktreeLink {
+                        id: id.to_owned(),
+                        path: base_path.clone(),
+                        source,
+                    })?;
                 std::fs::remove_dir_all(&base_path).map_err(|source| Error::RemoveWorktreeDir {
                     path: base_path,
                     source,

@@ -57,6 +57,53 @@ impl Proxy<'_> {
         Ok(gix_discover::path::without_dot_git_dir(base_dot_git))
     }
 
+    pub(crate) fn validate_gitfile_backlink(&self, base: &Path) -> std::io::Result<()> {
+        let dot_git = base.join(gix_discover::DOT_GIT_DIR);
+        let backlink = gix_discover::path::from_gitdir_file(&dot_git).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "worktree .git file '{}' does not point to an administrative git directory: {err}",
+                    dot_git.display()
+                ),
+            )
+        })?;
+
+        let backlink = backlink.canonicalize().map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "worktree .git file '{}' points to inaccessible git directory '{}': {err}",
+                    dot_git.display(),
+                    backlink.display()
+                ),
+            )
+        })?;
+        let expected = self.git_dir.canonicalize().map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "worktree administrative git directory '{}' is inaccessible: {err}",
+                    self.git_dir.display()
+                ),
+            )
+        })?;
+
+        if backlink != expected {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "worktree .git file '{}' points to '{}', expected '{}'",
+                    dot_git.display(),
+                    backlink.display(),
+                    expected.display()
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// The git directory for the work tree, typically contained within the parent git dir.
     pub fn git_dir(&self) -> &Path {
         &self.git_dir
