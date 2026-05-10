@@ -510,7 +510,9 @@ pub fn parse_ref_record(
     // Read update_index delta
     let (update_index_delta, n) = read_varint(&data[pos..])?;
     pos += n;
-    let update_index = min_update_index + update_index_delta;
+    let update_index = min_update_index
+        .checked_add(update_index_delta)
+        .ok_or(Error::InvalidVarint)?;
 
     let name = BString::from(name);
 
