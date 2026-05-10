@@ -206,6 +206,68 @@ mod ext {
 }
 pub use ext::FindExt;
 
+#[cfg(test)]
+mod tests {
+    use gix_object::Kind;
+
+    use super::FindExt;
+    use crate::{data, find};
+
+    struct BlobOnly;
+
+    impl crate::Find for BlobOnly {
+        fn contains(&self, _id: &gix_hash::oid) -> bool {
+            true
+        }
+
+        fn try_find_cached<'a>(
+            &self,
+            _id: &gix_hash::oid,
+            buffer: &'a mut Vec<u8>,
+            _pack_cache: &mut dyn crate::cache::DecodeEntry,
+        ) -> Result<Option<(gix_object::Data<'a>, Option<data::entry::Location>)>, gix_object::find::Error> {
+            buffer.clear();
+            Ok(Some((
+                gix_object::Data {
+                    kind: Kind::Blob,
+                    data: buffer,
+                },
+                None,
+            )))
+        }
+
+        fn location_by_oid(&self, _id: &gix_hash::oid, _buf: &mut Vec<u8>) -> Option<data::entry::Location> {
+            None
+        }
+
+        fn pack_offsets_and_oid(&self, _pack_id: u32) -> Option<Vec<(data::Offset, gix_hash::ObjectId)>> {
+            None
+        }
+
+        fn entry_by_location(&self, _location: &data::entry::Location) -> Option<find::Entry> {
+            None
+        }
+    }
+
+    #[test]
+    fn find_commit_iter_reports_commit_as_expected_kind() {
+        let id = gix_hash::ObjectId::empty_blob(gix_hash::Kind::shortest());
+        let mut buffer = Vec::new();
+        let err = match BlobOnly.find_commit_iter(&id, &mut buffer) {
+            Ok(_) => panic!("blob is not a commit"),
+            Err(err) => err,
+        };
+
+        match err {
+            gix_object::find::existing_iter::Error::ObjectKind { actual, expected, .. } => {
+                assert_eq!(actual, Kind::Blob);
+                assert_eq!(expected, Kind::Commit);
+            }
+            err => panic!("unexpected error: {err}"),
+        }
+    }
+}
+
 mod find_impls {
     use std::{ops::Deref, rc::Rc};
 
