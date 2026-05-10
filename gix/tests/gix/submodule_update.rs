@@ -218,6 +218,60 @@ mod update {
         Ok(())
     }
 
+    #[test]
+    fn update_does_not_remove_parent_paths_from_submodule_index() -> crate::Result {
+        use gix::bstr::ByteSlice;
+
+        let (repo, _tmp) = repo_rw("needs-update")?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+        let sm_repo = sm.open()?.expect("submodule repo exists");
+        let workdir = sm_repo.workdir().expect("submodule has a worktree").to_owned();
+        let outside_name = format!(
+            "{}-outside-victim",
+            workdir
+                .file_name()
+                .expect("submodule path has a name")
+                .to_string_lossy()
+        );
+        let outside_file = workdir
+            .parent()
+            .expect("submodule worktree has a parent")
+            .join(&outside_name);
+        std::fs::write(&outside_file, "keep\n")?;
+
+        let malicious_index_path = format!("../{outside_name}");
+        let blob_id = sm_repo.write_blob("malicious\n")?;
+        let mut index = sm_repo.open_index()?;
+        index.add_entry(
+            gix_index::entry::Stat::default(),
+            blob_id.detach(),
+            gix_index::entry::Flags::empty(),
+            gix_index::entry::Mode::FILE,
+            malicious_index_path.as_bytes().as_bstr(),
+        );
+        index.write(Default::default())?;
+
+        sm.update_submodule(
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+            &Default::default(),
+        )?
+        .expect("update should succeed");
+
+        assert_eq!(
+            std::fs::read_to_string(&outside_file)?,
+            "keep\n",
+            "submodule update must not delete paths that escape the worktree through the old index"
+        );
+        std::fs::remove_file(outside_file)?;
+        Ok(())
+    }
+
     /// Ported from git t7406: submodule update - update=none in .git/config.
     /// When update strategy is 'none', the submodule should not be updated.
     #[test]
