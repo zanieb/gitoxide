@@ -267,7 +267,7 @@ fn append_zip_entry<W: std::io::Write + std::io::Seek>(
                 .new_file(symlink_path)
                 .compression_method(rawzip::CompressionMethod::Store)
                 .last_modified(mtime)
-                .unix_permissions(0o120644) // Symlink mode
+                .unix_permissions(0o120777) // Symlink mode
                 .start()
                 .or_raise(|| message("Could not start zip symlink entry"))?;
 
@@ -324,7 +324,8 @@ fn archive_mode(mode: gix_object::tree::EntryMode) -> u32 {
     match mode.kind() {
         EntryKind::Tree | EntryKind::Commit => 0o755,
         EntryKind::BlobExecutable => 0o755,
-        EntryKind::Blob | EntryKind::Link => 0o644,
+        EntryKind::Blob => 0o644,
+        EntryKind::Link => 0o777,
     }
 }
 

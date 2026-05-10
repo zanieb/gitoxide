@@ -120,7 +120,7 @@ mod from_tree {
                 [
                     ("prefix/.gitattributes", EntryType::Regular, 56, 420),
                     ("prefix/a", EntryType::Regular, 3, 420),
-                    ("prefix/symlink-to-a", EntryType::Symlink, 0, 420),
+                    ("prefix/symlink-to-a", EntryType::Symlink, 0, 511),
                     ("prefix/dir/b", EntryType::Regular, 3, 420),
                     ("prefix/dir/subdir/exe", EntryType::Regular, 0, 493),
                     ("prefix/extra-file", EntryType::Regular, 21, 420),
@@ -131,7 +131,7 @@ mod from_tree {
                         if cfg!(windows) { 420 } else { 493 }
                     ),
                     ("prefix/extra-dir-empty", EntryType::Directory, 0, 493),
-                    ("prefix/extra-dir/symlink-to-extra", EntryType::Symlink, 0, 420)
+                    ("prefix/extra-dir/symlink-to-extra", EntryType::Symlink, 0, 511)
                 ]
                 .into_iter()
                 .map(|(path, b, c, d)| (bstr::BStr::new(path).to_owned(), b, c, d))
@@ -204,7 +204,7 @@ mod from_tree {
                     if String::from_utf8_lossy(entry.file_path().as_ref()) == "prefix/symlink-to-a" {
                         let mode = entry.mode();
                         assert!(mode.is_symlink(), "symlinks are supported as well, but only on Unix");
-                        assert_eq!(mode.value(), 0o120644, "the mode specifies what it should be");
+                        assert_eq!(mode.value(), 0o120777, "the mode specifies what it should be");
 
                         let wayfinder = entry.wayfinder();
                         let zip_entry = ar.get_entry(wayfinder)?;
