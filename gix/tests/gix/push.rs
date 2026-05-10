@@ -169,6 +169,19 @@ mod blocking_io {
     }
 
     #[test]
+    fn push_revspec_source_to_destination() -> gix_testtools::Result {
+        let (repo, bare_path, dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        let working_path = dir.path().join("working");
+        let previous_oid = git_in(&working_path, &["rev-parse", "main~1"]);
+
+        do_push(&repo, &bare_url, &["main~1:previous"])?;
+
+        verify_push_result(&bare_path, "refs/heads/previous", &previous_oid);
+        Ok(())
+    }
+
+    #[test]
     fn push_tag() -> gix_testtools::Result {
         // Mirrors: 'push tag with non-existent, incomplete dest'
         let (repo, bare_path, _dir) = setup_push_repos()?;
