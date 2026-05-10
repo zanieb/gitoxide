@@ -497,6 +497,8 @@ mod find {
     use gix_pack::Find;
     use gix_testtools::TestResult;
 
+    #[cfg(feature = "sha256")]
+    use crate::repository::object::empty_bare_repo_with_object_hash;
     use crate::repository::object::{empty_bare_in_memory_repo, empty_bare_repo};
     use crate::{basic_repo, util::hex_to_id};
 
@@ -575,6 +577,18 @@ mod find {
             repo.objects.try_find(&empty_tree, &mut buf)?.is_none(),
             "the lower level has no such special case so one can determine if this object exists or not"
         );
+        Ok(())
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn has_object_only_treats_repository_hash_empty_tree_as_virtual() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo_with_object_hash(gix::hash::Kind::Sha256)?;
+        let sha1_empty_tree = gix::hash::ObjectId::empty_tree(gix::hash::Kind::Sha1);
+        let sha256_empty_tree = gix::hash::ObjectId::empty_tree(gix::hash::Kind::Sha256);
+
+        assert!(!repo.has_object(sha1_empty_tree));
+        assert!(repo.has_object(sha256_empty_tree));
         Ok(())
     }
 
