@@ -46,6 +46,21 @@ fn parse_and_write_round_trip() {
 }
 
 #[test]
+fn parse_and_write_preserves_non_utf8_descriptions() {
+    let mut input = b"1b8d9e6a408e480ae1912e919c37a26e5c46639d\t\tbranch '".to_vec();
+    input.push(0xff);
+    input.extend_from_slice(b"' of https://example.com/repo.git\n");
+
+    let lines = gix_fetchhead::parse(&input).expect("valid FETCH_HEAD");
+    let description: &[u8] = lines[0].description.as_ref();
+    assert_eq!(description, &input[42..input.len() - 1]);
+
+    let mut out = Vec::new();
+    gix_fetchhead::write_to(&lines, &mut out).expect("write succeeds");
+    assert_eq!(out, input);
+}
+
+#[test]
 fn line_from_str_reports_invalid_object_id() {
     let err = Line::from_str("invalid\tbranch 'main' of https://example.com/repo.git").unwrap_err();
     assert!(err.to_string().contains("line 1"));

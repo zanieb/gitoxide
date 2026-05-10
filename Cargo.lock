@@ -1922,6 +1922,7 @@ dependencies = [
 name = "gix-fetchhead"
 version = "0.0.0"
 dependencies = [
+ "bstr",
  "gix-hash",
 ]
 
