@@ -220,6 +220,12 @@ pub mod update {
         FindHead(#[from] crate::reference::find::existing::Error),
         #[error(transparent)]
         HeadId(#[from] crate::reference::head_id::Error),
+        #[error(transparent)]
+        HeadTreeId(#[from] crate::reference::head_tree_id::Error),
+        #[error(transparent)]
+        OpenIndex(#[from] crate::worktree::open_index::Error),
+        #[error(transparent)]
+        IndexFromHeadTree(#[from] crate::repository::index_from_tree::Error),
         #[cfg(feature = "revision")]
         #[error(transparent)]
         MergeBase(#[from] crate::repository::merge_base::Error),
@@ -302,6 +308,25 @@ pub mod update {
             id: gix_hash::ObjectId,
             /// The underlying error.
             source: gix_index::init::from_tree::Error,
+        },
+        #[error("Local changes to '{path}' would be overwritten by submodule checkout")]
+        CheckoutWouldOverwrite {
+            /// The path with local changes.
+            path: crate::bstr::BString,
+        },
+        #[error("Could not read worktree path '{path}' while checking for local submodule changes")]
+        ReadWorktree {
+            /// The path that could not be read.
+            path: crate::bstr::BString,
+            /// The underlying IO error.
+            source: std::io::Error,
+        },
+        #[error("Could not hash worktree path '{path}' while checking for local submodule changes")]
+        HashWorktree {
+            /// The path that could not be hashed.
+            path: crate::bstr::BString,
+            /// The underlying hashing error.
+            source: gix_hash::hasher::Error,
         },
         #[error(transparent)]
         CheckoutOptions(#[from] crate::config::checkout_options::Error),

@@ -288,6 +288,49 @@ mod update {
     }
 
     #[test]
+    fn update_rejects_dirty_tracked_file_that_checkout_would_overwrite() -> crate::Result {
+        let (repo, _tmp) = repo_rw("needs-update")?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+
+        let sm_repo = sm.open()?.expect("submodule repo exists");
+        let workdir = sm_repo.workdir().expect("submodule has a worktree");
+        let head_before = sm_repo.head_id()?.detach();
+        std::fs::write(workdir.join("file"), "local change\n")?;
+
+        let err = sm
+            .update_submodule(
+                gix::progress::Discard,
+                &std::sync::atomic::AtomicBool::default(),
+                &Default::default(),
+            )
+            .expect_err("dirty tracked file should block checkout update");
+
+        assert!(
+            matches!(
+                err,
+                gix::submodule::update::Error::CheckoutWouldOverwrite { ref path } if &path[..] == b"file"
+            ),
+            "expected dirty-checkout error for file, got {err:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("file"))?,
+            "local change\n",
+            "failed update must not overwrite local content"
+        );
+        assert_eq!(
+            sm_repo.head_id()?.detach(),
+            head_before,
+            "failed update must not move the submodule HEAD"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn update_does_not_remove_parent_paths_from_submodule_index() -> crate::Result {
         use gix::bstr::ByteSlice;
 

@@ -1,9 +1,16 @@
 //! Implementation of `Submodule::update_submodule()`, modelled after git's `update_submodule()` and
 //! `run_update_procedure()` in `builtin/submodule--helper.c`.
 
-use std::sync::atomic::AtomicBool;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Component,
+    sync::atomic::AtomicBool,
+};
 
-use crate::{bstr::ByteSlice, Repository, Submodule};
+use crate::{
+    bstr::{BString, ByteSlice},
+    Repository, Submodule,
+};
 
 /// Update operations
 impl Submodule<'_> {
@@ -594,6 +601,8 @@ fn checkout_to_commit(
     commit_id: gix_hash::ObjectId,
     should_interrupt: &AtomicBool,
 ) -> Result<gix_worktree_state::checkout::Outcome, super::update::Error> {
+    ensure_checkout_would_not_overwrite_local_changes(repo, commit_id)?;
+
     // Set HEAD to the target commit (detached).
     set_head_to_commit(
         repo,
@@ -603,6 +612,162 @@ fn checkout_to_commit(
     )?;
 
     checkout_commit_tree(repo, commit_id, should_interrupt)
+}
+
+fn ensure_checkout_would_not_overwrite_local_changes(
+    repo: &Repository,
+    target_commit: gix_hash::ObjectId,
+) -> Result<(), super::update::Error> {
+    let workdir = repo.workdir().ok_or(super::update::Error::MissingWorkdir)?;
+    let current_index = repo.index_or_empty()?;
+    let target_index = index_from_commit_tree(repo, target_commit)?;
+    let affected_paths = affected_checkout_paths(&current_index, &target_index);
+    if affected_paths.is_empty() {
+        return Ok(());
+    }
+
+    let head_tree_id = repo.head_tree_id_or_empty()?;
+    let head_index = repo.index_from_tree(&head_tree_id)?;
+    let unconflicted = gix_index::entry::Stage::Unconflicted;
+
+    for path in affected_paths {
+        let path_bstr = path.as_bstr();
+        if path_escapes_worktree(path_bstr) {
+            continue;
+        }
+
+        let current_entry = current_index.entry_by_path_and_stage(path_bstr, unconflicted);
+        let head_entry = head_index.entry_by_path_and_stage(path_bstr, unconflicted);
+        if index_entries_differ(current_entry, head_entry) {
+            return Err(super::update::Error::CheckoutWouldOverwrite { path });
+        }
+
+        if let Some(entry) = current_entry {
+            if worktree_entry_differs_from_index(repo, workdir, &current_index, entry)? {
+                return Err(super::update::Error::CheckoutWouldOverwrite { path });
+            }
+        } else if workdir.join(gix_path::from_bstr(path_bstr)).symlink_metadata().is_ok() {
+            return Err(super::update::Error::CheckoutWouldOverwrite { path });
+        }
+    }
+
+    Ok(())
+}
+
+fn affected_checkout_paths(current_index: &gix_index::File, target_index: &gix_index::File) -> Vec<BString> {
+    let unconflicted = gix_index::entry::Stage::Unconflicted;
+    let mut current_entries = BTreeMap::new();
+    let mut target_entries = BTreeMap::new();
+
+    for entry in current_index.entries() {
+        if entry.stage() == unconflicted {
+            current_entries.insert(entry.path(current_index).to_owned(), (entry.id, entry.mode));
+        }
+    }
+    for entry in target_index.entries() {
+        if entry.stage() == unconflicted {
+            target_entries.insert(entry.path(target_index).to_owned(), (entry.id, entry.mode));
+        }
+    }
+
+    let mut paths = BTreeSet::new();
+    for (path, current) in &current_entries {
+        if target_entries.get(path) != Some(current) {
+            paths.insert(path.clone());
+        }
+    }
+    for path in target_entries.keys() {
+        if !current_entries.contains_key(path) {
+            paths.insert(path.clone());
+        }
+    }
+
+    paths.into_iter().collect()
+}
+
+fn index_entries_differ(lhs: Option<&gix_index::Entry>, rhs: Option<&gix_index::Entry>) -> bool {
+    match (lhs, rhs) {
+        (Some(lhs), Some(rhs)) => lhs.id != rhs.id || lhs.mode != rhs.mode,
+        (None, None) => false,
+        (Some(_), None) | (None, Some(_)) => true,
+    }
+}
+
+fn path_escapes_worktree(path: &crate::bstr::BStr) -> bool {
+    let os_path = gix_path::from_bstr(path);
+    os_path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    })
+}
+
+fn worktree_entry_differs_from_index(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    index: &gix_index::File,
+    entry: &gix_index::Entry,
+) -> Result<bool, super::update::Error> {
+    if !matches!(
+        entry.mode,
+        gix_index::entry::Mode::FILE | gix_index::entry::Mode::FILE_EXECUTABLE | gix_index::entry::Mode::SYMLINK
+    ) {
+        return Ok(false);
+    }
+
+    let path = entry.path(index);
+    let file_path = workdir.join(gix_path::from_bstr(path));
+    let Some(entry_data) = worktree_entry_data(&file_path).map_err(|source| super::update::Error::ReadWorktree {
+        path: path.to_owned(),
+        source,
+    })?
+    else {
+        return Ok(true);
+    };
+
+    let worktree_id = gix_object::compute_hash(repo.object_hash(), gix_object::Kind::Blob, &entry_data.content)
+        .map_err(|source| super::update::Error::HashWorktree {
+            path: path.to_owned(),
+            source,
+        })?;
+    Ok(worktree_id != entry.id || entry_data.mode != entry.mode)
+}
+
+struct WorktreeEntryData {
+    content: Vec<u8>,
+    mode: gix_index::entry::Mode,
+}
+
+fn worktree_entry_data(path: &std::path::Path) -> std::io::Result<Option<WorktreeEntryData>> {
+    let meta = match gix_index::fs::Metadata::from_path_no_follow(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    let Some(mode) = mode_from_worktree_metadata(&meta) else {
+        return Ok(None);
+    };
+    let content = if mode == gix_index::entry::Mode::SYMLINK {
+        gix_path::into_bstr(std::fs::read_link(path)?).into_owned().into()
+    } else {
+        std::fs::read(path)?
+    };
+    Ok(Some(WorktreeEntryData { content, mode }))
+}
+
+fn mode_from_worktree_metadata(meta: &gix_index::fs::Metadata) -> Option<gix_index::entry::Mode> {
+    if meta.is_symlink() {
+        Some(gix_index::entry::Mode::SYMLINK)
+    } else if meta.is_file() {
+        Some(if meta.is_executable() {
+            gix_index::entry::Mode::FILE_EXECUTABLE
+        } else {
+            gix_index::entry::Mode::FILE
+        })
+    } else {
+        None
+    }
 }
 
 fn set_head_to_commit(
@@ -670,17 +835,7 @@ fn checkout_commit_tree(
     )
     .ok();
 
-    // Build index from the target tree
-    let tree_id = repo.find_object(commit_id)?.peel_to_tree()?.id;
-
-    let index =
-        gix_index::State::from_tree(&tree_id, &repo.objects, repo.config.protect_options()?).map_err(|err| {
-            super::update::Error::IndexFromTree {
-                id: tree_id,
-                source: err,
-            }
-        })?;
-    let mut index = gix_index::File::from_state(index, repo.index_path());
+    let mut index = index_from_commit_tree(repo, commit_id)?;
 
     let mut opts = repo.checkout_options(gix_worktree::stack::state::attributes::Source::IdMapping)?;
     // The destination may have files from a previous checkout; allow overwriting.
@@ -706,4 +861,19 @@ fn checkout_commit_tree(
 
     index.write(Default::default())?;
     Ok(outcome)
+}
+
+fn index_from_commit_tree(
+    repo: &Repository,
+    commit_id: gix_hash::ObjectId,
+) -> Result<gix_index::File, super::update::Error> {
+    let tree_id = repo.find_object(commit_id)?.peel_to_tree()?.id;
+    let index =
+        gix_index::State::from_tree(&tree_id, &repo.objects, repo.config.protect_options()?).map_err(|err| {
+            super::update::Error::IndexFromTree {
+                id: tree_id,
+                source: err,
+            }
+        })?;
+    Ok(gix_index::File::from_state(index, repo.index_path()))
 }
