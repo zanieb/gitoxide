@@ -88,12 +88,21 @@ pub fn parse_v1(response: &[u8]) -> Result<(UnpackStatus, Vec<StatusV1>), Error>
             continue;
         }
         if line.starts_with(b"ok ") {
+            if line.len() == 3 {
+                return Err(Error::InvalidStatusLine { line: line.into() });
+            }
             statuses.push(StatusV1::Ok {
                 ref_name: line[3..].into(),
             });
         } else if line.starts_with(b"ng ") {
             let rest = &line[3..];
+            if rest.is_empty() {
+                return Err(Error::InvalidStatusLine { line: line.into() });
+            }
             if let Some(space_pos) = rest.find_byte(b' ') {
+                if space_pos == 0 {
+                    return Err(Error::InvalidStatusLine { line: line.into() });
+                }
                 statuses.push(StatusV1::Ng {
                     ref_name: rest[..space_pos].into(),
                     reason: rest[space_pos + 1..].into(),
@@ -104,6 +113,8 @@ pub fn parse_v1(response: &[u8]) -> Result<(UnpackStatus, Vec<StatusV1>), Error>
                     reason: BString::from("unknown reason"),
                 });
             }
+        } else {
+            return Err(Error::InvalidStatusLine { line: line.into() });
         }
     }
     Ok((unpack_status, statuses))
@@ -115,4 +126,6 @@ pub fn parse_v1(response: &[u8]) -> Result<(UnpackStatus, Vec<StatusV1>), Error>
 pub enum Error {
     #[error("the server did not send the expected 'unpack' status line")]
     MissingUnpackStatus,
+    #[error("the server sent an invalid ref status line: {line:?}")]
+    InvalidStatusLine { line: BString },
 }

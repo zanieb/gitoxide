@@ -150,6 +150,27 @@ mod parse_v1_edge_cases {
     }
 
     #[test]
+    fn unknown_ref_status_line_is_error() {
+        let response = b"unpack ok\nmaybe refs/heads/main\n";
+        let result = parse_v1(response);
+        assert!(result.is_err(), "unknown ref status lines should fail");
+    }
+
+    #[test]
+    fn ok_without_ref_name_is_error() {
+        let response = b"unpack ok\nok \n";
+        let result = parse_v1(response);
+        assert!(result.is_err(), "ok status without a ref name should fail");
+    }
+
+    #[test]
+    fn ng_without_ref_name_is_error() {
+        let response = b"unpack ok\nng  rejected\n";
+        let result = parse_v1(response);
+        assert!(result.is_err(), "ng status without a ref name should fail");
+    }
+
+    #[test]
     fn unpack_ok_with_no_ref_statuses() {
         // Edge case: server says unpack ok but reports no ref statuses
         let response = b"unpack ok\n";
