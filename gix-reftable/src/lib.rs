@@ -14,7 +14,7 @@
 //! ## Format overview
 //!
 //! A reftable file consists of:
-//! 1. A 24-byte file header with magic bytes "REFT"
+//! 1. A 24-byte v1 or 28-byte v2 file header with magic bytes "REFT"
 //! 2. Ref blocks containing sorted reference records
 //! 3. Optional obj blocks (reverse index: object -> ref names)
 //! 4. Optional log blocks (reflog entries, may be zlib-compressed)
@@ -181,6 +181,8 @@ pub struct Header {
     pub min_update_index: u64,
     /// Maximum update index for records in this table.
     pub max_update_index: u64,
+    /// Object hash kind used by object ids in this table.
+    pub object_hash: gix_hash::Kind,
 }
 
 /// The file footer of a reftable.
@@ -210,6 +212,8 @@ pub enum Error {
     InvalidMagic,
     #[error("unsupported reftable version {version}")]
     UnsupportedVersion { version: u8 },
+    #[error("unsupported reftable object hash id {hash_id:?}")]
+    UnsupportedObjectHash { hash_id: [u8; 4] },
     #[error("block size {size} is too small (minimum {MIN_BLOCK_SIZE})")]
     BlockSizeTooSmall { size: u32 },
     #[error("block length {block_len} exceeds maximum block payload length {max_len}")]
@@ -337,7 +341,7 @@ pub fn footer_size(version: Version) -> usize {
 /// - Bytes 5-7: BE24 block_size
 /// - Bytes 8-15: BE64 min_update_index
 /// - Bytes 16-23: BE64 max_update_index
-/// - (Version 2 only) Bytes 24-27: BE32 hash algorithm ID
+/// - (Version 2 only) Bytes 24-27: hash algorithm ID (`sha1` or `s256`)
 pub fn parse_header(data: &[u8]) -> Result<Header, Error> {
     if data.len() < HEADER_SIZE_V1 {
         return Err(Error::UnexpectedEof);
@@ -357,12 +361,20 @@ pub fn parse_header(data: &[u8]) -> Result<Header, Error> {
     }
     let min_update_index = u64::from_be_bytes(data[8..16].try_into().expect("8 bytes"));
     let max_update_index = u64::from_be_bytes(data[16..24].try_into().expect("8 bytes"));
+    let object_hash = match version {
+        Version::V1 => sha1_object_hash()?,
+        Version::V2 => {
+            let hash_id = data[24..28].try_into().expect("4 bytes");
+            object_hash_from_reftable_id(hash_id)?
+        }
+    };
 
     Ok(Header {
         version,
         block_size,
         min_update_index,
         max_update_index,
+        object_hash,
     })
 }
 
@@ -380,6 +392,9 @@ pub fn serialize_header(header: &Header) -> Vec<u8> {
     );
     out[8..16].copy_from_slice(&header.min_update_index.to_be_bytes());
     out[16..24].copy_from_slice(&header.max_update_index.to_be_bytes());
+    if header.version == Version::V2 {
+        out[24..28].copy_from_slice(reftable_id_for_object_hash(header.object_hash));
+    }
     out
 }
 
@@ -583,6 +598,39 @@ fn object_id_from_bytes(bytes: &[u8]) -> Result<ObjectId, Error> {
     ObjectId::try_from(bytes).map_err(|_| Error::InvalidObjectIdLength { len: bytes.len() })
 }
 
+fn sha1_object_hash() -> Result<gix_hash::Kind, Error> {
+    #[cfg(feature = "sha1")]
+    {
+        Ok(gix_hash::Kind::Sha1)
+    }
+    #[cfg(not(feature = "sha1"))]
+    {
+        Err(Error::UnsupportedObjectHash { hash_id: *b"sha1" })
+    }
+}
+
+fn object_hash_from_reftable_id(hash_id: [u8; 4]) -> Result<gix_hash::Kind, Error> {
+    #[cfg(feature = "sha1")]
+    if hash_id == *b"sha1" {
+        return Ok(gix_hash::Kind::Sha1);
+    }
+    #[cfg(feature = "sha256")]
+    if hash_id == *b"s256" {
+        return Ok(gix_hash::Kind::Sha256);
+    }
+    Err(Error::UnsupportedObjectHash { hash_id })
+}
+
+fn reftable_id_for_object_hash(kind: gix_hash::Kind) -> &'static [u8; 4] {
+    match kind {
+        #[cfg(feature = "sha1")]
+        gix_hash::Kind::Sha1 => b"sha1",
+        #[cfg(feature = "sha256")]
+        gix_hash::Kind::Sha256 => b"s256",
+        _ => unreachable!("unknown object hash kind"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -688,6 +736,7 @@ mod tests {
             block_size: 4096,
             min_update_index: 1,
             max_update_index: 10,
+            object_hash: gix_hash::Kind::Sha1,
         };
         let bytes = serialize_header(&header);
         assert_eq!(bytes.len(), HEADER_SIZE_V1);
@@ -702,6 +751,7 @@ mod tests {
             block_size: 65536,
             min_update_index: 100,
             max_update_index: 200,
+            object_hash: gix_hash::Kind::Sha1,
         };
         let bytes = serialize_header(&header);
         assert_eq!(bytes.len(), HEADER_SIZE_V2);
@@ -780,6 +830,7 @@ mod tests {
                 block_size: 4096,
                 min_update_index: 1,
                 max_update_index: 10,
+                object_hash: gix_hash::Kind::Sha1,
             },
             ref_index_offset: 0,
             obj_offset: 1024,
@@ -802,6 +853,7 @@ mod tests {
                 block_size: 4096,
                 min_update_index: 1,
                 max_update_index: 10,
+                object_hash: gix_hash::Kind::Sha1,
             },
             ref_index_offset: 0,
             obj_offset: 0,

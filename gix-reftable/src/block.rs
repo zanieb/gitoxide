@@ -252,10 +252,7 @@ pub fn read_table_ref_records(data: &[u8]) -> Result<Vec<RefRecord>, Error> {
 
     let footer_start = data.len() - footer_size;
     let footer = crate::parse_footer(&data[footer_start..])?;
-    let hash_size = match header.version {
-        crate::Version::V1 => 20,
-        crate::Version::V2 => 32,
-    };
+    let hash_size = header.object_hash.len_in_bytes();
 
     let mut records = Vec::new();
     let mut block_start = file_header_size;
@@ -410,6 +407,7 @@ mod tests {
             min_update_index,
             max_update_index,
             version: crate::Version::V1,
+            object_hash: gix_hash::Kind::Sha1,
         };
         let header = crate::write::write_header(&opts);
         let block = crate::write::write_ref_block_at(records, opts.min_update_index, 20, opts.block_size, header.len())
@@ -420,6 +418,7 @@ mod tests {
                 block_size: opts.block_size,
                 min_update_index: opts.min_update_index,
                 max_update_index: opts.max_update_index,
+                object_hash: gix_hash::Kind::Sha1,
             },
             ref_index_offset: 0,
             obj_offset: 0,
