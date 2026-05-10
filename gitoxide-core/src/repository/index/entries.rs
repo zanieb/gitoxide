@@ -57,6 +57,8 @@ pub(crate) mod function {
             out.write_all(b"[\n").or_error()?;
         }
 
+        #[cfg(feature = "serde")]
+        let mut json_state = JsonState::default();
         let stats = print_entries(
             &repo,
             attributes,
@@ -66,6 +68,8 @@ pub(crate) mod function {
             simple,
             "".into(),
             recurse_submodules,
+            #[cfg(feature = "serde")]
+            &mut json_state,
             &mut out,
         )?;
 
@@ -100,6 +104,7 @@ pub(crate) mod function {
         simple: bool,
         prefix: &BStr,
         recurse_submodules: bool,
+        #[cfg(feature = "serde")] json_state: &mut JsonState,
         out: &mut impl std::io::Write,
     ) -> Result<Statistics> {
         let _span = gix::trace::coarse!("print_entries()", git_dir = ?repo.git_dir());
@@ -220,6 +225,8 @@ pub(crate) mod function {
                         simple,
                         prefix.as_ref(),
                         recurse_submodules,
+                        #[cfg(feature = "serde")]
+                        json_state,
                         out,
                     )?;
                     stats.submodule.push((sm_path.into_owned(), sm_stats));
@@ -242,7 +249,7 @@ pub(crate) mod function {
                             .or_error()?;
                         }
                         #[cfg(feature = "serde")]
-                        OutputFormat::Json => to_json(out, &index, entry, attrs, is_last_entry, prefix)?,
+                        OutputFormat::Json => to_json(out, &index, entry, attrs, json_state, prefix)?,
                     }
                 }
             }
@@ -330,12 +337,18 @@ pub(crate) mod function {
     }
 
     #[cfg(feature = "serde")]
+    #[derive(Default)]
+    struct JsonState {
+        wrote_entry: bool,
+    }
+
+    #[cfg(feature = "serde")]
     fn to_json(
         out: &mut impl std::io::Write,
         index: &gix::index::File,
         entry: &gix::index::Entry,
         attrs: Option<Attrs>,
-        is_last: bool,
+        state: &mut JsonState,
         prefix: &BStr,
     ) -> Result<()> {
         use gix::bstr::ByteSlice;
@@ -349,6 +362,11 @@ pub(crate) mod function {
             meta: Option<Attrs>,
         }
 
+        if state.wrote_entry {
+            out.write_all(b",\n")?;
+        } else {
+            state.wrote_entry = true;
+        }
         serde_json::to_writer(
             &mut *out,
             &Entry {
@@ -444,5 +462,87 @@ pub(crate) mod function {
             }
             buf.into()
         })
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod tests {
+    use gix::bstr::ByteSlice;
+
+    use crate::{
+        repository::index::entries::{function::entries, Options},
+        OutputFormat,
+    };
+
+    fn repo_with_two_tracked_files() -> anyhow::Result<(gix::Repository, tempfile::TempDir)> {
+        let dir = tempfile::TempDir::new()?;
+        let repo = gix::init(dir.path())?;
+        let a_id = repo.write_blob("a\n")?.detach();
+        let z_id = repo.write_blob("z\n")?.detach();
+        let tree_id = repo
+            .write_object(gix::objs::TreeRef {
+                entries: vec![
+                    gix::objs::tree::EntryRef {
+                        mode: gix::objs::tree::EntryKind::Blob.into(),
+                        filename: b"a".as_bstr(),
+                        oid: a_id.as_ref(),
+                    },
+                    gix::objs::tree::EntryRef {
+                        mode: gix::objs::tree::EntryKind::Blob.into(),
+                        filename: b"z".as_bstr(),
+                        oid: z_id.as_ref(),
+                    },
+                ],
+            })?
+            .detach();
+        let committer = gix::actor::Signature {
+            name: "Committer".into(),
+            email: "committer@example.com".into(),
+            time: gix::date::parse_header("1 +0000").expect("valid static time"),
+        };
+        let author = gix::actor::Signature {
+            name: "Author".into(),
+            email: "author@example.com".into(),
+            time: gix::date::parse_header("1 +0000").expect("valid static time"),
+        };
+        let mut committer_time = gix::date::parse::TimeBuf::default();
+        let mut author_time = gix::date::parse::TimeBuf::default();
+        repo.commit_as(
+            committer.to_ref(&mut committer_time),
+            author.to_ref(&mut author_time),
+            "HEAD",
+            "initial",
+            tree_id,
+            gix::commit::NO_PARENT_IDS,
+        )?;
+        Ok((repo, dir))
+    }
+
+    #[test]
+    fn json_remains_valid_when_final_index_entry_is_filtered() -> anyhow::Result<()> {
+        let (repo, _keep) = repo_with_two_tracked_files()?;
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        entries(
+            repo,
+            vec![":(exclude)z".into()],
+            &mut out,
+            &mut err,
+            Options {
+                format: OutputFormat::Json,
+                attributes: None,
+                statistics: false,
+                simple: true,
+                recurse_submodules: false,
+            },
+        )?;
+
+        let entries: serde_json::Value = serde_json::from_slice(&out)?;
+        let entries = entries.as_array().expect("top-level array");
+        assert_eq!(entries.len(), 1, "excluded trailing entries don't leave a comma");
+        assert_eq!(entries[0]["path"], "a");
+        assert!(err.is_empty());
+        Ok(())
     }
 }
