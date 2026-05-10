@@ -1389,6 +1389,12 @@ mod conflict {
                 || err_str.contains("Conflict"),
             "error should mention cherry-pick or conflict: {err_str}"
         );
+        let on_disk = MergeState::read_from(&rebase_dir, Kind::Sha1)?;
+        assert_eq!(
+            on_disk.stopped_sha,
+            Some(fix.oid("D")),
+            "conflicting pick should persist stopped-sha"
+        );
 
         Ok(())
     }
