@@ -46,6 +46,8 @@ pub enum Error {
         #[source]
         source: gix_validate::reference::name::Error,
     },
+    #[error("Bundled reference {name:?} points to missing object {id}")]
+    MissingRefObject { name: BString, id: gix_hash::ObjectId },
     #[error(transparent)]
     EditReference(#[from] crate::reference::edit::Error),
     #[error("Could not remove pack keep file at '{}'", path.display())]
@@ -112,6 +114,15 @@ impl crate::Repository {
 
         let mut skipped_refs = Vec::new();
         let mut ref_edits = Vec::new();
+        for bundle_ref in &header.refs {
+            if !self.has_object(bundle_ref.id) {
+                return Err(Error::MissingRefObject {
+                    name: bundle_ref.name.clone(),
+                    id: bundle_ref.id,
+                });
+            }
+        }
+
         for bundle_ref in &header.refs {
             let name =
                 gix_ref::FullName::try_from(bundle_ref.name.clone()).map_err(|source| Error::InvalidRefName {
