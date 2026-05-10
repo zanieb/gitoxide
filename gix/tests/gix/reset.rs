@@ -415,6 +415,37 @@ mod reset {
         Ok(())
     }
 
+    #[test]
+    fn reset_paths_normalizes_current_directory_components() -> crate::Result {
+        let (repo, _tmp) = repo_rw_reset()?;
+        let commits = commit_ids(&repo)?;
+        let c1 = commits[0];
+
+        repo.reset_paths(c1, ["./first"])?;
+
+        let index = repo.open_index()?;
+        let first_entry = index
+            .entries()
+            .iter()
+            .find(|entry| *entry.path(&index) == "first")
+            .expect("first should still be in the index");
+        let c1_commit = repo.find_object(c1)?.try_into_commit().unwrap();
+        let c1_tree_id = c1_commit.tree_id().unwrap();
+        let c1_tree = repo.find_object(c1_tree_id)?.try_into_tree().unwrap();
+        let c1_first_ref = c1_tree
+            .iter()
+            .find(|entry| entry.as_ref().expect("valid").filename() == "first")
+            .unwrap()?;
+
+        assert_eq!(
+            first_entry.id,
+            c1_first_ref.oid(),
+            "reset_paths should treat './first' like 'first'"
+        );
+
+        Ok(())
+    }
+
     /// Ported from t7102: `git reset HEAD -- <path>` removes a file from the index
     /// if the path doesn't exist in the target tree.
     #[test]
@@ -564,13 +595,13 @@ mod reset {
         index.remove_entries(|_, path, _| path.starts_with(b"dir/"));
         index.write(Default::default())?;
 
-        repo.reset_paths(head, ["dir"])?;
+        repo.reset_paths(head, ["./dir/./"])?;
 
         let index = repo.open_index()?;
         let paths: Vec<_> = index.entries().iter().map(|entry| entry.path(&index)).collect();
         assert!(
             paths.contains(&b"dir/a.txt".as_bstr()) && paths.contains(&b"dir/b.txt".as_bstr()),
-            "reset_paths should restore all entries below a directory path"
+            "reset_paths should restore all entries below a normalized directory path"
         );
 
         Ok(())
