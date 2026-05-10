@@ -54,6 +54,8 @@ mod name {
         assert!(Name::from_str("brightdefault").is_err());
         assert!(Name::from_str("").is_err());
         assert!(Name::from_str("bright").is_err());
+        assert!(Name::from_str("bright255").is_err());
+        assert!(Name::from_str("bright#010203").is_err());
         assert!(Name::from_str("256").is_err());
         assert!(Name::from_str("#").is_err());
         assert!(Name::from_str("#fff").is_err());
