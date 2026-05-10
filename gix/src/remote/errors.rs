@@ -1,5 +1,7 @@
 ///
 pub mod find {
+    use std::path::PathBuf;
+
     use crate::{bstr::BString, config, remote};
 
     /// The error returned by [`Repository::find_remote(…)`](crate::Repository::find_remote()).
@@ -22,6 +24,8 @@ pub mod find {
             remote_name: BString,
             source: config::url::Error,
         },
+        #[error("Could not read legacy remote file at {path:?}")]
+        LegacyRemoteFileIo { path: PathBuf, source: std::io::Error },
         #[error(transparent)]
         Init(#[from] remote::init::Error),
     }

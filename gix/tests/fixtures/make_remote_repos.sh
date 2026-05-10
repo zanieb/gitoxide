@@ -148,6 +148,20 @@ git clone --shared base many-fetchspecs
   git config --add remote.origin.fetch HEAD
 )
 
+git clone --shared base legacy-remote-files
+(cd legacy-remote-files
+  git remote remove origin
+  mkdir -p .git/remotes .git/branches
+
+  cat <<EOF >.git/remotes/legacy
+URL: .
+Pull: +refs/heads/*:refs/remotes/legacy/*
+Push: refs/heads/main:refs/heads/main
+EOF
+
+  printf '.#main\n' >.git/branches/branchfile
+)
+
 git clone --shared base branch-push-remote
 (cd branch-push-remote
 
