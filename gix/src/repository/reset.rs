@@ -190,19 +190,7 @@ impl crate::Repository {
 
         // Collect normalized repository-relative paths. An empty path means the
         // entire index, and directory paths match all entries below them.
-        let reset_paths: Vec<Vec<u8>> = paths
-            .into_iter()
-            .map(|p| {
-                let mut path = gix_path::into_bstr(p.as_ref().to_owned()).to_vec();
-                while path.last() == Some(&b'/') {
-                    path.pop();
-                }
-                if path == b"." {
-                    path.clear();
-                }
-                path
-            })
-            .collect();
+        let reset_paths: Vec<Vec<u8>> = paths.into_iter().map(|p| normalize_reset_path(p.as_ref())).collect();
 
         // Build a lookup of target entries by path.
         let target_entries: std::collections::HashMap<Vec<u8>, (gix_hash::ObjectId, gix_index::entry::Mode)> =
@@ -393,4 +381,26 @@ fn path_matches_reset_path(path: &[u8], reset_path: &[u8]) -> bool {
         return true;
     }
     path.get(..reset_path.len()).is_some_and(|prefix| prefix == reset_path) && path.get(reset_path.len()) == Some(&b'/')
+}
+
+fn normalize_reset_path(path: &std::path::Path) -> Vec<u8> {
+    let mut path = gix_path::to_unix_separators_on_windows(gix_path::into_bstr(path.to_owned())).into_owned();
+    while path.last() == Some(&b'/') {
+        path.pop();
+    }
+    if path.is_empty() || path == b"." || path.starts_with(b"/") {
+        return path.into();
+    }
+
+    let mut normalized = Vec::with_capacity(path.len());
+    for component in path.split(|byte| *byte == b'/') {
+        if component.is_empty() || component == b"." {
+            continue;
+        }
+        if !normalized.is_empty() {
+            normalized.push(b'/');
+        }
+        normalized.extend_from_slice(component);
+    }
+    normalized
 }
