@@ -59,8 +59,18 @@ impl MemoryDb {
     }
 
     fn commit_data(tree: ObjectId, message: &str) -> Vec<u8> {
-        format!("tree {tree}\nauthor A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\n{message}\n")
-            .into_bytes()
+        Self::commit_data_with_parents(tree, &[], message)
+    }
+
+    fn commit_data_with_parents(tree: ObjectId, parents: &[ObjectId], message: &str) -> Vec<u8> {
+        let mut data = format!("tree {tree}\n").into_bytes();
+        for parent in parents {
+            data.extend_from_slice(format!("parent {parent}\n").as_bytes());
+        }
+        data.extend_from_slice(
+            format!("author A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\n{message}\n").as_bytes(),
+        );
+        data
     }
 
     fn tree_data(mode: &str, filename: &str, oid: ObjectId) -> Vec<u8> {
@@ -215,6 +225,74 @@ fn reachability_paths_describe_the_first_route_to_objects() {
     check.check_commit(&commit_id).expect("seen commit is skipped");
     let commit_path: &[u8] = check.path_to(&commit_id).expect("first commit path retained").as_ref();
     assert_eq!(commit_path, format!("tag {tag_id} -> commit {commit_id}").as_bytes());
+}
+
+#[test]
+fn commit_roots_report_missing_parents() {
+    let mut db = MemoryDb::default();
+    let tree_id = db.insert(Kind::Tree, Vec::new());
+    let missing_parent_id = hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let commit_id = db.insert(
+        Kind::Commit,
+        MemoryDb::commit_data_with_parents(tree_id, &[missing_parent_id], "child"),
+    );
+
+    let mut missing = HashMap::default();
+    let mut check = Connectivity::new(&db, |oid: &ObjectId, kind: Kind| {
+        missing.insert(*oid, kind);
+    });
+    check.check_commit(&commit_id).expect("commit itself is present");
+
+    let parent_path = {
+        let parent_path: &[u8] = check
+            .path_to(&missing_parent_id)
+            .expect("parent path recorded")
+            .as_ref();
+        parent_path.to_owned()
+    };
+    drop(check);
+
+    assert_eq!(missing, [(missing_parent_id, Kind::Commit)].into_iter().collect());
+    assert_eq!(
+        parent_path.as_slice(),
+        format!("commit {commit_id} -> parent {missing_parent_id}").as_bytes()
+    );
+}
+
+#[test]
+fn shallow_commit_roots_skip_parent_traversal_but_still_check_trees() {
+    let mut db = MemoryDb::default();
+    let missing_blob_id = hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let missing_parent_id = hex_to_id("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "file", missing_blob_id));
+    let commit_id = db.insert(
+        Kind::Commit,
+        MemoryDb::commit_data_with_parents(tree_id, &[missing_parent_id], "shallow"),
+    );
+    let is_shallow_commit = |id: &ObjectId| *id == commit_id;
+
+    let mut missing = HashMap::default();
+    let mut check = Connectivity::new(&db, |oid: &ObjectId, kind: Kind| {
+        missing.insert(*oid, kind);
+    });
+    check
+        .check_commit_with_options(
+            &commit_id,
+            Options {
+                skip_commit_parents: Some(&is_shallow_commit),
+                ..Options::default()
+            },
+        )
+        .expect("shallow boundary commit itself is present");
+
+    let parent_was_seen = check.path_to(&missing_parent_id).is_some();
+    drop(check);
+
+    assert_eq!(missing, [(missing_blob_id, Kind::Blob)].into_iter().collect());
+    assert!(
+        !parent_was_seen,
+        "shallow-boundary parents are intentionally not traversed"
+    );
 }
 
 #[test]

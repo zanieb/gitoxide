@@ -38,6 +38,10 @@ pub struct Options<'a> {
     pub validate_tree_order: bool,
     /// If true, report tree entries whose modes are not canonical Git tree modes.
     pub validate_tree_modes: bool,
+    /// If set, commit parents are not traversed when this predicate returns true for the commit id.
+    ///
+    /// Use this for shallow boundary commits, whose parents are intentionally absent.
+    pub skip_commit_parents: Option<&'a dyn Fn(&ObjectId) -> bool>,
 }
 
 impl Options<'_> {
@@ -201,11 +205,10 @@ where
     ///
     /// ### Algorithm
     ///
-    /// Walk the trees and blobs referenced by the commit and verify they exist in the ODB.
+    /// Walk the parents, trees, and blobs referenced by the commit and verify they exist in the ODB.
     /// Any objects previously encountered by this instance will be skipped silently.
-    /// Any referenced blobs that are not present in the ODB will result in a call to the  `missing_cb`.
-    /// Missing commits or trees will cause an error to be returned.
-    ///     - TODO: consider how to handle a missing commit (invoke `missing_cb`, or possibly return a Result?)
+    /// Any referenced blobs or parent commits that are not present in the ODB will result in a call to the `missing_cb`.
+    /// Missing root commits, malformed objects, or referenced objects with the wrong kind cause an error to be returned.
     pub fn check_commit(&mut self, oid: &ObjectId) -> Result<(), existing_object::Error> {
         match self.check_commit_with_options(oid, Options::default()) {
             Ok(()) => Ok(()),
@@ -231,16 +234,32 @@ where
         if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
             return Ok(());
         }
-        // Obtain the commit's tree ID
-        let tree_id = {
+        // Obtain the commit's tree ID and parent IDs.
+        let skip_parents = options
+            .skip_commit_parents
+            .map(|skip_commit_parents| skip_commit_parents(oid))
+            .unwrap_or_default();
+        let (tree_id, parent_ids) = {
             let object = find_existing_object(&self.db, oid, &mut self.buf, Kind::Commit, options)?;
             match decode_object(object, oid)? {
-                ObjectRef::Commit(commit) => commit.tree(),
+                ObjectRef::Commit(commit) => (commit.tree(), commit.parents().collect::<Vec<_>>()),
                 _ => unreachable!("find_existing_object validates the object kind"),
             }
         };
 
-        self.check_tree_id_at(&tree_id, options, child_path(&path, "tree", &tree_id))
+        self.check_tree_id_at(&tree_id, options, child_path(&path, "tree", &tree_id))?;
+
+        if !skip_parents {
+            for parent_id in parent_ids {
+                self.check_referenced_object_at(
+                    &parent_id,
+                    Kind::Commit,
+                    options,
+                    child_path(&path, "parent", &parent_id),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Run the connectivity check on the provided annotated tag `oid`.
