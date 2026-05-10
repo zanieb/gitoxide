@@ -127,7 +127,7 @@ impl crate::Repository {
         if mode == ResetMode::Hard {
             // Remove files from the working tree that are in the old index but not the new one.
             if let Some(old_idx) = &old_index {
-                Self::remove_worktree_files_not_in_index(old_idx, &index, &workdir, false);
+                Self::remove_worktree_files_not_in_index(old_idx, &index, &workdir, true);
             }
             // Check out all files from the new index into the working tree
             self.checkout_index_to_worktree_impl(&mut index, &workdir)?;

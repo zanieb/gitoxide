@@ -63,9 +63,9 @@ impl crate::Repository {
     /// This handles the case where a reset/checkout moves to a tree that no longer
     /// contains files present in the current tree -- those files need to be deleted.
     ///
-    /// When `check_path_traversal` is `true`, paths containing `..` components are
-    /// skipped to prevent deleting files outside the worktree (security mitigation
-    /// for crafted tree entries, similar to CVE-2018-11235).
+    /// When `check_path_traversal` is `true`, paths containing `..` or absolute path
+    /// components are skipped to prevent deleting files outside the worktree
+    /// (security mitigation for crafted tree/index entries, similar to CVE-2018-11235).
     ///
     /// Errors from removing individual files are intentionally ignored, matching
     /// git's behavior.
@@ -96,9 +96,14 @@ impl crate::Repository {
 
             let os_path = gix_path::from_bstr(path);
             if check_path_traversal
-                && os_path
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir))
+                && os_path.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
             {
                 continue;
             }
