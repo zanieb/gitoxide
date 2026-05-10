@@ -118,6 +118,7 @@ pub fn file_with_progress(
         commit_id: suspect,
     })?;
     let head_blob: Vec<u8> = odb.find_blob(&blamed_file_entry_id, &mut buf)?.data.to_vec();
+    let null_blob_id = ObjectId::null(blamed_file_entry_id.kind());
 
     // If worktree_blob is provided, use it as the blamed file and diff against the HEAD blob
     // to attribute worktree changes to a virtual "uncommitted" entry.
@@ -260,8 +261,8 @@ pub fn file_with_progress(
                         source_file_path: current_file_path.clone(),
                         previous_source_file_path: None,
                         commit_id: suspect,
-                        blob_id: entry.unwrap_or(ObjectId::null(suspect.kind())),
-                        previous_blob_id: ObjectId::null(suspect.kind()),
+                        blob_id: entry.unwrap_or(null_blob_id),
+                        previous_blob_id: null_blob_id,
                         parent_index: 0,
                     };
                     blame_path.push(blame_path_entry);
@@ -395,13 +396,12 @@ pub fn file_with_progress(
                         // it was modified, not added.
                     } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
                         if let Some(ref mut blame_path) = blame_path {
-                            let null_id = ObjectId::null(id.kind());
                             let blame_path_entry = BlamePathEntry {
                                 source_file_path: current_file_path.clone(),
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: id,
-                                previous_blob_id: null_id,
+                                previous_blob_id: null_blob_id,
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
@@ -417,13 +417,12 @@ pub fn file_with_progress(
                         // looking at other parents before attributing it to the merge commit.
                     } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
                         if let Some(ref mut blame_path) = blame_path {
-                            let null_id = ObjectId::null(entry_id.kind());
                             let blame_path_entry = BlamePathEntry {
                                 source_file_path: current_file_path.clone(),
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: entry_id,
-                                previous_blob_id: null_id,
+                                previous_blob_id: null_blob_id,
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
