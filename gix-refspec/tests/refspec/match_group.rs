@@ -318,6 +318,38 @@ mod push {
         assert!(outcome.deletions.is_empty());
     }
 
+    #[test]
+    fn duplicate_push_specs_keep_first_mapping() {
+        let local = [new_ref("refs/heads/main", "1111111111111111111111111111111111111111")];
+        let remote = [new_ref("refs/heads/main", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")];
+        let specs = parse_specs(["main", "refs/heads/main:refs/heads/main"]);
+        let outcome = group(&specs).match_push(items(&local), items(&remote));
+
+        assert_eq!(
+            outcome.updates,
+            [update(0, Some(0), "refs/heads/main", "refs/heads/main", 0, false)],
+            "the second refspec maps the same source and destination and should be ignored"
+        );
+        assert!(outcome.deletions.is_empty());
+    }
+
+    #[test]
+    fn duplicate_delete_specs_keep_first_mapping() {
+        let remote = [new_ref(
+            "refs/heads/obsolete",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )];
+        let specs = parse_specs([":obsolete", ":refs/heads/obsolete"]);
+        let outcome = group(&specs).match_push(std::iter::empty(), items(&remote));
+
+        assert!(outcome.updates.is_empty());
+        assert_eq!(
+            outcome.deletions,
+            [deletion(Some(0), "refs/heads/obsolete", 0)],
+            "duplicate deletions should not ask the remote to delete the same ref twice"
+        );
+    }
+
     fn parse_specs(specs: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<RefSpec> {
         specs
             .into_iter()
