@@ -4,7 +4,7 @@ use crate::{fixture_oid, tree_fixture};
 
 #[test]
 fn empty() -> crate::Result {
-    let tree_ref = TreeRef::from_bytes(&[], gix_testtools::object_hash())?;
+    let tree_ref = TreeRef::from_bytes_with_hash(&[], gix_testtools::object_hash())?;
     assert_eq!(
         tree_ref,
         TreeRef { entries: vec![] },
@@ -25,7 +25,7 @@ fn empty() -> crate::Result {
 fn everything() -> crate::Result {
     let fixture = tree_fixture("everything.tree")?;
     let hash_kind = crate::fixture_hash_kind();
-    let tree_ref = TreeRef::from_bytes(&fixture, hash_kind)?;
+    let tree_ref = TreeRef::from_bytes_with_hash(&fixture, hash_kind)?;
     assert_eq!(
         tree_ref,
         TreeRef {
@@ -66,9 +66,9 @@ fn invalid() {
     let fixture = tree_fixture("definitely-special.tree").expect("fixture is valid");
     let partial_tree = &fixture[..fixture.len() / 2];
     let hash_kind = crate::fixture_hash_kind();
-    assert!(TreeRef::from_bytes(partial_tree, hash_kind).is_err());
+    assert!(TreeRef::from_bytes_with_hash(partial_tree, hash_kind).is_err());
     assert!(
-        TreeRefIter::from_bytes(partial_tree, hash_kind)
+        TreeRefIter::from_bytes_with_hash(partial_tree, hash_kind)
             .take_while(Result::is_ok)
             .count()
             > 0,
@@ -79,7 +79,7 @@ fn invalid() {
 #[test]
 fn fuzzed() {
     assert!(
-        gix_object::TreeRef::from_bytes(b"2", gix_testtools::object_hash()).is_err(),
+        gix_object::TreeRef::from_bytes_with_hash(b"2", gix_testtools::object_hash()).is_err(),
         "fail, but don't crash"
     );
 }
@@ -88,8 +88,8 @@ fn fuzzed() {
 fn fuzz_artifact_inputs_can_be_parsed_without_panicking() {
     for path in crate::fuzz_artifact_paths("fuzz_tree") {
         let input = std::fs::read(path).expect("artifact is readable");
-        _ = TreeRef::from_bytes(&input, gix_hash::Kind::Sha1);
-        _ = TreeRef::from_bytes(&input, gix_hash::Kind::Sha256);
+        _ = TreeRef::from_bytes_with_hash(&input, gix_hash::Kind::Sha1);
+        _ = TreeRef::from_bytes_with_hash(&input, gix_hash::Kind::Sha256);
     }
 }
 
@@ -106,10 +106,10 @@ fn special_trees() -> crate::Result {
         ("special-5", 17),
     ] {
         let fixture = tree_fixture(&format!("{name}.tree"))?;
-        let actual = TreeRef::from_bytes(&fixture, hash_kind)?;
+        let actual = TreeRef::from_bytes_with_hash(&fixture, hash_kind)?;
         assert_eq!(actual.entries.len(), expected_entry_count, "{name}");
         assert_eq!(
-            TreeRefIter::from_bytes(&fixture, hash_kind).map(Result::unwrap).count(),
+            TreeRefIter::from_bytes_with_hash(&fixture, hash_kind).map(Result::unwrap).count(),
             expected_entry_count,
             "{name}"
         );

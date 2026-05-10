@@ -87,7 +87,7 @@ impl gix_object::Find for MemoryDb {
         Ok(self.objects.get(id).map(|(kind, data)| {
             buffer.clear();
             buffer.extend_from_slice(data);
-            Data::new(*kind, buffer)
+            Data::new_with_hash(*kind, buffer, id.kind())
         }))
     }
 }

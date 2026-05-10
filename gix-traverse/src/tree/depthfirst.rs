@@ -53,6 +53,7 @@ pub(super) mod function {
             Iterate {
                 tree_buf: Vec<u8>,
                 byte_offset_to_next_entry: usize,
+                object_hash: gix_hash::Kind,
             },
         }
 
@@ -66,13 +67,15 @@ pub(super) mod function {
                     stack.push(Machine::Iterate {
                         tree_buf: buf,
                         byte_offset_to_next_entry: 0,
+                        object_hash: id.kind(),
                     });
                 }
                 Machine::Iterate {
                     tree_buf: buf,
                     byte_offset_to_next_entry,
+                    object_hash,
                 } => {
-                    let mut iter = TreeRefIter::from_bytes(&buf[byte_offset_to_next_entry..], root.kind());
+                    let mut iter = TreeRefIter::from_bytes_with_hash(&buf[byte_offset_to_next_entry..], object_hash);
                     delegate.pop_back_tracked_path_and_set_current();
                     while let Some(entry) = iter.next() {
                         let entry = entry?;
@@ -92,6 +95,7 @@ pub(super) mod function {
                             let continue_at_next_entry = Machine::Iterate {
                                 byte_offset_to_next_entry: iter.offset_to_next_entry(&buf),
                                 tree_buf: buf,
+                                object_hash,
                             };
                             stack.push(continue_at_next_entry);
                             stack.push(recurse_tree);

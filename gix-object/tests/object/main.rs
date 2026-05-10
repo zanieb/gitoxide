@@ -141,7 +141,8 @@ pub fn tree_fixture(path: &str) -> Result<Vec<u8>> {
     match fixture_hash_kind() {
         gix_hash::Kind::Sha1 => Ok(fixture),
         kind => {
-            let mut tree: gix_object::Tree = gix_object::TreeRef::from_bytes(&fixture, gix_hash::Kind::Sha1)?.into();
+            let mut tree: gix_object::Tree =
+                gix_object::TreeRef::from_bytes_with_hash(&fixture, gix_hash::Kind::Sha1)?.into();
             for entry in &mut tree.entries {
                 entry.oid = translate_fixture_oid(entry.oid, kind);
             }

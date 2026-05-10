@@ -887,10 +887,10 @@ where
     T: Find,
 {
     if *oid == ObjectId::empty_tree(oid.kind()) {
-        return Ok(Some(Data::new(Kind::Tree, &[])));
+        return Ok(Some(Data::new_with_hash(Kind::Tree, &[], oid.kind())));
     }
     if *oid == ObjectId::empty_blob(oid.kind()) {
-        return Ok(Some(Data::new(Kind::Blob, &[])));
+        return Ok(Some(Data::new_with_hash(Kind::Blob, &[], oid.kind())));
     }
 
     let Some(object) = db.try_find(oid, buf).map_err(existing_object::Error::Find)? else {
@@ -918,7 +918,7 @@ where
         Kind::Commit | Kind::Tag => None,
     };
     if expected_empty_id.as_ref().is_some_and(|empty_id| empty_id == oid) {
-        return Ok(Some(Data::new(expected, &[])));
+        return Ok(Some(Data::new_with_hash(expected, &[], oid.kind())));
     }
 
     let Some(object) = db.try_find(oid, buf).map_err(existing_object::Error::Find)? else {

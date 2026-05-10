@@ -38,7 +38,7 @@ where
         return ControlFlow::Break(None);
     };
 
-    let Some(entry) = TreeRefIter::from_bytes(tree.data, tree.object_hash)
+    let Some(entry) = TreeRefIter::from_bytes_with_hash(tree.data, tree.object_hash)
         .filter_map(Result::ok)
         .find(|entry| component.eq(entry.filename))
     else {
@@ -53,9 +53,17 @@ where
 }
 
 impl<'a> TreeRefIter<'a> {
-    /// Instantiate an iterator from the given tree `data` and `object_hash`.
-    pub fn from_bytes(data: &'a [u8], hash_kind: gix_hash::Kind) -> TreeRefIter<'a> {
-        TreeRefIter { data, hash_kind }
+    /// Instantiate an iterator from tree data using the shortest supported hash kind.
+    ///
+    /// Use [`TreeRefIter::from_bytes_with_hash()`] when parsing tree data from a repository
+    /// that can use a different object hash.
+    pub fn from_bytes(data: &'a [u8]) -> TreeRefIter<'a> {
+        TreeRefIter::from_bytes_with_hash(data, gix_hash::Kind::shortest())
+    }
+
+    /// Instantiate an iterator from the given tree data and the hash kind used by its embedded object ids.
+    pub fn from_bytes_with_hash(data: &'a [u8], object_hash: gix_hash::Kind) -> TreeRefIter<'a> {
+        TreeRefIter { data, object_hash }
     }
 
     /// Follow a sequence of `path` components starting from this instance, and look them up in `odb` one by one using `buffer`
@@ -80,7 +88,7 @@ impl<'a> TreeRefIter<'a> {
         buffer.extend_from_slice(self.data);
 
         let mut iter = path.into_iter().peekable();
-        let mut data = crate::Data::new(buffer, crate::Kind::Tree, self.hash_kind);
+        let mut data = crate::Data::new_with_hash(crate::Kind::Tree, buffer, self.object_hash);
 
         loop {
             data = match next_entry(&mut iter, data) {
@@ -121,9 +129,20 @@ impl<'a> TreeRefIter<'a> {
 }
 
 impl<'a> TreeRef<'a> {
-    /// Deserialize a Tree from `data`, assuming `object_hash` to determine how the object ids are encoded in this particular tree.
-    pub fn from_bytes(data: &'a [u8], hash_kind: gix_hash::Kind) -> Result<TreeRef<'a>, crate::decode::Error> {
-        decode::tree(data, hash_kind.len_in_bytes())
+    /// Deserialize a Tree from `data` using the shortest supported hash kind.
+    ///
+    /// Use [`TreeRef::from_bytes_with_hash()`] when parsing tree data from a repository
+    /// that can use a different object hash.
+    pub fn from_bytes(data: &'a [u8]) -> Result<TreeRef<'a>, crate::decode::Error> {
+        TreeRef::from_bytes_with_hash(data, gix_hash::Kind::shortest())
+    }
+
+    /// Deserialize a Tree from `data`, using `object_hash` for embedded object ids.
+    pub fn from_bytes_with_hash(
+        data: &'a [u8],
+        object_hash: gix_hash::Kind,
+    ) -> Result<TreeRef<'a>, crate::decode::Error> {
+        decode::tree(data, object_hash.len_in_bytes())
     }
 
     /// Find an entry named `name` knowing if the entry is a directory or not, using a binary search.
@@ -185,7 +204,7 @@ impl<'a> Iterator for TreeRefIter<'a> {
         if self.data.is_empty() {
             return None;
         }
-        match decode::fast_entry(self.data, self.hash_kind.len_in_bytes()) {
+        match decode::fast_entry(self.data, self.object_hash.len_in_bytes()) {
             Some((data_left, entry)) => {
                 self.data = data_left;
                 Some(Ok(entry))

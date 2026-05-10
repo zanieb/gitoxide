@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kind = Kind::from_bytes(kind.to_string_lossy().as_bytes())?;
     let data = std::fs::read(path)?;
 
-    match ObjectRef::from_bytes(kind, &data)? {
+    match ObjectRef::from_bytes_with_hash(kind, &data, gix_hash::Kind::Sha1)? {
         ObjectRef::Blob(blob) => println!("blob: {} bytes", blob.data.len()),
         ObjectRef::Tree(tree) => println!("tree: {} entries", tree.entries.len()),
         ObjectRef::Commit(commit) => {

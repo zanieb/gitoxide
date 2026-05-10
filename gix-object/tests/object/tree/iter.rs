@@ -10,7 +10,7 @@ use crate::{fixture_hash_kind, fixture_oid, tree_fixture};
 #[test]
 fn empty() {
     assert_eq!(
-        TreeRefIter::from_bytes(&[], gix_testtools::object_hash()).count(),
+        TreeRefIter::from_bytes_with_hash(&[], gix_testtools::object_hash()).count(),
         0,
         "empty trees are definitely ok"
     );
@@ -19,7 +19,7 @@ fn empty() {
 #[test]
 fn error_handling() {
     let data = tree_fixture("everything.tree").expect("fixture is valid");
-    let iter = TreeRefIter::from_bytes(&data[..data.len() / 2], fixture_hash_kind());
+    let iter = TreeRefIter::from_bytes_with_hash(&data[..data.len() / 2], fixture_hash_kind());
     let entries = iter.collect::<Vec<_>>();
     assert!(
         entries.last().expect("at least one token").is_err(),
@@ -31,14 +31,14 @@ fn error_handling() {
 fn offset_to_next_entry() {
     let hash_kind = fixture_hash_kind();
     let buf = tree_fixture("everything.tree").expect("fixture is valid");
-    let mut iter = TreeRefIter::from_bytes(&buf, hash_kind);
+    let mut iter = TreeRefIter::from_bytes_with_hash(&buf, hash_kind);
     assert_eq!(iter.offset_to_next_entry(&buf), 0, "first entry is always at 0");
     iter.next();
 
     let actual = iter.offset_to_next_entry(&buf);
     assert_eq!(actual, 11 + hash_kind.len_in_bytes(), "now the offset increases");
     assert_eq!(
-        TreeRefIter::from_bytes(&buf[actual..], hash_kind)
+        TreeRefIter::from_bytes_with_hash(&buf[actual..], hash_kind)
             .next()
             .map(|e| e.unwrap().filename),
         iter.next().map(|e| e.unwrap().filename),
@@ -49,7 +49,7 @@ fn offset_to_next_entry() {
 #[test]
 fn everything() -> crate::Result {
     assert_eq!(
-        TreeRefIter::from_bytes(&tree_fixture("everything.tree")?, fixture_hash_kind())
+        TreeRefIter::from_bytes_with_hash(&tree_fixture("everything.tree")?, fixture_hash_kind())
             .collect::<Result<Vec<_>, _>>()?,
         vec![
             EntryRef {
@@ -89,7 +89,7 @@ fn leading_space_in_tree_name() -> crate::Result {
     buf.extend_from_slice(oid.as_bytes());
 
     assert_eq!(
-        TreeRefIter::from_bytes(&buf, fixture_hash_kind()).collect::<Result<Vec<_>, _>>()?,
+        TreeRefIter::from_bytes_with_hash(&buf, fixture_hash_kind()).collect::<Result<Vec<_>, _>>()?,
         vec![EntryRef {
             mode: tree::EntryKind::Tree.into(),
             filename: b" leading space".as_bstr(),
@@ -99,17 +99,46 @@ fn leading_space_in_tree_name() -> crate::Result {
     Ok(())
 }
 
+#[cfg(feature = "sha256")]
+#[test]
+fn sha256_entries_use_the_configured_hash_length() -> crate::Result {
+    let id = gix_hash::ObjectId::empty_blob(gix_hash::Kind::Sha256);
+    let mut data = b"100644 file\0".to_vec();
+    data.extend_from_slice(id.as_slice());
+
+    let mut iter = TreeRefIter::from_bytes_with_hash(&data, gix_hash::Kind::Sha256);
+    let entry = iter.next().expect("one entry")?;
+    assert_eq!(entry.filename, b"file".as_bstr());
+    assert_eq!(entry.oid, id.as_ref());
+    assert!(iter.next().is_none());
+
+    assert_eq!(
+        gix_object::TreeRef::from_bytes_with_hash(&data, gix_hash::Kind::Sha256)?.entries[0].oid,
+        id.as_ref()
+    );
+
+    let mut default_sha1_iter = TreeRefIter::from_bytes_with_hash(&data, gix_hash::Kind::Sha1);
+    assert!(default_sha1_iter.next().expect("sha1-sized prefix is parsed").is_ok());
+    assert!(
+        default_sha1_iter
+            .next()
+            .expect("remaining sha256 bytes are malformed as sha1 tree data")
+            .is_err(),
+        "the legacy constructor must not silently guess SHA-256"
+    );
+
+    Ok(())
+}
+
 mod lookup_entry {
     use gix_object::tree::EntryKind;
-    use utils::entry;
-
-    use crate::fixture_hash_kind;
+    use utils::{empty_blob_id, entry};
 
     #[test]
     fn top_level_directory() -> crate::Result {
         assert_eq!(
             utils::lookup_entry_by_path("bin")?,
-            entry("bin", EntryKind::Blob, fixture_hash_kind().empty_blob())
+            entry("bin", EntryKind::Blob, empty_blob_id())
         );
         Ok(())
     }
@@ -118,7 +147,7 @@ mod lookup_entry {
     fn nested_file() -> crate::Result {
         assert_eq!(
             utils::lookup_entry_by_path("file/a")?,
-            entry("a", EntryKind::Blob, fixture_hash_kind().empty_blob())
+            entry("a", EntryKind::Blob, empty_blob_id())
         );
         Ok(())
     }
@@ -155,6 +184,10 @@ mod lookup_entry {
                     ..Default::default()
                 },
             )?)
+        }
+
+        pub(super) fn empty_blob_id() -> gix_hash::ObjectId {
+            crate::fixture_hash_kind().empty_blob()
         }
 
         pub(super) fn lookup_entry_by_path(path: &str) -> gix_testtools::Result<Option<gix_object::tree::Entry>> {

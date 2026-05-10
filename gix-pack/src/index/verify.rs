@@ -245,13 +245,11 @@ where
             use gix_object::Kind::*;
             match object_kind {
                 Tree | Commit | Tag => {
-                    let object =
-                        gix_object::ObjectRef::from_bytes(buf, object_kind, index_entry.oid.kind()).map_err(|err| {
-                            integrity::Error::ObjectDecode {
-                                source: err,
-                                kind: object_kind,
-                                id: index_entry.oid,
-                            }
+                    let object = gix_object::ObjectRef::from_bytes_with_hash(object_kind, buf, index_entry.oid.kind())
+                        .map_err(|err| integrity::Error::ObjectDecode {
+                            source: err,
+                            kind: object_kind,
+                            id: index_entry.oid,
                         })?;
                     if let Mode::HashCrc32DecodeEncode = verify_mode {
                         encode_buf.clear();

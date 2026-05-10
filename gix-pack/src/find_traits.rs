@@ -147,11 +147,58 @@ mod ext {
         }
 
         make_obj_lookup!(find_commit, ObjectRef::Commit, Kind::Commit, CommitRef<'a>);
-        make_obj_lookup!(find_tree, ObjectRef::Tree, Kind::Tree, TreeRef<'a>);
         make_obj_lookup!(find_tag, ObjectRef::Tag, Kind::Tag, TagRef<'a>);
         make_obj_lookup!(find_blob, ObjectRef::Blob, Kind::Blob, BlobRef<'a>);
-        make_iter_lookup!(find_commit_iter, Kind::Blob, CommitRefIter<'a>, try_into_commit_iter);
-        make_iter_lookup!(find_tree_iter, Kind::Tree, TreeRefIter<'a>, try_into_tree_iter);
+        make_iter_lookup!(find_commit_iter, Kind::Commit, CommitRefIter<'a>, try_into_commit_iter);
+
+        /// Like [`find(…)`][Self::find()], but flattens the `Result<Option<_>>` into a single `Result` making a non-existing object an error
+        /// while returning the desired tree object.
+        fn find_tree<'a>(
+            &self,
+            id: &gix_hash::oid,
+            buffer: &'a mut Vec<u8>,
+        ) -> Result<(TreeRef<'a>, Option<crate::data::entry::Location>), gix_object::find::existing_object::Error>
+        {
+            self.try_find(id, buffer)
+                .map_err(gix_object::find::existing_object::Error::Find)?
+                .ok_or_else(|| gix_object::find::existing_object::Error::NotFound { oid: id.to_owned() })
+                .and_then(|(o, l)| match o {
+                    gix_object::Data { kind: Kind::Tree, data, .. } => TreeRef::from_bytes_with_hash(data, id.kind())
+                        .map(|tree| (tree, l))
+                        .map_err(|err| gix_object::find::existing_object::Error::Decode {
+                            source: err,
+                            oid: id.to_owned(),
+                        }),
+                    o => Err(gix_object::find::existing_object::Error::ObjectKind {
+                        oid: id.to_owned(),
+                        actual: o.kind,
+                        expected: Kind::Tree,
+                    }),
+                })
+        }
+
+        /// Like [`find(…)`][Self::find()], but flattens the `Result<Option<_>>` into a single `Result` making a non-existing object an error
+        /// while returning the desired tree iterator.
+        fn find_tree_iter<'a>(
+            &self,
+            id: &gix_hash::oid,
+            buffer: &'a mut Vec<u8>,
+        ) -> Result<(TreeRefIter<'a>, Option<crate::data::entry::Location>), gix_object::find::existing_iter::Error>
+        {
+            self.try_find(id, buffer)
+                .map_err(gix_object::find::existing_iter::Error::Find)?
+                .ok_or_else(|| gix_object::find::existing_iter::Error::NotFound { oid: id.to_owned() })
+                .and_then(|(o, l)| {
+                    o.try_into_tree_iter_with_hash(id.kind())
+                        .ok_or_else(|| gix_object::find::existing_iter::Error::ObjectKind {
+                            oid: id.to_owned(),
+                            actual: o.kind,
+                            expected: Kind::Tree,
+                        })
+                        .map(|i| (i, l))
+                })
+        }
+
         make_iter_lookup!(find_tag_iter, Kind::Tag, TagRefIter<'a>, try_into_tag_iter);
     }
 

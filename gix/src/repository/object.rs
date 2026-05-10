@@ -315,7 +315,7 @@ impl crate::Repository {
     }
 
     fn validate_object_references(&self, kind: gix_object::Kind, buf: &[u8]) -> Result<(), object::write::Error> {
-        let object = gix_object::Data::new(kind, buf)
+        let object = gix_object::Data::new_with_hash(kind, buf, self.object_hash())
             .decode()
             .map_err(|err| Box::new(err) as Box<dyn std::error::Error + Send + Sync + 'static>)?;
         match object {

@@ -53,7 +53,7 @@ macro_rules! round_trip_with_hash_kind {
                     let w = &mut output;
                     w.write_all(&item.loose_header())?;
                     item.write_to(w)?;
-                    let parsed = ObjectRef::from_loose(&output, hash_kind)?;
+                    let parsed = ObjectRef::from_loose_with_hash(&output, hash_kind)?;
                     let item2 = <$borrowed>::try_from(parsed).or(Err(super::Error::TryFromError))?;
                     assert_eq!(item2, item, "object-ref loose: {input_name} {:?}\n{:?}", output.as_bstr(), input.as_bstr());
                 }
@@ -64,7 +64,7 @@ macro_rules! round_trip_with_hash_kind {
                 let w = &mut output;
                 w.write_all(&item.loose_header())?;
                 item.write_to(w)?;
-                let parsed = ObjectRef::from_loose(&output, hash_kind)?;
+                let parsed = ObjectRef::from_loose_with_hash(&output, hash_kind)?;
                 let parsed_borrowed = <$borrowed>::try_from(parsed).or(Err(super::Error::TryFromError))?;
                 let item2: $owned = parsed_borrowed.try_into().or(Err(super::Error::TryFromError))?;
                 assert_eq!(item2, item, "object-ref loose owned: {input_name} {:?}\n{:?}", output.as_bstr(), input.as_bstr());
@@ -186,7 +186,7 @@ mod blob {
             let w = &mut output;
             w.write_all(&item.loose_header())?;
             item.write_to(w)?;
-            let parsed = ObjectRef::from_loose(&output, gix_testtools::object_hash())?;
+            let parsed = ObjectRef::from_loose_with_hash(&output, gix_testtools::object_hash())?;
             let item2 = BlobRef::try_from(parsed).or(Err(super::Error::TryFromError))?;
             assert_eq!(
                 item2,
@@ -202,7 +202,7 @@ mod blob {
         let w = &mut output;
         w.write_all(&item.loose_header())?;
         item.write_to(w)?;
-        let parsed = ObjectRef::from_loose(&output, gix_testtools::object_hash())?;
+        let parsed = ObjectRef::from_loose_with_hash(&output, gix_testtools::object_hash())?;
         let parsed_borrowed = BlobRef::try_from(parsed).or(Err(super::Error::TryFromError))?;
         let item2: Blob = parsed_borrowed.into();
         assert_eq!(

@@ -191,7 +191,7 @@ pub enum LooseDecodeError {
 
 impl<'a> ObjectRef<'a> {
     /// Deserialize an object from a loose serialisation given `data`, parsing with the provided `object_hash`.
-    pub fn from_loose(data: &'a [u8], hash_kind: gix_hash::Kind) -> Result<ObjectRef<'a>, LooseDecodeError> {
+    pub fn from_loose(data: &'a [u8], object_hash: gix_hash::Kind) -> Result<ObjectRef<'a>, LooseDecodeError> {
         let (kind, size, offset) = loose_header(data)?;
 
         let body = &data[offset..]
@@ -200,21 +200,38 @@ impl<'a> ObjectRef<'a> {
                 message: "object data was shorter than its size declared in the header",
             })?;
 
-        Ok(Self::from_bytes(body, kind, hash_kind)?)
+        Ok(Self::from_bytes_with_hash(kind, body, object_hash)?)
+    }
+
+    /// Deserialize an object from a loose serialisation, using `object_hash` for embedded object ids.
+    pub fn from_loose_with_hash(
+        data: &'a [u8],
+        object_hash: gix_hash::Kind,
+    ) -> Result<ObjectRef<'a>, LooseDecodeError> {
+        Self::from_loose(data, object_hash)
     }
 
     /// Deserialize an object of `kind` from the given `data`, using `object_hash`.
     pub fn from_bytes(
         data: &'a [u8],
         kind: Kind,
-        hash_kind: gix_hash::Kind,
+        object_hash: gix_hash::Kind,
     ) -> Result<ObjectRef<'a>, crate::decode::Error> {
         Ok(match kind {
-            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes(data, hash_kind)?),
+            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes(data, object_hash)?),
             Kind::Blob => ObjectRef::Blob(BlobRef { data }),
-            Kind::Commit => ObjectRef::Commit(CommitRef::from_bytes(data, hash_kind)?),
-            Kind::Tag => ObjectRef::Tag(TagRef::from_bytes(data, hash_kind)?),
+            Kind::Commit => ObjectRef::Commit(CommitRef::from_bytes(data, object_hash)?),
+            Kind::Tag => ObjectRef::Tag(TagRef::from_bytes(data, object_hash)?),
         })
+    }
+
+    /// Deserialize an object of `kind` from the given `data`, using `object_hash` for embedded object ids.
+    pub fn from_bytes_with_hash(
+        kind: Kind,
+        data: &'a [u8],
+        object_hash: gix_hash::Kind,
+    ) -> Result<ObjectRef<'a>, crate::decode::Error> {
+        Self::from_bytes(data, kind, object_hash)
     }
 
     /// Convert the immutable object into a mutable version, consuming the source in the process.

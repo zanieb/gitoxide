@@ -5,7 +5,7 @@ fn sort_order_is_correct() -> crate::Result {
     let root = gix_testtools::scripted_fixture_read_only("make_trees.sh")?;
     let input = std::fs::read(root.join("tree.baseline"))?;
 
-    let mut tree = TreeRef::from_bytes(&input, gix_testtools::object_hash())?;
+    let mut tree = TreeRef::from_bytes_with_hash(&input, gix_testtools::object_hash())?;
     let expected = tree.entries.clone();
 
     tree.entries.sort();

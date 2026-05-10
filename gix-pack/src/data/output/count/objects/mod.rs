@@ -204,7 +204,7 @@ mod expand {
                                     push_obj_count_unique(
                                         &mut out, seen_objs, &tree_id, location, objects, stats, true,
                                     );
-                                    gix_object::TreeRefIter::from_bytes(obj.data, obj.object_hash)
+                                    gix_object::TreeRefIter::from_bytes_with_hash(obj.data, tree_id.kind())
                                 };
 
                                 let objects_ref = if parent_commit_ids.is_empty() {
@@ -245,9 +245,9 @@ mod expand {
                                                 stats,
                                                 true,
                                             );
-                                            gix_object::TreeRefIter::from_bytes(
+                                            gix_object::TreeRefIter::from_bytes_with_hash(
                                                 parent_tree_obj.data,
-                                                parent_tree_obj.object_hash,
+                                                parent_tree_id.kind(),
                                             )
                                         };
 
@@ -285,7 +285,7 @@ mod expand {
                                 {
                                     let objects = ExpandedCountingObjects::new(db, out, objects);
                                     gix_traverse::tree::breadthfirst(
-                                        gix_object::TreeRefIter::from_bytes(obj.0.data, obj.0.object_hash),
+                                        gix_object::TreeRefIter::from_bytes_with_hash(obj.0.data, id.kind()),
                                         &mut tree_traversal_state,
                                         &objects,
                                         &mut traverse_delegate,

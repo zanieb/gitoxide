@@ -1,13 +1,18 @@
 //! Contains a borrowed Object bound to a buffer holding its decompressed data.
 
-use crate::{BlobRef, CommitRef, CommitRefIter, Data, Kind, ObjectRef, TagRef, TagRefIter, TreeRef, TreeRefIter};
+use crate::{CommitRefIter, Data, Kind, ObjectRef, TagRefIter, TreeRefIter};
 
 impl<'a> Data<'a> {
-    /// Constructs a new data object from `data`, `kind` and `object_hash`.
-    pub fn new(data: &'a [u8], kind: Kind, hash_kind: gix_hash::Kind) -> Data<'a> {
+    /// Constructs a new data object from `kind` and `data`, using the shortest supported hash kind.
+    pub fn new(kind: Kind, data: &'a [u8]) -> Data<'a> {
+        Data::new_with_hash(kind, data, gix_hash::Kind::shortest())
+    }
+
+    /// Constructs a new data object from `kind`, `data` and `object_hash`.
+    pub fn new_with_hash(kind: Kind, data: &'a [u8], object_hash: gix_hash::Kind) -> Data<'a> {
         Data {
             kind,
-            object_hash: hash_kind,
+            object_hash,
             data,
         }
     }
@@ -17,19 +22,26 @@ impl<'a> Data<'a> {
     /// **Note** that [mutable, decoded objects][crate::Object] can be created from [`Data`]
     /// using [`crate::ObjectRef::into_owned()`].
     pub fn decode(&self) -> Result<ObjectRef<'a>, crate::decode::Error> {
-        Ok(match self.kind {
-            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes(self.data, self.object_hash)?),
-            Kind::Blob => ObjectRef::Blob(BlobRef { data: self.data }),
-            Kind::Commit => ObjectRef::Commit(CommitRef::from_bytes(self.data, self.object_hash)?),
-            Kind::Tag => ObjectRef::Tag(TagRef::from_bytes(self.data, self.object_hash)?),
-        })
+        ObjectRef::from_bytes_with_hash(self.kind, self.data, self.object_hash)
+    }
+
+    /// Decodes the data in the backing slice into an [`ObjectRef`], using `object_hash`
+    /// for embedded object ids.
+    pub fn decode_with_hash(&self, object_hash: gix_hash::Kind) -> Result<ObjectRef<'a>, crate::decode::Error> {
+        ObjectRef::from_bytes_with_hash(self.kind, self.data, object_hash)
     }
 
     /// Returns this object as tree iterator to parse entries one at a time to avoid allocations, or
     /// `None` if this is not a tree object.
     pub fn try_into_tree_iter(self) -> Option<TreeRefIter<'a>> {
+        self.try_into_tree_iter_with_hash(self.object_hash)
+    }
+
+    /// Returns this object as tree iterator to parse entries one at a time to avoid allocations, or
+    /// `None` if this is not a tree object, using `object_hash` for embedded object ids.
+    pub fn try_into_tree_iter_with_hash(self, object_hash: gix_hash::Kind) -> Option<TreeRefIter<'a>> {
         match self.kind {
-            Kind::Tree => Some(TreeRefIter::from_bytes(self.data, self.object_hash)),
+            Kind::Tree => Some(TreeRefIter::from_bytes_with_hash(self.data, object_hash)),
             _ => None,
         }
     }
