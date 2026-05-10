@@ -854,6 +854,35 @@ mod stash {
 
     #[cfg(unix)]
     #[test]
+    fn stash_save_include_untracked_removes_dangling_symlinks() -> crate::Result {
+        use gix::repository::stash::StashSaveOptions;
+        use std::os::unix::{ffi::OsStrExt, fs::symlink};
+
+        let (repo, tmp) = repo_rw_stash()?;
+        let workdir = tmp.path().to_owned();
+        let link_path = workdir.join("dangling-link");
+        symlink("missing-target", &link_path)?;
+
+        repo.stash_save_opts(StashSaveOptions {
+            message: Some("dangling symlink"),
+            keep_index: false,
+            include_untracked: true,
+        })?;
+
+        assert!(
+            link_path.symlink_metadata().is_err(),
+            "dangling untracked symlink should be removed from the worktree after save"
+        );
+
+        repo.stash_apply(0)?;
+        let target = std::fs::read_link(&link_path)?;
+        assert_eq!(target.as_os_str().as_bytes(), b"missing-target");
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn stash_save_captures_tracked_symlink_target_changes() -> crate::Result {
         use std::os::unix::{ffi::OsStrExt, fs::symlink};
 
