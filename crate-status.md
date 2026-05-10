@@ -165,7 +165,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [ ] save to configuration on disk
         * [ ] write [`FETCH_HEAD`](https://git-scm.com/docs/gitrepository-layout)
         * [x] apply transport and remote configuration from `git-config`, including `http.*`
-        * [ ] groups
+        * [x] groups (`Repository::remote_group_names()`, `Repository::remote_names_by_group()`)
         * [ ] [remote and branch files](https://github.com/git/git/blob/master/remote.c#L300)
     * [x] execute hooks
         * [x] respect [`core.hooksPath`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)

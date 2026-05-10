@@ -1,7 +1,7 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeSet};
 
 use crate::{
-    bstr::BStr,
+    bstr::{BStr, ByteSlice},
     config::tree::{Remote, Section},
     remote,
 };
@@ -33,6 +33,48 @@ impl crate::Repository {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Return a set of unique names of remote groups configured as `remotes.<group>`,
+    /// if we deem their sections [trustworthy][crate::open::Options::filter_config_section()].
+    ///
+    /// The group names are configuration key names and thus always valid UTF-8.
+    #[doc(alias = "remotes.<group>")]
+    pub fn remote_group_names(&self) -> BTreeSet<&str> {
+        self.config
+            .resolved
+            .sections_by_name("remotes")
+            .map(|it| {
+                let filter = self.filter_config_section();
+                it.filter(move |s| filter(s.meta()))
+                    .flat_map(|section| section.body().value_names().map(std::convert::AsRef::as_ref))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Return remote names configured for `remotes.<group>`, preserving configuration order.
+    ///
+    /// Each value is split like C Git does, using ASCII space, tab and newline as separators.
+    /// Empty values yield an empty list.
+    #[doc(alias = "remotes.<group>")]
+    pub fn remote_names_by_group(&self, group: impl AsRef<str>) -> Option<Vec<Cow<'_, BStr>>> {
+        self.config
+            .resolved
+            .strings_filter_by("remotes", None, group.as_ref(), &mut self.filter_config_section())
+            .map(|values| {
+                values
+                    .into_iter()
+                    .flat_map(|value| {
+                        value
+                            .as_ref()
+                            .split(|b| matches!(*b, b' ' | b'\t' | b'\n'))
+                            .filter(|name| !name.is_empty())
+                            .map(|name| Cow::Owned(name.as_bstr().to_owned()))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            })
     }
 
     /// Obtain the branch-independent name for a remote for use in the given `direction`, or `None` if it could not be determined.

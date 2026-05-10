@@ -37,6 +37,41 @@ fn remote_and_branch_names() {
 }
 
 #[test]
+fn remote_groups() {
+    let repo = crate::util::named_subrepo_opts(
+        "make_remote_config_repos.sh",
+        "remote-groups",
+        gix::open::Options::isolated(),
+    )
+    .expect("valid remote fixture");
+
+    assert_eq!(
+        Vec::from_iter(repo.remote_group_names()),
+        vec!["ci", "default", "empty"],
+        "groups are discovered from trusted remotes.<group> keys"
+    );
+    assert_eq!(
+        repo.remote_names_by_group("default").expect("group exists"),
+        remote_names(["origin", "backup"]),
+        "group values are split by spaces"
+    );
+    assert_eq!(
+        repo.remote_names_by_group("ci").expect("group exists"),
+        remote_names(["mirror", "backup", "origin"]),
+        "multiple values are concatenated in configuration order and tabs are separators"
+    );
+    assert_eq!(
+        repo.remote_names_by_group("empty").expect("group exists"),
+        Vec::<Cow<'_, BStr>>::new(),
+        "an existing but empty group yields no remote names"
+    );
+    assert!(
+        repo.remote_names_by_group("missing").is_none(),
+        "missing groups remain distinguishable from empty groups"
+    );
+}
+
+#[test]
 fn remote_default_name() {
     let repo = remote::repo("push-default");
 

@@ -132,6 +132,19 @@ EOF
 EOF
 )
 
+(mkdir remote-groups && cd remote-groups
+  git init -q
+
+  git remote add origin .
+  git remote add backup .
+  git remote add mirror .
+
+  git config remotes.default "origin backup"
+  git config --add remotes.ci "mirror"
+  git config --add remotes.ci "backup	origin"
+  git config remotes.empty ""
+)
+
 git clone fetch multiple-remotes
 (cd multiple-remotes
   git remote add other ../fetch
