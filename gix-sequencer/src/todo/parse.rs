@@ -19,6 +19,12 @@ pub enum Error {
         line_number: usize,
         source: gix_hash::prefix::from_hex::Error,
     },
+    #[error("Commit hash '{hash}' on line {line_number} is longer than {hash_kind:?} object ids")]
+    CommitHashTooLong {
+        hash: String,
+        line_number: usize,
+        hash_kind: gix_hash::Kind,
+    },
     #[error("Missing argument for '{keyword}' on line {line_number}")]
     MissingArgument { keyword: String, line_number: usize },
 }
@@ -29,7 +35,7 @@ impl TodoList {
     /// Comment lines (starting with `#`) and empty lines are ignored.
     /// Abbreviated commit hashes are stored as [`Prefix`] values that preserve
     /// the original hex length. Callers must resolve abbreviated prefixes via the ODB.
-    pub fn parse(input: &BStr, _hash_kind: gix_hash::Kind) -> Result<Self, Error> {
+    pub fn parse(input: &BStr, hash_kind: gix_hash::Kind) -> Result<Self, Error> {
         let mut operations = VecDeque::new();
 
         for (line_number_zero, line) in input.lines().enumerate() {
@@ -44,24 +50,24 @@ impl TodoList {
 
             match keyword {
                 b"pick" | b"p" => {
-                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number)?;
+                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number, hash_kind)?;
                     operations.push_back(Operation::Pick { commit, summary });
                 }
                 b"reword" | b"r" => {
-                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number)?;
+                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number, hash_kind)?;
                     operations.push_back(Operation::Reword { commit, summary });
                 }
                 b"edit" | b"e" => {
-                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number)?;
+                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number, hash_kind)?;
                     operations.push_back(Operation::Edit { commit, summary });
                 }
                 b"squash" | b"s" => {
-                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number)?;
+                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number, hash_kind)?;
                     operations.push_back(Operation::Squash { commit, summary });
                 }
                 b"fixup" | b"f" => {
                     let (amend, fixup_rest) = parse_fixup_flags(rest);
-                    let (commit, summary) = parse_commit_and_summary(fixup_rest, &keyword_str, line_number)?;
+                    let (commit, summary) = parse_commit_and_summary(fixup_rest, &keyword_str, line_number, hash_kind)?;
                     operations.push_back(Operation::Fixup {
                         commit,
                         summary,
@@ -87,15 +93,15 @@ impl TodoList {
                     operations.push_back(Operation::Noop);
                 }
                 b"drop" | b"d" => {
-                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number)?;
+                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number, hash_kind)?;
                     operations.push_back(Operation::Drop { commit, summary });
                 }
                 b"revert" => {
-                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number)?;
+                    let (commit, summary) = parse_commit_and_summary(rest, &keyword_str, line_number, hash_kind)?;
                     operations.push_back(Operation::Revert { commit, summary });
                 }
                 b"merge" | b"m" => {
-                    operations.push_back(parse_merge(rest, &keyword_str, line_number)?);
+                    operations.push_back(parse_merge(rest, &keyword_str, line_number, hash_kind)?);
                 }
                 b"label" | b"l" => {
                     let rest = rest.trim_ascii();
@@ -169,7 +175,7 @@ fn parse_fixup_flags(rest: &[u8]) -> (AmendMessage, &[u8]) {
 }
 
 /// Parse `merge [-C|-c <commit>] <label> [# <oneline>]`.
-fn parse_merge(rest: &[u8], keyword: &str, line_number: usize) -> Result<Operation, Error> {
+fn parse_merge(rest: &[u8], keyword: &str, line_number: usize, hash_kind: gix_hash::Kind) -> Result<Operation, Error> {
     let rest = rest.trim_ascii();
     if rest.is_empty() {
         return Err(Error::MissingArgument {
@@ -188,7 +194,7 @@ fn parse_merge(rest: &[u8], keyword: &str, line_number: usize) -> Result<Operati
         let after_flag = rest[2..].trim_ascii();
         let (hash_bytes, after_hash) = split_first_word(after_flag);
         let hash_str = hash_bytes.to_str_lossy();
-        let prefix = parse_hex_prefix(&hash_str, line_number)?;
+        let prefix = parse_hex_prefix(&hash_str, line_number, hash_kind)?;
         (Some((prefix, amend)), after_hash)
     } else {
         (None, rest)
@@ -216,7 +222,15 @@ fn parse_merge(rest: &[u8], keyword: &str, line_number: usize) -> Result<Operati
     })
 }
 
-fn parse_hex_prefix(hash_str: &str, line_number: usize) -> Result<Prefix, Error> {
+fn parse_hex_prefix(hash_str: &str, line_number: usize, hash_kind: gix_hash::Kind) -> Result<Prefix, Error> {
+    if hash_str.len() > hash_kind.len_in_hex() {
+        return Err(Error::CommitHashTooLong {
+            hash: hash_str.to_owned(),
+            line_number,
+            hash_kind,
+        });
+    }
+
     // Use Prefix::from_hex which properly handles both full and abbreviated hashes.
     // For very short hashes (< 4 chars), use from_hex_nonempty.
     if hash_str.len() < Prefix::MIN_HEX_LEN {
@@ -231,7 +245,12 @@ fn parse_hex_prefix(hash_str: &str, line_number: usize) -> Result<Prefix, Error>
     })
 }
 
-fn parse_commit_and_summary(rest: &[u8], keyword: &str, line_number: usize) -> Result<(Prefix, BString), Error> {
+fn parse_commit_and_summary(
+    rest: &[u8],
+    keyword: &str,
+    line_number: usize,
+    hash_kind: gix_hash::Kind,
+) -> Result<(Prefix, BString), Error> {
     let rest = rest.trim_ascii();
     if rest.is_empty() {
         return Err(Error::MissingCommit {
@@ -242,7 +261,7 @@ fn parse_commit_and_summary(rest: &[u8], keyword: &str, line_number: usize) -> R
     let (hash_bytes, summary_rest) = split_first_word(rest);
     let hash_str = hash_bytes.to_str_lossy();
 
-    let prefix = parse_hex_prefix(&hash_str, line_number)?;
+    let prefix = parse_hex_prefix(&hash_str, line_number, hash_kind)?;
 
     let summary = BString::from(summary_rest.trim_ascii());
     Ok((prefix, summary))
