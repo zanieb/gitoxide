@@ -1922,6 +1922,7 @@ mod stash {
             !subdir.join("nested.txt").exists(),
             "nested untracked file should be removed"
         );
+        assert!(!subdir.exists(), "empty untracked directories should be removed");
         assert!(
             !workdir.join("toplevel.txt").exists(),
             "toplevel untracked file should be removed"
