@@ -173,14 +173,17 @@ impl State {
             &|write| {
                 extensions
                     .should_write(extension::tree::SIGNATURE)
-                    .and_then(|signature| self.tree().map(|tree| tree.write_to(write).map(|_| signature)))
+                    .and_then(|signature| {
+                        self.tree()
+                            .map(|tree| tree.write_to_with_hash(self.object_hash, write).map(|_| signature))
+                    })
             },
             &|write| {
                 extensions
                     .should_write(extension::resolve_undo::SIGNATURE)
                     .and_then(|signature| {
                         self.resolve_undo().map(|resolve_undo| {
-                            extension::resolve_undo::write_to(resolve_undo, write).map(|_| signature)
+                            extension::resolve_undo::write_to(resolve_undo, self.object_hash, write).map(|_| signature)
                         })
                     })
             },

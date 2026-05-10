@@ -59,7 +59,11 @@ pub fn decode(mut data: &[u8], object_hash: gix_hash::Kind) -> Option<Paths> {
 }
 
 /// Serialize a resolve-undo extension to `out`.
-pub fn write_to(paths: &Paths, mut out: impl std::io::Write) -> Result<(), std::io::Error> {
+pub fn write_to(
+    paths: &Paths,
+    object_hash: gix_hash::Kind,
+    mut out: impl std::io::Write,
+) -> Result<(), std::io::Error> {
     use std::io::Write as _;
 
     let mut entries = Vec::new();
@@ -71,6 +75,12 @@ pub fn write_to(paths: &Paths, mut out: impl std::io::Write) -> Result<(), std::
             write!(entries, "{mode:o}\0")?;
         }
         for stage in path.stages.iter().flatten() {
+            if stage.id.kind() != object_hash {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "resolve-undo object id length does not match index object hash",
+                ));
+            }
             entries.write_all(stage.id.as_bytes())?;
         }
     }
@@ -78,4 +88,29 @@ pub fn write_to(paths: &Paths, mut out: impl std::io::Write) -> Result<(), std::
     out.write_all(&SIGNATURE)?;
     out.write_all(&(u32::try_from(entries.len()).expect("less than 4GB resolve-undo extension")).to_be_bytes())?;
     out.write_all(&entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{write_to, ResolvePath, Stage};
+
+    #[test]
+    fn write_to_rejects_object_hash_mismatch() {
+        let paths = vec![ResolvePath {
+            name: "file".into(),
+            stages: [
+                Some(Stage {
+                    mode: 0o100644,
+                    id: gix_hash::ObjectId::from_bytes_or_panic(&[0; 20]),
+                }),
+                None,
+                None,
+            ],
+        }];
+        let mut out = Vec::new();
+
+        let err = write_to(&paths, gix_hash::Kind::Sha256, &mut out).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
 }
