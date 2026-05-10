@@ -69,6 +69,11 @@ mod shebang {
                 "single interpreter options are returned too"
             );
             assert_eq!(
+                parse("#!/bin/sh\t-i -u\nunrelated content"),
+                exe_args("/bin/sh", &["-i", "-u"]),
+                "a tab separates the interpreter from its options"
+            );
+            assert_eq!(
                 parse("#!/bin/exe anything goes\nunrelated content"),
                 exe_args("/bin/exe", &["anything", "goes"]),
                 "the entire shebang suffix is returned"

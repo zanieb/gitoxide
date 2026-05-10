@@ -41,10 +41,10 @@ pub mod shebang {
         line = line.strip_prefix(b"#!")?;
 
         let slash_idx = line.rfind_byteset(br"/\")?;
-        let space_idx = line[slash_idx..]
-            .find_byte(b' ')
-            .map_or(line.len(), |space_idx| slash_idx + space_idx);
-        let (interpreter, args) = line.split_at(space_idx);
+        let separator_idx = line[slash_idx..]
+            .find_byteset(b" \t")
+            .map_or(line.len(), |idx| slash_idx + idx);
+        let (interpreter, args) = line.split_at(separator_idx);
         Some(Data {
             interpreter: gix_path::from_byte_slice(interpreter.trim()).ok()?.to_owned(),
             args: crate::parse::arguments(args.trim().as_bstr()).unwrap_or_default(),
