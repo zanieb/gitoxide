@@ -703,6 +703,11 @@ mod extensions {
                 gix_hash::Kind::Sha1,
                 "case-insensitive"
             );
+            assert_eq!(
+                Extensions::OBJECT_FORMAT.try_into_object_format(bcow("SHA-1"))?,
+                gix_hash::Kind::Sha1,
+                "case-insensitive, allowing dashes"
+            );
             assert!(Extensions::OBJECT_FORMAT.validate("sha1".into()).is_ok());
         }
         #[cfg(feature = "sha256")]
@@ -715,6 +720,11 @@ mod extensions {
                 Extensions::OBJECT_FORMAT.try_into_object_format(bcow("SHA256"))?,
                 gix_hash::Kind::Sha256,
                 "case-insensitive"
+            );
+            assert_eq!(
+                Extensions::OBJECT_FORMAT.try_into_object_format(bcow("SHA-256"))?,
+                gix_hash::Kind::Sha256,
+                "case-insensitive, allowing dashes"
             );
             assert!(Extensions::OBJECT_FORMAT.validate("sha256".into()).is_ok());
         }

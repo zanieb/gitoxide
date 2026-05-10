@@ -8,9 +8,7 @@ impl Extensions {
     pub const WORKTREE_CONFIG: keys::Boolean = keys::Boolean::new_boolean("worktreeConfig", &config::Tree::EXTENSIONS);
     /// The `extensions.objectFormat` key.
     pub const OBJECT_FORMAT: ObjectFormat =
-        ObjectFormat::new_with_validate("objectFormat", &config::Tree::EXTENSIONS, validate::ObjectFormat).with_note(
-            "Support for SHA256 is prepared but not fully implemented yet. For now we abort when encountered",
-        );
+        ObjectFormat::new_with_validate("objectFormat", &config::Tree::EXTENSIONS, validate::ObjectFormat);
 }
 
 /// The `core.checkStat` key.
@@ -19,24 +17,21 @@ pub type ObjectFormat = keys::Any<validate::ObjectFormat>;
 mod object_format {
     use std::borrow::Cow;
 
-    use crate::{bstr::BStr, config, config::tree::sections::extensions::ObjectFormat};
+    use crate::{
+        bstr::{BStr, ByteSlice},
+        config, config::tree::sections::extensions::ObjectFormat,
+    };
 
     impl ObjectFormat {
         pub fn try_into_object_format(
             &'static self,
             value: Cow<'_, BStr>,
         ) -> Result<gix_hash::Kind, config::key::GenericErrorWithValue> {
-            #[cfg(feature = "sha1")]
-            if value.as_ref().eq_ignore_ascii_case(b"sha1") {
-                return Ok(gix_hash::Kind::Sha1);
-            }
-
-            #[cfg(feature = "sha256")]
-            if value.as_ref().eq_ignore_ascii_case(b"sha256") {
-                return Ok(gix_hash::Kind::Sha256);
-            }
-
-            Err(config::key::GenericErrorWithValue::from_value(self, value.into_owned()))
+            value
+                .to_str()
+                .ok()
+                .and_then(|name| name.parse().ok())
+                .ok_or_else(|| config::key::GenericErrorWithValue::from_value(self, value.into_owned()))
         }
     }
 }
