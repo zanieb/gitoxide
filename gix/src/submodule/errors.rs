@@ -171,6 +171,11 @@ pub mod init {
             /// The component that is a symbolic link.
             symlink: std::path::PathBuf,
         },
+        #[error("Submodule name '{name}' cannot be used below .git/modules")]
+        InvalidName {
+            /// The invalid submodule name.
+            name: crate::bstr::BString,
+        },
     }
 }
 
@@ -326,6 +331,11 @@ pub mod update {
             path: std::path::PathBuf,
             /// The component that is a symbolic link.
             symlink: std::path::PathBuf,
+        },
+        #[error("Submodule name '{name}' cannot be used below .git/modules")]
+        InvalidName {
+            /// The invalid submodule name.
+            name: crate::bstr::BString,
         },
     }
 }

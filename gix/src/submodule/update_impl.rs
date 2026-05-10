@@ -37,6 +37,10 @@ impl Submodule<'_> {
         P: gix_features::progress::NestedProgress + 'static,
         P::SubProgress: gix_features::progress::NestedProgress + 'static,
     {
+        let target_git_dir = self
+            .validated_git_dir()
+            .map_err(|name| super::update::Error::InvalidName { name })?;
+
         // Step 1: Optionally init
         if options.init {
             self.init(false)?;
@@ -176,12 +180,11 @@ impl Submodule<'_> {
 
             // Move the cloned .git/ directory into the superproject's modules directory
             // and replace it with a .git file, matching modern git's submodule layout.
-            let target_git_dir = self.git_dir();
             super::git_dir_layout::connect_work_tree_and_git_dir(&work_dir, &target_git_dir)?;
 
             // Re-open the repo from the new layout location.
             let mut repo =
-                crate::open_opts(target_git_dir, self.state.repo.options.clone()).map_err(super::open::Error::from)?;
+                crate::open_opts(&target_git_dir, self.state.repo.options.clone()).map_err(super::open::Error::from)?;
             repo.set_workdir(Some(work_dir.clone()))
                 .map_err(super::open::Error::from)?;
 
@@ -198,9 +201,8 @@ impl Submodule<'_> {
 
             // Ensure core.worktree is set for existing submodule repos.
             // This is a safety net for repos that may have been cloned without it.
-            let git_dir = self.git_dir();
-            if git_dir.is_dir() {
-                let _ = super::git_dir_layout::ensure_core_worktree(&git_dir, &work_dir);
+            if target_git_dir.is_dir() {
+                let _ = super::git_dir_layout::ensure_core_worktree(&target_git_dir, &work_dir);
             }
 
             // Check if the target commit already exists in the submodule.

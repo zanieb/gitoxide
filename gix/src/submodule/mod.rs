@@ -309,6 +309,21 @@ impl Submodule<'_> {
             .join(gix_path::from_bstr(self.validated_name()?)))
     }
 
+    fn validated_git_dir(&self) -> Result<PathBuf, crate::bstr::BString> {
+        let name_path = gix_path::from_bstr(self.name());
+        let mut has_component = false;
+        for component in name_path.components() {
+            match component {
+                std::path::Component::Normal(_) => has_component = true,
+                _ => return Err(self.name().to_owned()),
+            }
+        }
+        if !has_component {
+            return Err(self.name().to_owned());
+        }
+        Ok(self.state.repo.common_dir().join("modules").join(name_path))
+    }
+
     /// Return the path to the location at which the workdir would be checked out.
     ///
     /// Note that it may be a path relative to the repository if, for some reason, the parent directory

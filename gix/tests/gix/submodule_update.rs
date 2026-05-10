@@ -183,6 +183,39 @@ mod update {
         Ok(())
     }
 
+    #[test]
+    fn update_rejects_name_that_escapes_modules_dir() -> crate::Result {
+        let (repo, _tmp) = repo_rw("after-clone")?;
+        let modules_path = repo.workdir().expect("worktree").join(".gitmodules");
+        let modules = std::fs::read_to_string(&modules_path)?;
+        let malicious = modules.replace(r#"[submodule "submodule"]"#, r#"[submodule "../escaped"]"#);
+        assert_ne!(malicious, modules, "fixture should contain the expected submodule name");
+        std::fs::write(&modules_path, malicious)?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+        assert_eq!(sm.name(), "../escaped");
+
+        let result = sm.update_submodule(
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+            &gix::submodule::update::Options::new(true, false),
+        );
+
+        assert!(
+            matches!(result, Err(gix::submodule::update::Error::InvalidName { .. })),
+            "submodule update must reject names escaping .git/modules, got {result:?}"
+        );
+        assert!(
+            !repo.common_dir().join("escaped").exists(),
+            "invalid submodule name must not create a git dir outside .git/modules"
+        );
+        Ok(())
+    }
+
     /// Ported from libgit2 test_submodule_update__update_already_checked_out_submodule:
     /// When the submodule is already checked out but at the wrong commit, update should
     /// advance it to the correct commit.
