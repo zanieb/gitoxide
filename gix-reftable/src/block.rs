@@ -314,6 +314,16 @@ pub struct Stack {
     pub tables: Vec<String>,
 }
 
+fn validate_table_name(table_name: &str) -> Result<(), Error> {
+    let mut components = std::path::Path::new(table_name).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) if !table_name.is_empty() => Ok(()),
+        _ => Err(Error::InvalidTableName {
+            name: table_name.to_owned(),
+        }),
+    }
+}
+
 impl Stack {
     /// Read a reftable stack from the given directory.
     ///
@@ -325,8 +335,11 @@ impl Stack {
         let tables: Vec<String> = content
             .lines()
             .filter(|l| !l.is_empty())
-            .map(std::borrow::ToOwned::to_owned)
-            .collect();
+            .map(|line| {
+                validate_table_name(line)?;
+                Ok(line.to_owned())
+            })
+            .collect::<Result<_, Error>>()?;
         Ok(Stack { path, tables })
     }
 
@@ -343,6 +356,7 @@ impl Stack {
     pub fn ref_records(&self) -> Result<Vec<RefRecord>, Error> {
         let mut visible = std::collections::BTreeMap::<Vec<u8>, RefRecord>::new();
         for table_name in &self.tables {
+            validate_table_name(table_name)?;
             let table_data = std::fs::read(self.table_path(table_name))?;
             for record in read_table_ref_records(&table_data)? {
                 if matches!(&record.value, crate::RefRecordValue::Deletion) {
@@ -576,6 +590,32 @@ mod tests {
                 .is_some(),
             "updated ref should be visible"
         );
+    }
+
+    #[test]
+    fn stack_open_rejects_parent_table_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let reftable_dir = dir.path().join("reftable");
+        std::fs::create_dir(&reftable_dir).expect("reftable dir");
+        std::fs::write(reftable_dir.join("tables.list"), "../outside.ref\n").expect("tables.list");
+
+        assert!(matches!(
+            Stack::open(&reftable_dir),
+            Err(Error::InvalidTableName { name }) if name == "../outside.ref"
+        ));
+    }
+
+    #[test]
+    fn stack_ref_records_rejects_parent_table_names() {
+        let stack = Stack {
+            path: "/tmp/repo/.git/reftable".into(),
+            tables: vec!["../outside.ref".to_owned()],
+        };
+
+        assert!(matches!(
+            stack.ref_records(),
+            Err(Error::InvalidTableName { name }) if name == "../outside.ref"
+        ));
     }
 
     #[test]

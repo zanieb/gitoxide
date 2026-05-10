@@ -230,6 +230,8 @@ pub enum Error {
     Crc32Mismatch { expected: u32, actual: u32 },
     #[error("zlib decompression error")]
     ZlibError,
+    #[error("invalid reftable stack table name: {name}")]
+    InvalidTableName { name: String },
 }
 
 /// Read a varint from a byte slice using the reftable MSB-first encoding with +1 adjustment.
