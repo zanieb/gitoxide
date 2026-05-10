@@ -272,29 +272,69 @@ pub fn read_table_ref_records(data: &[u8]) -> Result<Vec<RefRecord>, Error> {
             break;
         }
 
-        let block_end = if header.block_size > 0 {
-            let next_boundary = if is_first_block {
+        let mut attempts = Vec::new();
+        let header_off = if is_first_block { file_header_size } else { 0 };
+        if header.block_size > 0 {
+            let c_git_end = if is_first_block {
                 header.block_size as usize
             } else {
-                block_start + header.block_size as usize
-            };
-            next_boundary.min(footer_start)
-        } else {
-            let content_len = if is_first_block {
-                (block_header.block_len as usize).saturating_sub(file_header_size)
-            } else {
-                block_header.block_len as usize
-            };
-            block_start.saturating_add(content_len).min(footer_start)
-        };
+                block_start.saturating_add(header.block_size as usize)
+            }
+            .min(footer_start);
+            attempts.push((c_git_end, header_off));
 
-        let header_off = if is_first_block { file_header_size } else { 0 };
-        let mut block_records = read_ref_records_at(
-            &data[block_start..block_end],
-            hash_size,
-            footer.header.min_update_index,
-            header_off,
-        )?;
+            if is_first_block {
+                let legacy_end = block_start.saturating_add(header.block_size as usize).min(footer_start);
+                if legacy_end != c_git_end {
+                    attempts.push((legacy_end, 0));
+                }
+            }
+        } else {
+            if is_first_block {
+                if let Some(content_len) = (block_header.block_len as usize).checked_sub(file_header_size) {
+                    attempts.push((
+                        block_start.saturating_add(content_len).min(footer_start),
+                        file_header_size,
+                    ));
+                }
+            }
+            let relative_end = block_start
+                .saturating_add(block_header.block_len as usize)
+                .min(footer_start);
+            if attempts.iter().all(|(end, _)| *end != relative_end) {
+                attempts.push((relative_end, 0));
+            }
+        }
+
+        let mut last_err = None;
+        let mut parsed_block = None;
+        for (block_end, header_off) in attempts {
+            if block_end <= block_start {
+                continue;
+            }
+            match read_ref_records_at(
+                &data[block_start..block_end],
+                hash_size,
+                footer.header.min_update_index,
+                header_off,
+            ) {
+                Ok(records) => {
+                    if block_end < footer_start {
+                        let next = data[block_end];
+                        if next != 0 && BlockType::from_byte(next).is_none() {
+                            last_err = Some(Error::InvalidBlockType { byte: next });
+                            continue;
+                        }
+                    }
+                    parsed_block = Some((block_end, records));
+                    break;
+                }
+                Err(err) => last_err = Some(err),
+            }
+        }
+        let Some((block_end, mut block_records)) = parsed_block else {
+            return Err(last_err.unwrap_or(Error::UnexpectedEof));
+        };
         records.append(&mut block_records);
 
         if block_end <= block_start {
