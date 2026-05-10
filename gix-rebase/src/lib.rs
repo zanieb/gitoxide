@@ -132,6 +132,8 @@ pub enum StepError {
     },
     #[error("could not finish rebase")]
     Finish(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("cannot '{operation}' without a previous commit")]
+    NoPreviousCommit { operation: &'static str },
 }
 
 /// An error originating from the [`Driver::cherry_pick()`] callback.
@@ -438,6 +440,8 @@ impl MergeState {
             return Ok(StepOutcome::Done);
         }
 
+        self.validate_operation_sequence(self.todo.operations.front().expect("todo list is not empty"))?;
+
         let op = self.todo.operations.pop_front().expect("todo list is not empty");
         // Push to done BEFORE executing, so on failure the operation is not lost
         // from both lists. This matches C Git behavior where the failed operation
@@ -719,30 +723,28 @@ impl MergeState {
         }
     }
 
+    fn validate_operation_sequence(&self, op: &gix_sequencer::todo::Operation) -> Result<(), StepError> {
+        use gix_sequencer::todo::Operation;
+
+        let operation = match op {
+            Operation::Squash { .. } => "squash",
+            Operation::Fixup { .. } => "fixup",
+            _ => return Ok(()),
+        };
+
+        if self.previous_commit_operation(0).is_some() {
+            Ok(())
+        } else {
+            Err(StepError::NoPreviousCommit { operation })
+        }
+    }
+
     /// Get the commit message of the last completed operation (for squash/fixup).
     ///
     /// Skips the last entry in `done` because it is the current operation being
     /// executed (pushed to `done` before execution in `step()`).
     fn last_done_commit_message(&self, driver: &dyn Driver) -> Result<Option<Vec<u8>>, StepError> {
-        use gix_sequencer::todo::Operation;
-
-        // Skip the last entry (the current operation, already pushed to done).
-        let mut previous_commit_op = None;
-        for op in self.done.operations.iter().rev().skip(1) {
-            match op {
-                Operation::Pick { commit, .. }
-                | Operation::Reword { commit, .. }
-                | Operation::Edit { commit, .. }
-                | Operation::Squash { commit, .. }
-                | Operation::Fixup { commit, .. } => {
-                    previous_commit_op = Some(commit);
-                    break;
-                }
-                _ => continue,
-            }
-        }
-
-        let Some(commit) = previous_commit_op else {
+        let Some(commit) = self.previous_commit_operation(1) else {
             return Ok(None);
         };
 
@@ -755,6 +757,19 @@ impl MergeState {
             .read_commit_message(commit_id)
             .map_err(StepError::ReadCommitMessage)?;
         Ok(Some(msg))
+    }
+
+    fn previous_commit_operation(&self, skip: usize) -> Option<&gix_hash::Prefix> {
+        use gix_sequencer::todo::Operation;
+
+        self.done.operations.iter().rev().skip(skip).find_map(|op| match op {
+            Operation::Pick { commit, .. }
+            | Operation::Reword { commit, .. }
+            | Operation::Edit { commit, .. }
+            | Operation::Squash { commit, .. }
+            | Operation::Fixup { commit, .. } => Some(commit),
+            _ => None,
+        })
     }
 }
 
