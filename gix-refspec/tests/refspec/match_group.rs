@@ -299,6 +299,23 @@ mod push {
     }
 
     #[test]
+    fn negative_specs_filter_deletes_by_destination() {
+        let remote = [
+            new_ref("refs/heads/main", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            new_ref("refs/heads/feature", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        ];
+        let specs = parse_specs([":refs/heads/main", ":refs/heads/feature", "^refs/heads/feature"]);
+        let outcome = group(&specs).match_push(std::iter::empty(), items(&remote));
+
+        assert!(outcome.updates.is_empty());
+        assert_eq!(
+            outcome.deletions,
+            [deletion(Some(0), "refs/heads/main", 0)],
+            "negative push refspecs should exclude matching deletion destinations"
+        );
+    }
+
+    #[test]
     fn object_ids_can_be_pushed_to_a_named_destination() {
         let object_id = "1111111111111111111111111111111111111111";
         let specs = parse_specs([format!("{object_id}:refs/heads/by-id")]);

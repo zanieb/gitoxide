@@ -330,6 +330,23 @@ impl<'spec> MatchGroup<'spec> {
                     !negative_matchers.iter().any(|matcher| matcher.matches_lhs(local).0)
                 }
             });
+
+            let null_target = remote_items
+                .first()
+                .or_else(|| local_items.first())
+                .map_or_else(|| gix_hash::Kind::shortest().null(), |item| item.target.kind().null());
+            deletions.retain(|deletion| {
+                let remote = deletion
+                    .remote_item_index
+                    .and_then(|idx| remote_items.get(idx))
+                    .copied()
+                    .unwrap_or(Item {
+                        full_ref_name: deletion.dst.as_ref(),
+                        target: &null_target,
+                        object: None,
+                    });
+                !negative_matchers.iter().any(|matcher| matcher.matches_lhs(remote).0)
+            });
         }
 
         match_push::Outcome {
