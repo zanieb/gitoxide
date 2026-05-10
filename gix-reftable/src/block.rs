@@ -107,14 +107,19 @@ pub fn read_ref_records_at(
     //
     // Subtract `header_off` to get the actual content size within `block_data`.
     let data_end = if header.block_len > 0 {
-        let content_size = (header.block_len as usize).saturating_sub(header_off);
-        content_size.min(block_data.len())
+        let content_size = (header.block_len as usize)
+            .checked_sub(header_off)
+            .ok_or(Error::UnexpectedEof)?;
+        if content_size > block_data.len() {
+            return Err(Error::UnexpectedEof);
+        }
+        content_size
     } else {
         block_data.len()
     };
 
     if data_end < header_size + 2 {
-        return Ok(Vec::new());
+        return Err(Error::UnexpectedEof);
     }
 
     // Read restart count from the last 2 bytes of the data portion
@@ -487,6 +492,42 @@ mod tests {
         block.push(b'r');
         block.extend_from_slice(&[0, 0, 0]);
         block.extend_from_slice(&1u16.to_be_bytes());
+        let block_len = block.len() as u32;
+        crate::put_be24((&mut block[1..4]).try_into().expect("3 bytes"), block_len);
+
+        assert!(matches!(read_ref_records(&block, 20, 1), Err(Error::UnexpectedEof)));
+    }
+
+    #[test]
+    fn read_ref_records_rejects_block_len_before_header_offset() {
+        let mut block = Vec::new();
+        block.push(b'r');
+        block.extend_from_slice(&[0, 0, 0]);
+        block.extend_from_slice(&0u16.to_be_bytes());
+        crate::put_be24((&mut block[1..4]).try_into().expect("3 bytes"), 10);
+
+        assert!(matches!(
+            read_ref_records_at(&block, 20, 1, crate::HEADER_SIZE_V1),
+            Err(Error::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn read_ref_records_rejects_block_len_beyond_data() {
+        let mut block = Vec::new();
+        block.push(b'r');
+        block.extend_from_slice(&[0, 0, 0]);
+        block.extend_from_slice(&0u16.to_be_bytes());
+        crate::put_be24((&mut block[1..4]).try_into().expect("3 bytes"), 100);
+
+        assert!(matches!(read_ref_records(&block, 20, 1), Err(Error::UnexpectedEof)));
+    }
+
+    #[test]
+    fn read_ref_records_rejects_missing_restart_count() {
+        let mut block = Vec::new();
+        block.push(b'r');
+        block.extend_from_slice(&[0, 0, 0]);
         let block_len = block.len() as u32;
         crate::put_be24((&mut block[1..4]).try_into().expect("3 bytes"), block_len);
 
