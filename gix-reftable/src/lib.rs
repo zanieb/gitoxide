@@ -486,26 +486,28 @@ pub fn parse_ref_record(
     // Read prefix length
     let (prefix_len, n) = read_varint(&data[pos..])?;
     pos += n;
-    let prefix_len = prefix_len as usize;
+    let prefix_len = usize::try_from(prefix_len).map_err(|_| Error::UnexpectedEof)?;
 
     // Read suffix length (includes value type in low 3 bits)
     let (suffix_and_type, n) = read_varint(&data[pos..])?;
     pos += n;
 
     let value_type = (suffix_and_type & 0x7) as u8;
-    let suffix_len = (suffix_and_type >> 3) as usize;
+    let suffix_len = usize::try_from(suffix_and_type >> 3).map_err(|_| Error::UnexpectedEof)?;
 
     // Validate lengths before allocating to prevent OOM on crafted input.
     if prefix_len > prefix.len() {
         return Err(Error::UnexpectedEof);
     }
-    if pos + suffix_len > data.len() {
+    let suffix_end = pos.checked_add(suffix_len).ok_or(Error::UnexpectedEof)?;
+    if suffix_end > data.len() {
         return Err(Error::UnexpectedEof);
     }
-    let mut name = Vec::with_capacity(prefix_len + suffix_len);
+    let name_len = prefix_len.checked_add(suffix_len).ok_or(Error::UnexpectedEof)?;
+    let mut name = Vec::with_capacity(name_len);
     name.extend_from_slice(&prefix[..prefix_len]);
-    name.extend_from_slice(&data[pos..pos + suffix_len]);
-    pos += suffix_len;
+    name.extend_from_slice(&data[pos..suffix_end]);
+    pos = suffix_end;
 
     // Read update_index delta
     let (update_index_delta, n) = read_varint(&data[pos..])?;
@@ -523,34 +525,37 @@ pub fn parse_ref_record(
         }
         1 => {
             // val1: single OID
-            if pos + hash_size > data.len() {
+            let target_end = pos.checked_add(hash_size).ok_or(Error::UnexpectedEof)?;
+            if target_end > data.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let target = object_id_from_bytes(&data[pos..pos + hash_size])?;
-            pos += hash_size;
+            let target = object_id_from_bytes(&data[pos..target_end])?;
+            pos = target_end;
             RefRecordValue::Val1 { target }
         }
         2 => {
             // val2: OID + peeled OID
-            if pos + 2 * hash_size > data.len() {
+            let target_end = pos.checked_add(hash_size).ok_or(Error::UnexpectedEof)?;
+            let target_value_end = target_end.checked_add(hash_size).ok_or(Error::UnexpectedEof)?;
+            if target_value_end > data.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let target = object_id_from_bytes(&data[pos..pos + hash_size])?;
-            pos += hash_size;
-            let target_value = object_id_from_bytes(&data[pos..pos + hash_size])?;
-            pos += hash_size;
+            let target = object_id_from_bytes(&data[pos..target_end])?;
+            let target_value = object_id_from_bytes(&data[target_end..target_value_end])?;
+            pos = target_value_end;
             RefRecordValue::Val2 { target, target_value }
         }
         3 => {
             // symref: target ref name
             let (target_len, n) = read_varint(&data[pos..])?;
             pos += n;
-            let target_len = target_len as usize;
-            if pos + target_len > data.len() {
+            let target_len = usize::try_from(target_len).map_err(|_| Error::UnexpectedEof)?;
+            let target_end = pos.checked_add(target_len).ok_or(Error::UnexpectedEof)?;
+            if target_end > data.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let target = BString::from(&data[pos..pos + target_len]);
-            pos += target_len;
+            let target = BString::from(&data[pos..target_end]);
+            pos = target_end;
             RefRecordValue::Symref { target }
         }
         _ => return Err(Error::InvalidRefValueType { value_type }),
