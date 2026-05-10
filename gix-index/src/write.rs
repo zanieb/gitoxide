@@ -166,8 +166,9 @@ impl State {
         type WriteExtFn<'a> = &'a dyn Fn(&mut dyn std::io::Write) -> Option<std::io::Result<extension::Signature>>;
         let extensions: &[WriteExtFn<'_>] = &[
             &|write| {
-                self.link()
-                    .map(|link| extension::link::write_to(link, write).map(|_| extension::link::SIGNATURE))
+                self.link().map(|link| {
+                    extension::link::write_to(link, self.object_hash, write).map(|_| extension::link::SIGNATURE)
+                })
             },
             &|write| {
                 extensions

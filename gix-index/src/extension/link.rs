@@ -67,9 +67,16 @@ pub(crate) fn decode(data: &[u8], object_hash: gix_hash::Kind) -> Result<Link, d
     })
 }
 
-pub(crate) fn write_to(link: &Link, mut out: impl Write) -> Result<(), std::io::Error> {
+pub(crate) fn write_to(link: &Link, object_hash: gix_hash::Kind, mut out: impl Write) -> Result<(), std::io::Error> {
     let mut data = Vec::new();
-    data.extend_from_slice(link.shared_index_checksum.as_bytes());
+    let checksum = link.shared_index_checksum.as_bytes();
+    if checksum.len() != object_hash.len_in_bytes() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "shared-index checksum length does not match index object hash",
+        ));
+    }
+    data.extend_from_slice(checksum);
     if let Some(bitmaps) = &link.bitmaps {
         bitmaps.delete.write_to(&mut data)?;
         bitmaps.replace.write_to(&mut data)?;
@@ -196,5 +203,24 @@ impl Link {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_to;
+    use crate::extension::Link;
+
+    #[test]
+    fn write_to_rejects_object_hash_mismatch() {
+        let link = Link {
+            shared_index_checksum: gix_hash::ObjectId::from_bytes_or_panic(&[0; 20]),
+            bitmaps: None,
+        };
+        let mut out = Vec::new();
+
+        let err = write_to(&link, gix_hash::Kind::Sha256, &mut out).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
 }
