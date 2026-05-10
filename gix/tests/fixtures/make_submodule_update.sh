@@ -172,6 +172,25 @@ git init -q recursive-super
 # Fresh clone for --init --recursive testing
 git clone -q recursive-super recursive-clone
 
+# Fresh clone whose nested submodule URL is broken, so recursive update fails.
+git clone -q mid-module broken-mid-module
+(cd broken-mid-module
+  git config -f .gitmodules submodule.inner.url ../missing-inner-module
+  git add .gitmodules
+  git commit -q -m "break inner submodule url"
+)
+
+git init -q recursive-broken-super
+(cd recursive-broken-super
+  echo "top" > top-file
+  git add top-file
+  git commit -q -m "top initial"
+  git submodule add ../broken-mid-module mid
+  git commit -q -m "add broken mid submodule"
+)
+
+git clone -q recursive-broken-super recursive-broken-clone
+
 # --- Scenario: command-in-gitmodules-rejected ---
 # Superproject with update=!command in .gitmodules (must be rejected for security).
 git clone -q super command-in-gitmodules

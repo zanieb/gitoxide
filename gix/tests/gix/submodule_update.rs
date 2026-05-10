@@ -695,6 +695,36 @@ mod update {
         Ok(())
     }
 
+    #[test]
+    fn update_init_recursive_reports_nested_update_failure() -> crate::Result {
+        let (repo, _tmp) = repo_rw("recursive-broken-clone")?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+
+        assert_eq!(sm.name(), "mid");
+
+        let err = sm
+            .update_submodule(
+                gix::progress::Discard,
+                &std::sync::atomic::AtomicBool::default(),
+                &gix::submodule::update::Options::new(true, true),
+            )
+            .expect_err("broken nested submodule should fail the recursive update");
+
+        assert!(
+            matches!(
+                err,
+                gix::submodule::update::Error::RecursiveUpdate { ref name, .. } if &name[..] == b"inner"
+            ),
+            "expected recursive update error for inner submodule, got {err:?}"
+        );
+        Ok(())
+    }
+
     /// Ported from git t7406: submodule update does not fetch already present commits.
     /// If the target commit already exists in the submodule, no fetch should be needed.
     #[test]
