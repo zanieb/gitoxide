@@ -410,7 +410,7 @@ impl Repository {
             .try_find_reference("refs/stash")
             .ok()
             .flatten()
-            .map_or(PreviousValue::Any, |r| {
+            .map_or(PreviousValue::MustNotExist, |r| {
                 PreviousValue::MustExistAndMatch(r.inner.target.clone())
             });
 
