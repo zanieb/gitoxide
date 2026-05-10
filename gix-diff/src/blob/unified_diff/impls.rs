@@ -32,6 +32,8 @@ where
 
     /// Symmetrical context before and after the changed hunk.
     ctx_size: u32,
+    /// Merge hunks separated by at most this many unchanged lines.
+    interhunk_lines: u32,
 
     buffer: Vec<(DiffLineKind, &'a [u8])>,
 
@@ -63,6 +65,7 @@ where
             ctx_pos: None,
 
             ctx_size: context_size.symmetrical,
+            interhunk_lines: context_size.interhunk_lines,
 
             buffer: Vec::with_capacity(8),
             delegate: consume_hunk,
@@ -129,9 +132,10 @@ where
         if self.err.is_some() {
             return;
         }
+        let split_gap = self.ctx_size.saturating_mul(2).saturating_add(self.interhunk_lines);
         let start_next_hunk = self
             .ctx_pos
-            .is_some_and(|ctx_pos| before.start - ctx_pos > 2 * self.ctx_size);
+            .is_some_and(|ctx_pos| before.start.saturating_sub(ctx_pos) > split_gap);
         if start_next_hunk {
             if let Err(err) = self.flush_accumulated_hunk() {
                 self.err = Some(err);

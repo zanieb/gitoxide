@@ -41,6 +41,10 @@ use super::unified_diff::{ConsumeHunk, ContextSize, DiffLineKind, HunkHeader};
 pub struct Options {
     /// Number of context lines around each hunk. Default is 3.
     pub context_lines: u32,
+    /// Merge hunks separated by at most this many unchanged lines. Default is 0.
+    ///
+    /// This corresponds to Git's `--inter-hunk-context=<n>`.
+    pub interhunk_lines: u32,
     /// The prefix for the old file path. Default is `"a/"`.
     pub old_prefix: &'static str,
     /// The prefix for the new file path. Default is `"b/"`.
@@ -60,6 +64,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             context_lines: 3,
+            interhunk_lines: 0,
             old_prefix: "a/",
             new_prefix: "b/",
             find_function_names: true,
@@ -246,7 +251,13 @@ pub fn write_with_change(
     };
 
     let diff = super::Diff::compute(super::Algorithm::Myers, &interner);
-    super::UnifiedDiff::new(&diff, &interner, sink, ContextSize::symmetrical(options.context_lines)).consume()?;
+    super::UnifiedDiff::new(
+        &diff,
+        &interner,
+        sink,
+        ContextSize::symmetrical(options.context_lines).with_interhunk_lines(options.interhunk_lines),
+    )
+    .consume()?;
     Ok(())
 }
 
@@ -675,6 +686,33 @@ mod tests {
                 p.contains("@@ -4,3 +4,3 @@\n"),
                 "should have small hunk with context=1: {p:?}"
             );
+        }
+
+        #[test]
+        fn interhunk_lines_merge_close_hunks() {
+            let old = b"1\n2\n3\n4\n5\n6\n7\n8\n9\n";
+            let new = b"1\n2\nthree\n4\n5\n6\nseven\n8\n9\n";
+            let mut out = Vec::new();
+            write(
+                &mut out,
+                None,
+                None,
+                "file.txt",
+                "file.txt",
+                old,
+                new,
+                Options {
+                    context_lines: 1,
+                    interhunk_lines: 1,
+                    ..Options::default()
+                },
+            )
+            .unwrap();
+            let p = String::from_utf8(out).unwrap();
+            let hunk_headers = p.lines().filter(|line| line.starts_with("@@")).count();
+            assert_eq!(hunk_headers, 1, "nearby changes should be merged: {p:?}");
+            assert!(p.contains("@@ -2,7 +2,7 @@"), "merged hunk header: {p:?}");
+            assert!(p.contains(" 5\n 6\n"), "inter-hunk lines should become context: {p:?}");
         }
     }
 
