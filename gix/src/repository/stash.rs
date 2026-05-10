@@ -487,6 +487,9 @@ impl Repository {
                 )));
                 if file_path.exists() {
                     std::fs::remove_file(&file_path).map_err(SaveError::RemoveFile)?;
+                    if let Some(parent) = file_path.parent() {
+                        super::worktree_ops::remove_empty_parents(parent, &workdir).map_err(SaveError::RemoveFile)?;
+                    }
                 }
             }
         }
