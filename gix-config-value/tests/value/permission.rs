@@ -58,11 +58,13 @@ fn octal_modes_need_owner_read_and_write() {
 fn invalid_values_fail() {
     assert!(Permission::try_from(b("maybe")).is_err());
     assert!(Permission::try_from(b("0660x")).is_err());
+    assert!(Permission::try_from(b("0888")).is_err());
+    assert!(Permission::try_from(b("0008")).is_err());
 }
 
 #[test]
-fn invalid_octal_decimal_numbers_fall_back_to_boolean_values() -> crate::Result {
-    assert_eq!(Permission::try_from(b("0888"))?, Permission::Group);
-    assert_eq!(Permission::try_from(b("0008"))?, Permission::Group);
+fn non_octal_decimal_numbers_fall_back_to_boolean_values() -> crate::Result {
+    assert_eq!(Permission::try_from(b("8"))?, Permission::Group);
+    assert_eq!(Permission::try_from(b("678"))?, Permission::Group);
     Ok(())
 }
