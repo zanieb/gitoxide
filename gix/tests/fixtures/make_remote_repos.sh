@@ -170,6 +170,13 @@ git clone --shared base branch-push-remote
   git config branch.main.pushRemote myself
 )
 
+git clone --shared base branch-merge-no-fetch
+(cd branch-merge-no-fetch
+  git config --unset-all remote.origin.fetch
+  git config branch.main.remote origin
+  git config branch.main.merge refs/heads/main
+)
+
 git clone --shared base branch-dot-remote
 (cd branch-dot-remote
 

@@ -148,3 +148,9 @@ fn url_as_remote_name() -> TestResult {
     }
     Ok(())
 }
+
+fn fetchspec(spec: &str) -> gix_refspec::RefSpec {
+    gix::refspec::parse(spec.into(), gix::refspec::parse::Operation::Fetch)
+        .unwrap()
+        .to_owned()
+}
