@@ -131,7 +131,7 @@ impl delegate::Navigate for Delegate<'_> {
                         .ok_or_raise_erased(|| {
                             message!(
                                 "Could not find path {path:?} in tree {tree} of parent object {object}",
-                                path = path,
+                                path = path.as_ref(),
                                 object = obj.attach(repo).shorten_or_id(),
                                 tree = tree_id.attach(repo).shorten_or_id(),
                             )
@@ -143,7 +143,7 @@ impl delegate::Navigate for Delegate<'_> {
                         Ok((replace, mode)) => {
                             if !path.is_empty() {
                                 // Technically this is letting the last one win, but so be it.
-                                self.paths[self.idx] = Some((path.to_owned(), mode));
+                                self.paths[self.idx] = Some((path.as_ref().to_owned(), mode));
                             }
                             replacements.push((*obj, replace));
                         }
@@ -321,7 +321,7 @@ impl delegate::Navigate for Delegate<'_> {
                 }
 
                 self.paths[self.idx] = Some((
-                    path.to_owned(),
+                    path.as_ref().to_owned(),
                     entry
                         .mode
                         .to_tree_entry_mode()
@@ -340,6 +340,7 @@ impl delegate::Navigate for Delegate<'_> {
                 };
                 Err(message!(
                     "Path {path:?} did not exist in index at stage {desired_stage}{stage_hint}{exists}",
+                    path = path.as_ref(),
                     exists = if exists {
                         ". It exists on disk"
                     } else {
@@ -408,6 +409,54 @@ fn handle_errors_and_replacements(
                 objs.push(*replace);
             }
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bstr::ByteSlice;
+    use crate::prelude::ObjectIdExt;
+    use crate::revision::Spec;
+
+    #[test]
+    fn cwd_relative_paths_are_looked_up_from_the_worktree_root() -> gix_testtools::Result {
+        let fixture = gix_testtools::scripted_fixture_writable("make_rev_spec_parse_repos.sh")?;
+        let repo_path = fixture.path().join("complex_graph");
+        let cwd = repo_path.join("subdir");
+        std::fs::create_dir(&cwd)?;
+
+        let mut repo = crate::ThreadSafeRepository::open(&repo_path)?.to_thread_local();
+
+        repo.options.current_dir = Some(repo_path.clone());
+        assert_eq!(repo.rev_parse("HEAD:./file")?, repo.rev_parse("HEAD:file")?);
+        assert_eq!(repo.rev_parse(":./file")?, repo.rev_parse(":file")?);
+
+        repo.options.current_dir = Some(cwd);
+
+        let tree_path = repo.rev_parse("HEAD:../file")?;
+        assert_eq!(tree_path, repo.rev_parse("HEAD:file")?);
+        assert_eq!(
+            tree_path.path_and_mode().expect("tree path is stored"),
+            ("file".as_bytes().as_bstr(), gix_object::tree::EntryKind::Blob.into())
+        );
+
+        let index_path = repo.rev_parse(":../file")?;
+        assert_eq!(index_path, repo.rev_parse(":file")?);
+        assert_eq!(
+            index_path,
+            Spec::from_id(
+                repo.index()?
+                    .entry_by_path("file".into())
+                    .expect("file in index")
+                    .id
+                    .attach(&repo)
+            )
+        );
+        assert_eq!(
+            index_path.path_and_mode().expect("index path is stored"),
+            ("file".as_bytes().as_bstr(), gix_object::tree::EntryKind::Blob.into())
+        );
         Ok(())
     }
 }
