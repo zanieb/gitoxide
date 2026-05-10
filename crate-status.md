@@ -177,7 +177,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * **main or linked worktree**
         * [ ] add files with `.gitignore` handling
         * [x] checkout with conversions like clean + smudge as in `.gitattributes`
-        * [ ] _diff_ index with working tree
+        * [x] _diff_ index with working tree
         * [ ] sparse checkout support
         * [x] read per-worktree config if `extensions.worktreeConfig` is enabled.
         * **index**
