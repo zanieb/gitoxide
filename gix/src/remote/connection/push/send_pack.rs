@@ -36,12 +36,13 @@ where
             });
         }
 
-        let (commands, lease_rejected) = build_push_commands(&self.ref_map, repo, self.expected_old_ids.as_ref())?;
+        let (commands, client_updates) = build_push_commands(&self.ref_map, repo, self.expected_old_ids.as_ref())?;
 
-        // If we have no commands AND no lease rejections, check if all refspecs
-        // were no-ops (refs already at target). If so, return empty success.
-        // Only error if there are no refspecs at all.
-        if commands.is_empty() && lease_rejected.is_empty() {
+        // If we have no commands AND no client-side updates, check if all refspecs
+        // were no-ops (refs already at target). If so, return empty success while
+        // preserving the existing `NoMapping` error for matching pushes into an
+        // empty remote advertisement.
+        if commands.is_empty() && client_updates.is_empty() {
             let has_refspecs = !self.ref_map.refspecs.is_empty() || !self.ref_map.extra_refspecs.is_empty();
             if !has_refspecs || self.ref_map.remote_refs.is_empty() {
                 return Err(Error::NoMapping {
@@ -66,7 +67,7 @@ where
                     ref_name: cmd.ref_name.clone(),
                 })
                 .collect();
-            updates.extend(lease_rejected);
+            updates.extend(client_updates);
             return Ok(Outcome {
                 ref_map: std::mem::take(&mut self.ref_map),
                 handshake,
@@ -75,12 +76,12 @@ where
             });
         }
 
-        // If all commands were rejected by force-with-lease, return early.
-        if commands.is_empty() && !lease_rejected.is_empty() {
+        // If all commands were handled client-side, return early.
+        if commands.is_empty() && !client_updates.is_empty() {
             return Ok(Outcome {
                 ref_map: std::mem::take(&mut self.ref_map),
                 handshake,
-                updates: lease_rejected,
+                updates: client_updates,
                 unpack_ok: true,
             });
         }
@@ -176,7 +177,7 @@ where
         }
 
         let mut updates = result.ref_updates;
-        updates.extend(lease_rejected);
+        updates.extend(client_updates);
         Ok(Outcome {
             ref_map: std::mem::take(&mut self.ref_map),
             handshake,
@@ -247,7 +248,7 @@ fn build_push_commands(
     }
 
     let mut commands = Vec::new();
-    let mut lease_rejected = Vec::new();
+    let mut client_updates = Vec::new();
     let mut source_by_destination = std::collections::HashMap::new();
 
     let local_refs = local_refs_for_push(repo)?;
@@ -332,7 +333,7 @@ fn build_push_commands(
         if let Some(expected_ids) = expected_old_ids {
             if let Some(expected_oid) = expected_ids.get(&update.dst) {
                 if remote_old_id != *expected_oid {
-                    lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
+                    client_updates.push(gix_protocol::push::response::StatusV1::Ng {
                         ref_name: update.dst,
                         reason: "stale info".into(),
                     });
@@ -363,7 +364,7 @@ fn build_push_commands(
         if let Some(expected_ids) = expected_old_ids {
             if let Some(expected_oid) = expected_ids.get(&update.dst) {
                 if remote_old_id != *expected_oid {
-                    lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
+                    client_updates.push(gix_protocol::push::response::StatusV1::Ng {
                         ref_name: update.dst,
                         reason: "stale info".into(),
                     });
@@ -388,7 +389,7 @@ fn build_push_commands(
             if let Some(expected_oid) = expected_ids.get(&deletion.dst) {
                 let actual = remote_old_id.unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
                 if actual != *expected_oid {
-                    lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
+                    client_updates.push(gix_protocol::push::response::StatusV1::Ng {
                         ref_name: deletion.dst,
                         reason: "stale info".into(),
                     });
@@ -403,10 +404,12 @@ fn build_push_commands(
                 old_id,
                 new_id: gix_hash::ObjectId::null(object_hash),
             });
+        } else {
+            client_updates.push(gix_protocol::push::response::StatusV1::Ok { ref_name: deletion.dst });
         }
     }
 
-    Ok((commands, lease_rejected))
+    Ok((commands, client_updates))
 }
 
 fn record_push_destination(
