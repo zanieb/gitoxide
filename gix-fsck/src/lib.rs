@@ -230,8 +230,11 @@ where
     }
 
     fn check_commit_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
-        // Attempt to insert the commit ID in the set, and if already present, return immediately
+        // Previously reached objects don't need traversal again, but they must still match this use-site's kind.
         if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
+            if !is_skipped_object(oid, options) {
+                find_existing_object(&self.db, oid, &mut self.buf, Kind::Commit, options)?;
+            }
             return Ok(());
         }
         // Obtain the commit's tree ID and parent IDs.
@@ -288,6 +291,9 @@ where
 
     fn check_tag_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
         if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
+            if !is_skipped_object(oid, options) {
+                find_existing_object(&self.db, oid, &mut self.buf, Kind::Tag, options)?;
+            }
             return Ok(());
         }
 
@@ -330,6 +336,9 @@ where
 
     fn check_object_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
         if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
+            if !is_skipped_object(oid, options) {
+                find_existing_any_object(&self.db, oid, &mut self.buf, options)?;
+            }
             return Ok(());
         }
 
@@ -376,6 +385,8 @@ where
                         tree_path.clone(),
                     )? {
                         self.check_tree(&tree_id, &tree_path, &mut tree_ids, options)?;
+                    } else if !is_skipped_object(&tree_id, options) {
+                        ensure_optional_object_kind(&self.db, &tree_id, &mut self.buf, Kind::Tree, options)?;
                     }
                 }
                 Ok(())
@@ -528,6 +539,8 @@ where
             EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => {
                 if insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path)? {
                     check_blob(&self.db, oid, &mut self.buf, &mut self.missing_cb, options)?;
+                } else if !is_skipped_object(oid, options) {
+                    ensure_optional_object_kind(&self.db, oid, &mut self.buf, Kind::Blob, options)?;
                 }
                 Ok(())
             }
@@ -547,6 +560,8 @@ where
             Kind::Blob => {
                 if insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path)? {
                     check_blob(&self.db, oid, &mut self.buf, &mut self.missing_cb, options)?;
+                } else if !is_skipped_object(oid, options) {
+                    ensure_optional_object_kind(&self.db, oid, &mut self.buf, Kind::Blob, options)?;
                 }
                 Ok(())
             }
@@ -585,6 +600,8 @@ where
                 tree_path.clone(),
             )? {
                 self.check_tree(&tree_id, &tree_path, &mut tree_ids, options)?;
+            } else if !is_skipped_object(&tree_id, options) {
+                ensure_optional_object_kind(&self.db, &tree_id, &mut self.buf, Kind::Tree, options)?;
             }
         }
         Ok(())
@@ -667,6 +684,8 @@ where
                             &mut self.missing_cb,
                             options,
                         )?;
+                    } else if !is_skipped_object(&blob_id, options) {
+                        ensure_optional_object_kind(&self.db, &blob_id, &mut self.secondary_buf, Kind::Blob, options)?;
                     }
                 }
                 EntryKind::Commit => {
@@ -781,13 +800,16 @@ pub mod lost_found {
     }
 }
 
+fn is_skipped_object(oid: &ObjectId, options: Options<'_>) -> bool {
+    options
+        .skip_objects
+        .map(|skip_objects| skip_objects.contains(oid))
+        .unwrap_or_default()
+}
+
 fn insert_seen(seen: &mut HashSet, oid: ObjectId, options: Options<'_>) -> Result<bool, Error> {
     options.check_interrupted()?;
-    if options
-        .skip_objects
-        .map(|skip_objects| skip_objects.contains(&oid))
-        .unwrap_or_default()
-    {
+    if is_skipped_object(&oid, options) {
         return Ok(false);
     }
     let was_inserted = seen.insert(oid);
@@ -854,6 +876,20 @@ where
     if find_optional_object(db, oid, buf, Kind::Blob, options)?.is_none() {
         missing_cb(oid, Kind::Blob);
     }
+    Ok(())
+}
+
+fn ensure_optional_object_kind<T>(
+    db: &T,
+    oid: &ObjectId,
+    buf: &mut Vec<u8>,
+    expected: Kind,
+    options: Options<'_>,
+) -> Result<(), Error>
+where
+    T: Find,
+{
+    find_optional_object(db, oid, buf, expected, options)?;
     Ok(())
 }
 
