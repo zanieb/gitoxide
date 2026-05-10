@@ -780,6 +780,7 @@ Make it the best-performing implementation and the most convenient one.
     - [x] untracked files
     - [x] support for fs-monitor for modification checks
 * [x] differences between index and index to learn what changed
+    - Implemented through `Repository::tree_index_status()`, which materializes a tree as an index and diffs it with `gix_diff::index()`.
     - [x] rename tracking
 * [ ] sparse-index and split-index aware status acceleration
 
