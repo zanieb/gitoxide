@@ -71,8 +71,6 @@ pub mod file {
             entry: usize,
             source: gix_quote::ansi_c::undo::Error,
         },
-        #[error("Quoted pathspec entry {entry} has trailing data after byte {consumed} of {len}")]
-        TrailingData { entry: usize, consumed: usize, len: usize },
         #[error("Could not parse pathspec entry {entry}")]
         Parse { entry: usize, source: super::Error },
     }
@@ -103,15 +101,8 @@ pub fn from_file(input: &[u8], defaults: Defaults, options: file::Options) -> Re
         }
 
         let unquoted = if options.allow_quoted_strings {
-            let (unquoted, consumed) =
+            let (unquoted, _) =
                 gix_quote::ansi_c::undo(raw.as_bstr()).map_err(|source| file::Error::Unquote { entry, source })?;
-            if consumed != raw.len() {
-                return Err(file::Error::TrailingData {
-                    entry,
-                    consumed,
-                    len: raw.len(),
-                });
-            }
             unquoted
         } else {
             Cow::Borrowed(raw.as_bstr())

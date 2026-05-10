@@ -68,6 +68,7 @@ fn from_file_parses_lf_crlf_and_quoted_entries() {
     let patterns = gix_pathspec::parse::from_file(
         br#"src/*.rs
 "spaced path"
+"quoted" trailing bytes ignored by git
 :(literal)raw[chars]
 trailing-cr
 "#,
@@ -77,8 +78,8 @@ trailing-cr
     .expect("valid pathspec file");
 
     let paths = patterns.iter().map(gix_pathspec::Pattern::path).collect::<Vec<_>>();
-    assert_eq!(paths, ["src/*.rs", "spaced path", "raw[chars]", "trailing-cr"]);
-    assert_eq!(patterns[2].search_mode, SearchMode::Literal);
+    assert_eq!(paths, ["src/*.rs", "spaced path", "quoted", "raw[chars]", "trailing-cr"]);
+    assert_eq!(patterns[3].search_mode, SearchMode::Literal);
 
     let patterns =
         gix_pathspec::parse::from_file(b"Cargo.toml\r\nREADME.md\r\n", Default::default(), Default::default())
@@ -108,11 +109,6 @@ fn from_file_parses_nul_separated_entries_without_unquoting() {
 
 #[test]
 fn from_file_reports_entry_errors() {
-    let err =
-        gix_pathspec::parse::from_file(br#""quoted" trailing"#, Default::default(), Default::default()).unwrap_err();
-    assert!(err.to_string().contains("entry 1"));
-    assert!(err.to_string().contains("trailing data"));
-
     let err = gix_pathspec::parse::from_file(b"valid\n\n", Default::default(), Default::default()).unwrap_err();
     assert!(err.to_string().contains("entry 2"));
 }
