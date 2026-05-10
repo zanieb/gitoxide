@@ -53,6 +53,8 @@ mod revision {
 
 #[cfg(feature = "index")]
 mod index {
+    use gix::bstr::ByteSlice;
+
     #[test]
     fn basics() -> crate::Result {
         let repo = crate::named_subrepo_opts("make_basic_repo.sh", "unborn", gix::open::Options::isolated())?;
@@ -75,6 +77,91 @@ mod index {
             "This is a quirk of default values in gix and the way we override the initial branch for test fixtures"
         );
         Ok(())
+    }
+
+    #[cfg(feature = "dirwalk")]
+    mod add {
+        use super::*;
+
+        fn repo_rw() -> crate::Result<(gix::Repository, gix_testtools::tempfile::TempDir)> {
+            let tmp = gix_testtools::tempfile::tempdir()?;
+            let repo = gix::ThreadSafeRepository::init_opts(
+                tmp.path(),
+                gix::create::Kind::WithWorktree,
+                Default::default(),
+                crate::restricted(),
+            )?
+            .to_thread_local();
+            Ok((repo, tmp))
+        }
+
+        #[test]
+        fn respects_gitignore_unless_forced() -> crate::Result {
+            let (repo, _tmp) = repo_rw()?;
+            let workdir = repo.workdir().expect("worktree");
+            std::fs::write(workdir.join(".gitignore"), "*.log\n")?;
+            std::fs::write(workdir.join("keep.txt"), "keep\n")?;
+            std::fs::write(workdir.join("ignored.log"), "ignored\n")?;
+
+            let outcome = repo.add_to_index([b"keep.txt".as_bstr(), b"ignored.log".as_bstr()], Default::default())?;
+
+            assert_eq!(outcome.added_entries, 1);
+            assert_eq!(outcome.ignored_entries, [b"ignored.log".as_bstr()]);
+            let index = repo.open_index()?;
+            assert!(index.entry_by_path(b"keep.txt".as_bstr()).is_some());
+            assert!(index.entry_by_path(b"ignored.log".as_bstr()).is_none());
+
+            let outcome = repo.add_to_index(
+                [b"ignored.log".as_bstr()],
+                gix::repository::add_to_index::Options { force_ignored: true },
+            )?;
+
+            assert_eq!(outcome.added_entries, 1);
+            let index = repo.open_index()?;
+            assert!(index.entry_by_path(b"ignored.log".as_bstr()).is_some());
+            Ok(())
+        }
+
+        #[test]
+        fn refreshes_tracked_file_content() -> crate::Result {
+            let (repo, _tmp) = repo_rw()?;
+            let workdir = repo.workdir().expect("worktree");
+            std::fs::write(workdir.join("tracked.txt"), "old\n")?;
+            repo.add_to_index([b"tracked.txt".as_bstr()], Default::default())?;
+            let old_id = repo
+                .open_index()?
+                .entry_by_path(b"tracked.txt".as_bstr())
+                .expect("tracked")
+                .id;
+
+            std::fs::write(workdir.join("tracked.txt"), "new\n")?;
+            let outcome = repo.add_to_index([b"tracked.txt".as_bstr()], Default::default())?;
+
+            assert_eq!(outcome.added_entries, 1);
+            let new_id = repo
+                .open_index()?
+                .entry_by_path(b"tracked.txt".as_bstr())
+                .expect("tracked")
+                .id;
+            assert_ne!(old_id, new_id);
+            assert_eq!(new_id, repo.write_blob("new\n")?.detach());
+            Ok(())
+        }
+
+        #[test]
+        fn stages_tracked_deletions() -> crate::Result {
+            let (repo, _tmp) = repo_rw()?;
+            let workdir = repo.workdir().expect("worktree");
+            std::fs::write(workdir.join("gone.txt"), "gone\n")?;
+            repo.add_to_index([b"gone.txt".as_bstr()], Default::default())?;
+            std::fs::remove_file(workdir.join("gone.txt"))?;
+
+            let outcome = repo.add_to_index([b"gone.txt".as_bstr()], Default::default())?;
+
+            assert_eq!(outcome.removed_entries, 1);
+            assert!(repo.open_index()?.entry_by_path(b"gone.txt".as_bstr()).is_none());
+            Ok(())
+        }
     }
 }
 

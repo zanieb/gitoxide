@@ -1,6 +1,34 @@
 use std::{ffi::OsString, path::PathBuf};
 
 use anyhow::bail;
+use gix::bstr::BString;
+
+#[derive(Default)]
+pub struct AddOptions {
+    pub force_ignored: bool,
+}
+
+pub fn add(
+    repo: gix::Repository,
+    pathspecs: Vec<BString>,
+    mut out: impl std::io::Write,
+    opts: AddOptions,
+) -> anyhow::Result<()> {
+    let outcome = repo.add_to_index(
+        pathspecs,
+        gix::repository::add_to_index::Options {
+            force_ignored: opts.force_ignored,
+        },
+    )?;
+    writeln!(
+        out,
+        "added: {}, removed: {}, ignored: {}",
+        outcome.added_entries,
+        outcome.removed_entries,
+        outcome.ignored_entries.len()
+    )?;
+    Ok(())
+}
 
 pub fn from_tree(
     repo: gix::Repository,

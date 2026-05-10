@@ -1738,6 +1738,25 @@ pub fn main() -> Result<()> {
             ),
         },
         Subcommands::Index(cmd) => match cmd {
+            index::Subcommands::Add {
+                force_ignored,
+                pathspec,
+            } => prepare_and_run(
+                "index-add",
+                trace,
+                verbose,
+                progress,
+                progress_keep_open,
+                None,
+                move |_progress, out, _err| {
+                    core::repository::index::add(
+                        repository(Mode::Lenient)?,
+                        pathspec,
+                        out,
+                        core::repository::index::AddOptions { force_ignored },
+                    )
+                },
+            ),
             index::Subcommands::Entries {
                 format: entry_format,
                 no_attributes,

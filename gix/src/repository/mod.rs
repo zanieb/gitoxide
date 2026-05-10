@@ -45,6 +45,8 @@ pub(crate) mod identity;
 mod impls;
 #[cfg(feature = "index")]
 mod index;
+#[cfg(feature = "dirwalk")]
+mod index_add;
 pub(crate) mod init;
 mod location;
 #[cfg(feature = "mailmap")]
@@ -541,6 +543,58 @@ pub mod index_or_load_from_head_or_empty {
         TraverseTree(#[from] crate::repository::index_from_tree::Error),
         #[error(transparent)]
         OpenIndex(#[from] crate::worktree::open_index::Error),
+    }
+}
+
+/// Add files from the worktree to the index.
+#[cfg(feature = "dirwalk")]
+pub mod add_to_index {
+    /// Options for [`Repository::add_to_index()`](crate::Repository::add_to_index()).
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct Options {
+        /// Stage ignored files as well.
+        pub force_ignored: bool,
+    }
+
+    /// The outcome of [`Repository::add_to_index()`](crate::Repository::add_to_index()).
+    #[derive(Default, Debug, Clone)]
+    pub struct Outcome {
+        /// The number of paths added or refreshed in the index.
+        pub added_entries: usize,
+        /// The number of tracked paths removed from the index because they are missing in the worktree.
+        pub removed_entries: usize,
+        /// Ignored paths that matched the walk. These are skipped unless [`Options::force_ignored`] is set.
+        pub ignored_entries: Vec<crate::bstr::BString>,
+    }
+
+    /// The error returned by [`Repository::add_to_index()`](crate::Repository::add_to_index()).
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error("A working tree is required to add files to the index")]
+        MissingWorktree,
+        #[error(transparent)]
+        FilterPipeline(#[from] crate::repository::filter::pipeline::Error),
+        #[error(transparent)]
+        Pathspec(#[from] crate::pathspec::init::Error),
+        #[error(transparent)]
+        DirwalkOptions(#[from] crate::config::boolean::Error),
+        #[error(transparent)]
+        Dirwalk(#[from] crate::dirwalk::Error),
+        #[error(transparent)]
+        WorktreeFile(#[from] crate::filter::pipeline::worktree_file_to_object::Error),
+        #[error("Could not read metadata for '{path}'")]
+        Metadata {
+            path: std::path::PathBuf,
+            source: std::io::Error,
+        },
+        #[error("Could not convert filesystem metadata for '{path}' to index stat information")]
+        Stat {
+            path: std::path::PathBuf,
+            source: std::time::SystemTimeError,
+        },
+        #[error(transparent)]
+        WriteIndex(#[from] gix_index::file::write::Error),
     }
 }
 
