@@ -55,6 +55,11 @@ pub enum Error {
         path: std::path::PathBuf,
         source: std::io::Error,
     },
+    #[error("Could not remove imported pack file at '{}'", path.display())]
+    RemoveImportedPackFile {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
 }
 
 impl crate::Repository {
@@ -136,6 +141,7 @@ impl crate::Repository {
 
         for bundle_ref in &header.refs {
             if !self.has_object(bundle_ref.id) {
+                remove_imported_pack_files(&mut write_pack)?;
                 return Err(Error::MissingRefObject {
                     name: bundle_ref.name.clone(),
                     id: bundle_ref.id,
@@ -173,5 +179,28 @@ impl crate::Repository {
             reference_edits,
             skipped_refs,
         })
+    }
+}
+
+fn remove_imported_pack_files(write_pack: &mut gix_pack::bundle::write::Outcome) -> Result<(), Error> {
+    let Some(keep_path) = write_pack.keep_path.take() else {
+        return Ok(());
+    };
+    remove_pack_file(keep_path)?;
+
+    if let Some(index_path) = write_pack.index_path.take() {
+        remove_pack_file(index_path)?;
+    }
+    if let Some(data_path) = write_pack.data_path.take() {
+        remove_pack_file(data_path)?;
+    }
+    Ok(())
+}
+
+fn remove_pack_file(path: std::path::PathBuf) -> Result<(), Error> {
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(Error::RemoveImportedPackFile { path, source }),
     }
 }
