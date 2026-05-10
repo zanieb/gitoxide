@@ -36,6 +36,7 @@ impl File {
     /// * `ignore`
     /// * `update`
     /// * `branch`
+    /// * `shallow`
     ///
     /// These values aren't validated yet, which will happen upon query.
     pub fn append_submodule_overrides(&mut self, config: &gix_config::File<'_>) -> &mut Self {
@@ -46,7 +47,7 @@ impl File {
             .flatten()
             .filter_map(|s| s.header().subsection_name().map(|n| (n, s)))
         {
-            for field in ["url", "fetchRecurseSubmodules", "ignore", "update", "branch"] {
+            for field in ["url", "fetchRecurseSubmodules", "ignore", "update", "branch", "shallow"] {
                 if let Some(value) = section.value(field) {
                     values.entry((module_name, field)).or_default().push(value);
                 }

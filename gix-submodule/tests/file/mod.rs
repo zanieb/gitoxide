@@ -472,6 +472,20 @@ mod append_submodule_overrides {
         module.append_submodule_overrides(&repo_config);
         Ok(())
     }
+
+    #[test]
+    fn shallow_is_overridden() -> crate::Result {
+        let mut module = submodule("[submodule.a]\n shallow = false");
+        let repo_config = gix_config::File::from_str("[submodule.a]\n shallow = true")?;
+        module.append_submodule_overrides(&repo_config);
+
+        assert_eq!(
+            module.shallow("a".into())?,
+            Some(true),
+            "local submodule shallow config should override .gitmodules"
+        );
+        Ok(())
+    }
 }
 
 mod baseline;

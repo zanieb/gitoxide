@@ -195,6 +195,8 @@ pub mod update {
         #[error(transparent)]
         UpdateConfiguration(#[from] gix_submodule::config::update::Error),
         #[error(transparent)]
+        ShallowConfiguration(#[from] gix_config::value::Error),
+        #[error(transparent)]
         IndexId(#[from] super::index_id::Error),
         #[error(transparent)]
         Clone(#[from] crate::clone::Error),
