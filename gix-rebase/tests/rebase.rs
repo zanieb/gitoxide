@@ -1745,11 +1745,15 @@ mod driver {
 
         let calls = driver.cherry_pick_calls.borrow();
         assert_eq!(calls.len(), 2);
-        // The fixup call should have a message override.
-        // Current implementation uses last_done_commit_message which returns
-        // the previous commit's message regardless of AmendMessage variant.
-        // This tests the existing behavior -- fixup always uses prev message.
-        assert!(calls[1].1.is_some(), "fixup -C should provide a message override");
+        assert_eq!(
+            calls[1].1.as_deref(),
+            Some(b"Replacement message\n".as_slice()),
+            "fixup -C should replace the accumulated message with the fixup commit message"
+        );
+        assert_eq!(
+            state.accumulated_squash_message.as_deref(),
+            Some(b"Replacement message\n".as_slice())
+        );
     }
 
     #[test]
@@ -1777,11 +1781,33 @@ mod driver {
         ]);
 
         state.step(&driver, &rebase_dir).unwrap();
-        state.step(&driver, &rebase_dir).unwrap();
+        let outcome = state.step(&driver, &rebase_dir).unwrap();
 
         let calls = driver.cherry_pick_calls.borrow();
         assert_eq!(calls.len(), 2);
-        assert!(calls[1].1.is_some(), "fixup -c should provide a message override");
+        assert_eq!(
+            calls[1].1.as_deref(),
+            Some(b"Edit message\n".as_slice()),
+            "fixup -c should apply the fixup commit message before pausing"
+        );
+        match outcome {
+            StepOutcome::Paused {
+                commit_id: Some(commit_id),
+                original_message: Some(original_message),
+            } => {
+                assert_eq!(commit_id, make_oid("0000000000000000000000000000000000000002"));
+                assert_eq!(original_message, b"Edit message\n");
+            }
+            other => panic!("fixup -c should pause for message editing, got {other:?}"),
+        }
+        assert_eq!(
+            state.stopped_sha,
+            Some(make_oid("0000000000000000000000000000000000000002"))
+        );
+        assert_eq!(
+            state.accumulated_squash_message.as_deref(),
+            Some(b"Edit message\n".as_slice())
+        );
     }
 
     #[test]
