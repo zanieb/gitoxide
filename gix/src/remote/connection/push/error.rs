@@ -32,6 +32,11 @@ pub enum Error {
         oid: gix_hash::ObjectId,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("Multiple push sources map to destination {destination}: {sources:?}")]
+    DestinationConflict {
+        destination: BString,
+        sources: Vec<BString>,
+    },
     #[error("Could not generate pack data for push")]
     PackGeneration(#[from] Box<dyn std::error::Error + Send + Sync>),
 }

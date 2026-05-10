@@ -209,6 +209,7 @@ impl LocalRef {
 }
 
 struct SupplementalUpdate {
+    src: BString,
     dst: BString,
     new_id: gix_hash::ObjectId,
 }
@@ -247,6 +248,7 @@ fn build_push_commands(
 
     let mut commands = Vec::new();
     let mut lease_rejected = Vec::new();
+    let mut source_by_destination = std::collections::HashMap::new();
 
     let local_refs = local_refs_for_push(repo)?;
     let null = gix_hash::ObjectId::null(object_hash);
@@ -281,6 +283,7 @@ fn build_push_commands(
                 source: Box::new(e),
             })?;
             supplemental_updates.push(SupplementalUpdate {
+                src: src.to_owned(),
                 dst: expand_push_destination(dst),
                 new_id: new_id.detach(),
             });
@@ -288,6 +291,7 @@ fn build_push_commands(
     }
 
     for update in matched.updates {
+        let source_label = push_source_label(&update.src);
         let new_id = match update.src {
             SourceRef::ObjectId(oid) => {
                 if !repo.has_object(oid) {
@@ -313,6 +317,8 @@ fn build_push_commands(
                     )),
                 })?,
         };
+
+        record_push_destination(&update.dst, source_label, &mut source_by_destination)?;
 
         let remote_old_id = remote_ref_by_name
             .get(update.dst.as_bytes())
@@ -343,6 +349,8 @@ fn build_push_commands(
     }
 
     for update in supplemental_updates {
+        record_push_destination(&update.dst, update.src, &mut source_by_destination)?;
+
         let remote_old_id = remote_ref_by_name
             .get(update.dst.as_bytes())
             .and_then(|oid| *oid)
@@ -372,6 +380,8 @@ fn build_push_commands(
     }
 
     for deletion in matched.deletions {
+        record_push_destination(&deletion.dst, BString::from("<delete>"), &mut source_by_destination)?;
+
         let remote_old_id = remote_ref_by_name.get(deletion.dst.as_bytes()).and_then(|oid| *oid);
 
         if let Some(expected_ids) = expected_old_ids {
@@ -397,6 +407,31 @@ fn build_push_commands(
     }
 
     Ok((commands, lease_rejected))
+}
+
+fn record_push_destination(
+    dst: &BString,
+    src: BString,
+    seen: &mut std::collections::HashMap<BString, BString>,
+) -> Result<(), Error> {
+    if let Some(existing) = seen.get(dst) {
+        if existing != &src {
+            return Err(Error::DestinationConflict {
+                destination: dst.clone(),
+                sources: vec![existing.clone(), src],
+            });
+        }
+    } else {
+        seen.insert(dst.clone(), src);
+    }
+    Ok(())
+}
+
+fn push_source_label(src: &SourceRef<'_>) -> BString {
+    match src {
+        SourceRef::FullName(name) => name.as_ref().to_owned(),
+        SourceRef::ObjectId(oid) => BString::from(oid.to_string()),
+    }
 }
 
 fn local_refs_for_push(repo: &crate::Repository) -> Result<Vec<LocalRef>, Error> {
