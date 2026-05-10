@@ -260,6 +260,8 @@ mod edit_tree {
     }
 }
 mod write_object {
+    #[cfg(feature = "sha256")]
+    use crate::repository::object::empty_bare_repo_with_object_hash;
     use crate::{repository::object::empty_bare_in_memory_repo, util::hex_to_id};
     use gix::objs::tree::EntryKind;
 
@@ -417,6 +419,23 @@ mod write_object {
             repo.write_object_checked(&tree).unwrap_err().to_string(),
             format!("Cannot write tree object because it references blob object {tree_id}, which is actually tree")
         );
+        Ok(())
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn checked_tree_uses_repository_hash_kind_for_entries() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo_with_object_hash(gix::hash::Kind::Sha256)?;
+        let blob = repo.write_blob(b"sha256 blob")?.detach();
+        let mut tree = gix::objs::Tree::empty();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Blob.into(),
+            filename: "blob".into(),
+            oid: blob,
+        });
+
+        let id = repo.write_object_checked(&tree)?;
+        assert!(repo.has_object(id));
         Ok(())
     }
 
@@ -1105,5 +1124,24 @@ fn empty_bare_repo() -> crate::Result<(tempfile::TempDir, gix::Repository)> {
         gix::open::Options::isolated(),
     )?
     .into();
+    Ok((tmp, repo))
+}
+
+#[cfg(feature = "sha256")]
+fn empty_bare_repo_with_object_hash(
+    object_hash: gix::hash::Kind,
+) -> crate::Result<(tempfile::TempDir, gix::Repository)> {
+    let (tmp, repo) = empty_bare_repo()?;
+    if object_hash == repo.object_hash() {
+        return Ok((tmp, repo));
+    }
+
+    std::fs::write(
+        tmp.path().join("config"),
+        format!(
+            "[core]\n\trepositoryFormatVersion = 1\n\tfilemode = true\n\tbare = true\n[extensions]\n\tobjectFormat = {object_hash}\n"
+        ),
+    )?;
+    let repo = gix::open_opts(tmp.path(), gix::open::Options::isolated())?;
     Ok((tmp, repo))
 }
