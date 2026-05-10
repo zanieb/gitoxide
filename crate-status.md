@@ -208,7 +208,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * [x] read git configuration
     * [ ] merging
     * [x] stashing (save, apply, pop, drop, list, --keep-index, --include-untracked)
-    * [ ] Use _Commit Graph_ to speed up certain queries
+    * [x] Use _Commit Graph_ to speed up certain queries
     * [ ] subtree
     * [x] interactive rebase status/manipulation (state read/write + step-by-step driver)
     * **submodules**
