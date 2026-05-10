@@ -343,6 +343,38 @@ fn parse_v3_single_capability() {
     assert_eq!(header.capabilities[0], BString::from("object-format=sha1"));
 }
 
+#[test]
+fn v3_object_format_capability_must_be_supported() {
+    let data = b"# v3 git bundle\n\
+                 @object-format=sha512\n\
+                 \n\
+                 abcdef0123456789abcdef0123456789abcdef01 refs/heads/main\n\
+                 \n";
+    let err = header::decode(data.as_slice(), gix_hash::Kind::Sha1).unwrap_err();
+    assert!(matches!(
+        err,
+        header::Error::UnsupportedObjectFormat { format } if format.as_slice() == b"sha512"
+    ));
+}
+
+#[cfg(feature = "sha256")]
+#[test]
+fn v3_object_format_capability_must_match_requested_hash() {
+    let data = b"# v3 git bundle\n\
+                 @object-format=sha256\n\
+                 \n\
+                 abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789 refs/heads/main\n\
+                 \n";
+    let err = header::decode(data.as_slice(), gix_hash::Kind::Sha1).unwrap_err();
+    assert!(matches!(
+        err,
+        header::Error::ObjectFormatMismatch {
+            expected: gix_hash::Kind::Sha1,
+            actual: gix_hash::Kind::Sha256,
+        }
+    ));
+}
+
 /// V2 bundles should not have capabilities -- any @ lines should fail or be treated as refs.
 /// In C Git, v2 bundles ignore capabilities (there's no capability section).
 #[test]
