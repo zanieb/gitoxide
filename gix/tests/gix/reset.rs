@@ -128,6 +128,44 @@ mod reset {
     }
 
     #[test]
+    fn hard_reset_does_not_remove_parent_paths_from_old_index() -> crate::Result {
+        use gix::bstr::ByteSlice;
+
+        let (repo, tmp) = repo_rw_reset()?;
+        let workdir = tmp.path().to_owned();
+        let outside_name = format!(
+            "{}-outside-victim",
+            workdir.file_name().expect("fixture path has a name").to_string_lossy()
+        );
+        let outside_file = workdir.parent().expect("fixture has a parent").join(&outside_name);
+        std::fs::write(&outside_file, "keep\n")?;
+
+        let malicious_index_path = format!("../{outside_name}");
+        let blob_id = repo.write_blob("malicious\n")?;
+        let mut index = repo.open_index()?;
+        index.add_entry(
+            gix_index::entry::Stat::default(),
+            blob_id.detach(),
+            gix_index::entry::Flags::empty(),
+            gix_index::entry::Mode::FILE,
+            malicious_index_path.as_bytes().as_bstr(),
+        );
+        index.write(Default::default())?;
+
+        let head = repo.head_id()?.detach();
+        repo.reset(head, ResetMode::Hard)?;
+
+        assert_eq!(
+            std::fs::read_to_string(&outside_file)?,
+            "keep\n",
+            "hard reset must not delete paths that escape the worktree through the old index"
+        );
+        std::fs::remove_file(outside_file)?;
+
+        Ok(())
+    }
+
+    #[test]
     fn reset_to_head_is_noop_for_soft() -> crate::Result {
         let (repo, _tmp) = repo_rw_reset()?;
         let head_before = repo.head_id()?.detach();
