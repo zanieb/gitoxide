@@ -89,6 +89,7 @@ progress-unit-bytes = ["gix-utils/progress-unit-bytes"]
 #! Support for various hash algorithms is controlled here. The idea is to allow applications to
 #! compile in only the ones they need, which is why within the entire `gix` stack there is no
 #! crate that sets an algorithm, except for the top-level `gix` crate for convenience.
+#! Some legacy storage formats still require SHA-1 support internally even when SHA-256 is enabled.
 #!
 #! At least one hash algorithm must be enabled for compilation to succeed.
 
@@ -102,6 +103,14 @@ sha1 = [
 
 ## Enable support for the SHA-256 hash throughout the `gix` stack.
 sha256 = [
+    "gix-archive?/sha256",
+    "gix-blame?/sha256",
+    "gix-commitgraph/sha256",
+    "gix-config/sha256",
+    "gix-diff/sha256",
+    "gix-dir?/sha256",
+    "gix-discover/sha256",
+    "gix-filter?/sha256",
     "gix-hash/sha256",
     "gix-object/sha256",
     "gix-pack/sha256",
