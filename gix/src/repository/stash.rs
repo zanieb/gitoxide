@@ -39,6 +39,7 @@ fn path_has_worktree_escape_component(path: &[u8]) -> bool {
 }
 
 type StashIndexChange = (Vec<u8>, ObjectId, gix_index::entry::Mode);
+type StashUntrackedFile = (Vec<u8>, ObjectId, gix_index::entry::Mode);
 
 /// A single entry from the stash reflog.
 #[derive(Debug)]
@@ -166,6 +167,8 @@ pub enum ApplyError {
     Checkout(#[from] gix_worktree_state::checkout::Error),
     #[error("Failed to convert object database to Arc for thread-safe access")]
     ObjectsToArc(#[from] std::io::Error),
+    #[error(transparent)]
+    HashObject(#[from] gix_hash::hasher::Error),
     #[error("Path traversal rejected: entry path '{path}' contains '..' components")]
     PathTraversal { path: BString },
 }
@@ -473,7 +476,7 @@ impl Repository {
 
         // Remove untracked files from the worktree after stashing them.
         if options.include_untracked && has_untracked {
-            for (path, _) in &untracked_files {
+            for (path, _, _) in &untracked_files {
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
                 )));
@@ -641,7 +644,7 @@ impl Repository {
         };
 
         // Collect untracked files from the third parent (if any).
-        let mut untracked_files: Vec<(Vec<u8>, ObjectId)> = Vec::new();
+        let mut untracked_files: Vec<StashUntrackedFile> = Vec::new();
         if parent_ids.len() >= 3 {
             let untracked_parent_id = parent_ids[2].detach();
             let untracked_commit = self
@@ -654,7 +657,7 @@ impl Repository {
                 .map_err(ApplyError::IndexFromTree)?;
             for untracked_entry in untracked_index.entries() {
                 let path: &[u8] = untracked_entry.path(&untracked_index);
-                untracked_files.push((path.to_vec(), untracked_entry.id));
+                untracked_files.push((path.to_vec(), untracked_entry.id, untracked_entry.mode));
             }
         }
 
@@ -800,16 +803,12 @@ impl Repository {
 
         // Check untracked files for conflicts: if a file from the untracked commit
         // already exists in the worktree with different content, it's a conflict.
-        for (path, blob_id) in &untracked_files {
-            let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
-                path.as_slice(),
-            )));
-            if let Ok(content) = std::fs::read(&file_path) {
-                if let Ok(worktree_oid) = gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)
-                {
-                    if worktree_oid != *blob_id {
-                        conflicts.push(BString::from(path.as_slice()));
-                    }
+        for (path, blob_id, mode) in &untracked_files {
+            if let Some(matches_stashed_entry) =
+                self.untracked_worktree_entry_matches(&workdir, path, *blob_id, *mode)?
+            {
+                if !matches_stashed_entry {
+                    conflicts.push(BString::from(path.as_slice()));
                 }
             }
         }
@@ -865,7 +864,7 @@ impl Repository {
         final_index.write(Default::default()).map_err(ApplyError::WriteIndex)?;
 
         // Restore untracked files from the third parent.
-        for (path, blob_id) in &untracked_files {
+        for (path, blob_id, mode) in &untracked_files {
             // Reject paths with '..' components to prevent writing outside worktree.
             validate_path_within_worktree(path)?;
             let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
@@ -877,7 +876,18 @@ impl Repository {
             }
             let blob = self.find_object(*blob_id)?;
             let blob_data: &[u8] = blob.data.as_ref();
-            std::fs::write(&file_path, blob_data).map_err(ApplyError::ObjectsToArc)?;
+            if *mode == gix_index::entry::Mode::SYMLINK {
+                if file_path.symlink_metadata().is_ok() {
+                    gix_fs::symlink::remove(&file_path).map_err(ApplyError::ObjectsToArc)?;
+                }
+                gix_fs::symlink::create(
+                    gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(blob_data)).as_ref(),
+                    &file_path,
+                )
+                .map_err(ApplyError::ObjectsToArc)?;
+            } else {
+                std::fs::write(&file_path, blob_data).map_err(ApplyError::ObjectsToArc)?;
+            }
         }
 
         Ok(())
@@ -1047,7 +1057,7 @@ impl Repository {
         &self,
         index: &gix_index::File,
         workdir: &std::path::Path,
-    ) -> Result<Vec<(Vec<u8>, ObjectId)>, SaveError> {
+    ) -> Result<Vec<StashUntrackedFile>, SaveError> {
         use std::collections::HashSet;
 
         // Build a set of all paths in the index for fast lookup.
@@ -1094,7 +1104,7 @@ impl Repository {
         root: &std::path::Path,
         dir: &std::path::Path,
         indexed_paths: &std::collections::HashSet<Vec<u8>>,
-        out: &mut Vec<(Vec<u8>, ObjectId)>,
+        out: &mut Vec<StashUntrackedFile>,
         excludes: Option<&mut crate::AttributeStack<'_>>,
     ) -> Result<(), SaveError> {
         self.walk_worktree_for_untracked_inner(root, dir, indexed_paths, out, excludes, 0)
@@ -1108,7 +1118,7 @@ impl Repository {
         root: &std::path::Path,
         dir: &std::path::Path,
         indexed_paths: &std::collections::HashSet<Vec<u8>>,
-        out: &mut Vec<(Vec<u8>, ObjectId)>,
+        out: &mut Vec<StashUntrackedFile>,
         mut excludes: Option<&mut crate::AttributeStack<'_>>,
         depth: usize,
     ) -> Result<(), SaveError> {
@@ -1135,7 +1145,10 @@ impl Repository {
         for (i, entry) in dir_entries.iter().enumerate() {
             let path = entry.path();
             let relative = path.strip_prefix(root).unwrap_or(&path);
-            let relative_bytes: Vec<u8> = relative.to_string_lossy().replace('\\', "/").into_bytes();
+            let relative_bytes: Vec<u8> =
+                gix_path::to_unix_separators_on_windows(gix_path::into_bstr(relative.to_owned()))
+                    .into_owned()
+                    .into();
 
             // Skip .git directory.
             if path.file_name().is_some_and(|n| n == ".git") {
@@ -1181,11 +1194,23 @@ impl Repository {
                     excludes.as_deref_mut(),
                     depth + 1,
                 )?;
-            } else if file_type.is_file() && !indexed_paths.contains(&relative_paths[i]) {
+            } else if (file_type.is_file() || file_type.is_symlink()) && !indexed_paths.contains(&relative_paths[i]) {
                 // Write blob to ODB immediately to avoid holding file contents in memory.
-                let content = std::fs::read(&path).map_err(SaveError::ReadWorktreeFile)?;
+                let (content, mode) = if file_type.is_symlink() {
+                    (
+                        gix_path::into_bstr(std::fs::read_link(&path).map_err(SaveError::ReadWorktreeFile)?)
+                            .into_owned()
+                            .into(),
+                        gix_index::entry::Mode::SYMLINK,
+                    )
+                } else {
+                    (
+                        std::fs::read(&path).map_err(SaveError::ReadWorktreeFile)?,
+                        gix_index::entry::Mode::FILE,
+                    )
+                };
                 let blob_id = self.write_blob(&content)?.detach();
-                out.push((relative_paths[i].clone(), blob_id));
+                out.push((relative_paths[i].clone(), blob_id, mode));
             }
         }
         Ok(())
@@ -1195,20 +1220,20 @@ impl Repository {
     ///
     /// Builds a tree hierarchy from the (path, blob_oid) pairs.
     /// Paths may contain directory separators (e.g., `subdir/file.txt`).
-    fn build_untracked_tree(&self, files: &[(Vec<u8>, ObjectId)]) -> Result<ObjectId, SaveError> {
+    fn build_untracked_tree(&self, files: &[StashUntrackedFile]) -> Result<ObjectId, SaveError> {
         use std::collections::BTreeMap;
 
         // Build a nested map: directory -> (filename -> blob_oid).
         // This handles nested paths like "a/b/file.txt".
         #[derive(Default)]
         struct DirNode {
-            files: BTreeMap<Vec<u8>, ObjectId>,
+            files: BTreeMap<Vec<u8>, (ObjectId, gix_index::entry::Mode)>,
             dirs: BTreeMap<Vec<u8>, DirNode>,
         }
 
         let mut root = DirNode::default();
 
-        for (path, blob_id) in files {
+        for (path, blob_id, mode) in files {
             // Split path into components.
             let parts: Vec<&[u8]> = path.split(|&b| b == b'/').collect();
             let (filename, dir_parts) = parts.split_last().expect("path is not empty");
@@ -1217,7 +1242,7 @@ impl Repository {
             for dir in dir_parts {
                 node = node.dirs.entry(dir.to_vec()).or_default();
             }
-            node.files.insert(filename.to_vec(), *blob_id);
+            node.files.insert(filename.to_vec(), (*blob_id, *mode));
         }
 
         // Recursively write trees bottom-up.
@@ -1235,9 +1260,9 @@ impl Repository {
             }
 
             // Add files.
-            for (name, oid) in &node.files {
+            for (name, (oid, mode)) in &node.files {
                 entries.push(gix_object::tree::Entry {
-                    mode: gix_object::tree::EntryKind::Blob.into(),
+                    mode: tree_mode_from_index_mode(*mode),
                     filename: name.as_slice().into(),
                     oid: *oid,
                 });
@@ -1250,6 +1275,37 @@ impl Repository {
         }
 
         write_tree_node(&root, self)
+    }
+
+    fn untracked_worktree_entry_matches(
+        &self,
+        workdir: &std::path::Path,
+        path: &[u8],
+        blob_id: ObjectId,
+        mode: gix_index::entry::Mode,
+    ) -> Result<Option<bool>, ApplyError> {
+        let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(path)));
+        let meta = match file_path.symlink_metadata() {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(ApplyError::ObjectsToArc(err)),
+        };
+
+        let content = if mode == gix_index::entry::Mode::SYMLINK {
+            if !meta.file_type().is_symlink() {
+                return Ok(Some(false));
+            }
+            gix_path::into_bstr(std::fs::read_link(&file_path).map_err(ApplyError::ObjectsToArc)?)
+                .into_owned()
+                .into()
+        } else {
+            if meta.file_type().is_symlink() || !meta.is_file() {
+                return Ok(Some(false));
+            }
+            std::fs::read(&file_path).map_err(ApplyError::ObjectsToArc)?
+        };
+        let worktree_oid = gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)?;
+        Ok(Some(worktree_oid == blob_id))
     }
 
     /// Build a tree object that represents the current worktree state.
@@ -1404,6 +1460,16 @@ fn parse_reflog_new_oid(line: &[u8], hash_kind: gix_hash::Kind) -> Option<Object
     }
     let hex = &line[start..end];
     ObjectId::from_hex(hex).ok()
+}
+
+fn tree_mode_from_index_mode(mode: gix_index::entry::Mode) -> gix_object::tree::EntryMode {
+    if mode == gix_index::entry::Mode::SYMLINK {
+        gix_object::tree::EntryKind::Link.into()
+    } else if mode == gix_index::entry::Mode::FILE_EXECUTABLE {
+        gix_object::tree::EntryKind::BlobExecutable.into()
+    } else {
+        gix_object::tree::EntryKind::Blob.into()
+    }
 }
 
 #[derive(Debug, Clone)]
