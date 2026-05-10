@@ -279,6 +279,7 @@ macro_rules! mktest {
                     ignore_revs: Vec::new(),
                     worktree_blob: None,
                     oldest_commit: None,
+                    shallow_commits: Vec::new(),
                 },
                 &std::sync::atomic::AtomicBool::new(false),
             )?
@@ -372,6 +373,7 @@ fn diff_algorithm_parity() {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )
@@ -444,6 +446,7 @@ fn since() -> gix_testtools::TestResult {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?
@@ -488,6 +491,7 @@ mod blame_ranges {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -535,6 +539,7 @@ mod blame_ranges {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -580,6 +585,7 @@ mod blame_ranges {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -630,6 +636,7 @@ mod rename_tracking {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -664,6 +671,7 @@ mod rename_tracking {
                     ignore_revs: Vec::new(),
                     worktree_blob: None,
                     oldest_commit: None,
+                    shallow_commits: Vec::new(),
                 },
             )?
             .entries;
