@@ -206,7 +206,7 @@ impl PrepareFetch {
         let mut clone_fetch_tags = None;
         if let Some(f) = self.configure_remote.as_mut() {
             remote = f(remote).map_err(Error::RemoteConfiguration)?;
-        } else {
+        } else if self.shallow == remote::fetch::Shallow::NoChange {
             clone_fetch_tags = remote::fetch::Tags::All.into();
         }
 

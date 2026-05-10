@@ -2,7 +2,7 @@ use crate::{remote, util::restricted};
 
 #[cfg(all(feature = "worktree-mutation", feature = "blocking-network-client"))]
 mod blocking_io {
-    use std::{borrow::Cow, path::Path, sync::atomic::AtomicBool};
+    use std::{borrow::Cow, path::Path, process::Command, sync::atomic::AtomicBool};
 
     use crate::{
         remote,
@@ -25,6 +25,22 @@ mod blocking_io {
         Ok(std::iter::once(commits.head)
             .chain(commits.tail.iter().copied())
             .collect())
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .expect("git must be on PATH");
+        assert!(
+            output.status.success(),
+            "git {} failed in {}:\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -150,6 +166,54 @@ mod blocking_io {
             "shallow clone refspec should not use wildcard and should be the main branch: {refspec_str}"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn shallow_clone_fetches_included_tags_only() -> crate::Result {
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _out) = gix::prepare_clone_bare(remote::repo("base").path(), tmp.path())?
+            .with_shallow(Shallow::DepthAtRemote(1.try_into()?))
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        assert!(
+            repo.references()?.prefixed("refs/tags/")?.next().is_none(),
+            "shallow clone should not fetch unrelated tags"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn shallow_clone_includes_tags_pointing_to_received_history() -> crate::Result {
+        let remote_dir = gix_testtools::scripted_fixture_writable("make_remote_repos.sh")?;
+        let base = remote_dir.path().join("base");
+        git(&base, &["tag", "tip-light", "main"]);
+        git(
+            &base,
+            &[
+                "-c",
+                "user.name=Bundle Test",
+                "-c",
+                "user.email=bundle@example.com",
+                "tag",
+                "-m",
+                "tip annotated",
+                "tip-annotated",
+                "main",
+            ],
+        );
+
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _out) = gix::prepare_clone_bare(base, tmp.path())?
+            .with_shallow(Shallow::DepthAtRemote(1.try_into()?))
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        assert!(repo.find_reference("refs/tags/tip-light").is_ok());
+        assert!(repo.find_reference("refs/tags/tip-annotated").is_ok());
+        assert!(
+            repo.try_find_reference("refs/tags/future-tag")?.is_none(),
+            "shallow clone should not fetch tags outside the received history"
+        );
         Ok(())
     }
 
