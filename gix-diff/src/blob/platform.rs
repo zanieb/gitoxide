@@ -26,6 +26,8 @@ pub(crate) struct CacheValue {
     mode: gix_object::tree::EntryKind,
     /// A possibly empty buffer, depending on `conversion.data` which may indicate the data is considered binary.
     buffer: Vec<u8>,
+    /// If `true`, `buffer` contains the original bytes for a binary resource so it can be passed to an external command.
+    binary_buffer_is_available: bool,
 }
 
 impl std::hash::Hash for CacheKey {
@@ -161,7 +163,10 @@ pub mod resource {
                         buf: &value.buffer,
                         is_derived,
                     },
-                    pipeline::Data::Binary { size } => Data::Binary { size },
+                    pipeline::Data::Binary { size } => Data::Binary {
+                        size,
+                        data: value.binary_buffer_is_available.then_some(value.buffer.as_slice()),
+                    },
                 }),
                 mode: value.mode,
                 rela_path: key.location.as_ref(),
@@ -216,6 +221,8 @@ pub mod resource {
             /// content, as once it can be the size of the blob in git, and once it's the size of file
             /// in the worktree.
             size: u64,
+            /// The resource bytes, if they were retained while classifying this item as binary.
+            data: Option<&'a [u8]>,
         },
     }
 
@@ -357,7 +364,7 @@ pub mod prepare_diff_command {
     pub enum Error {
         #[error("Either the source or the destination of the diff operation were not set")]
         SourceOrDestinationUnset,
-        #[error("Binary resources can't be diffed with an external command (as we don't have the data anymore)")]
+        #[error("Binary resources can't be diffed with an external command because their data wasn't retained")]
         SourceOrDestinationBinary,
         #[error("Tempfile to store content of '{rela_path}' for passing to external diff command could not be created")]
         CreateTempfile { rela_path: BString, source: std::io::Error },
@@ -480,9 +487,8 @@ impl Platform {
     ///
     /// ### Deviation
     ///
-    /// If one of the resources is binary, the operation reports an error as such resources don't make their data available
-    /// which is required for the external diff to run.
-    // TODO: fix this - the diff shouldn't fail if binary (or large) files are used, just copy them into tempfiles.
+    /// If one of the resources is binary and its data wasn't retained when it was set, the operation reports an error as
+    /// such resources don't make their data available which is required for the external diff to run.
     pub fn prepare_diff_command(
         &self,
         diff_command: BString,
@@ -490,6 +496,39 @@ impl Platform {
         count: usize,
         total: usize,
     ) -> Result<prepare_diff_command::Command, prepare_diff_command::Error> {
+        fn write_resource_to_tempfile(
+            cmd: &mut std::process::Command,
+            res: Resource<'_>,
+            buf: &[u8],
+        ) -> Result<gix_tempfile::Handle<gix_tempfile::handle::Closed>, prepare_diff_command::Error> {
+            let mut tmp = gix_tempfile::new(
+                std::env::temp_dir(),
+                gix_tempfile::ContainingDirectory::Exists,
+                gix_tempfile::AutoRemove::Tempfile,
+            )
+            .map_err(|err| prepare_diff_command::Error::CreateTempfile {
+                rela_path: res.rela_path.to_owned(),
+                source: err,
+            })?;
+            tmp.write_all(buf)
+                .map_err(|err| prepare_diff_command::Error::WriteTempfile {
+                    rela_path: res.rela_path.to_owned(),
+                    source: err,
+                })?;
+            tmp.with_mut(|f| {
+                cmd.arg(f.path());
+            })
+            .map_err(|err| prepare_diff_command::Error::WriteTempfile {
+                rela_path: res.rela_path.to_owned(),
+                source: err,
+            })?;
+            cmd.arg(res.id.to_string()).arg(res.mode.as_octal_str().to_string());
+            tmp.close().map_err(|err| prepare_diff_command::Error::WriteTempfile {
+                rela_path: res.rela_path.to_owned(),
+                source: err,
+            })
+        }
+
         fn add_resource(
             cmd: &mut std::process::Command,
             res: Resource<'_>,
@@ -499,36 +538,11 @@ impl Platform {
                     cmd.args(["/dev/null", ".", "."]);
                     None
                 }
-                resource::Data::Buffer { buf, is_derived: _ } => {
-                    let mut tmp = gix_tempfile::new(
-                        std::env::temp_dir(),
-                        gix_tempfile::ContainingDirectory::Exists,
-                        gix_tempfile::AutoRemove::Tempfile,
-                    )
-                    .map_err(|err| prepare_diff_command::Error::CreateTempfile {
-                        rela_path: res.rela_path.to_owned(),
-                        source: err,
-                    })?;
-                    tmp.write_all(buf)
-                        .map_err(|err| prepare_diff_command::Error::WriteTempfile {
-                            rela_path: res.rela_path.to_owned(),
-                            source: err,
-                        })?;
-                    tmp.with_mut(|f| {
-                        cmd.arg(f.path());
-                    })
-                    .map_err(|err| prepare_diff_command::Error::WriteTempfile {
-                        rela_path: res.rela_path.to_owned(),
-                        source: err,
-                    })?;
-                    cmd.arg(res.id.to_string()).arg(res.mode.as_octal_str().to_string());
-                    let tmp = tmp.close().map_err(|err| prepare_diff_command::Error::WriteTempfile {
-                        rela_path: res.rela_path.to_owned(),
-                        source: err,
-                    })?;
-                    Some(tmp)
+                resource::Data::Buffer { buf, is_derived: _ } => Some(write_resource_to_tempfile(cmd, res, buf)?),
+                resource::Data::Binary { data: Some(buf), .. } => Some(write_resource_to_tempfile(cmd, res, buf)?),
+                resource::Data::Binary { data: None, .. } => {
+                    return Err(prepare_diff_command::Error::SourceOrDestinationBinary)
                 }
-                resource::Data::Binary { .. } => return Err(prepare_diff_command::Error::SourceOrDestinationBinary),
             };
             Ok(tmpfile)
         }
@@ -613,22 +627,27 @@ impl Platform {
             }
         };
 
-        match (old.conversion.data, new.conversion.data) {
-            (None, None) => return Err(prepare_diff::Error::SourceAndDestinationRemoved),
-            (Some(pipeline::Data::Binary { .. }), _) | (_, Some(pipeline::Data::Binary { .. })) => return Ok(out),
-            _either_missing_or_non_binary => {
-                if let Some(command) = old
-                    .conversion
-                    .driver_index
-                    .and_then(|idx| self.filter.drivers[idx].command.as_deref())
-                    .filter(|_| self.options.skip_internal_diff_if_external_is_configured)
-                {
-                    out.operation = prepare_diff::Operation::ExternalCommand {
-                        command: command.as_bstr(),
-                    };
-                    return Ok(out);
-                }
-            }
+        if matches!((old.conversion.data, new.conversion.data), (None, None)) {
+            return Err(prepare_diff::Error::SourceAndDestinationRemoved);
+        }
+
+        if let Some(command) = old
+            .conversion
+            .driver_index
+            .and_then(|idx| self.filter.drivers[idx].command.as_deref())
+            .filter(|_| self.options.skip_internal_diff_if_external_is_configured)
+        {
+            out.operation = prepare_diff::Operation::ExternalCommand {
+                command: command.as_bstr(),
+            };
+            return Ok(out);
+        }
+
+        if matches!(
+            (old.conversion.data, new.conversion.data),
+            (Some(pipeline::Data::Binary { .. }), _) | (_, Some(pipeline::Data::Binary { .. }))
+        ) {
+            return Ok(out);
         }
 
         out.operation = prepare_diff::Operation::InternalDiff {
@@ -725,18 +744,35 @@ impl Platform {
                     rela_path: rela_path.to_owned(),
                 })?;
         let mut buf = self.free_list.pop().unwrap_or_default();
-        let out = self.filter.convert_to_diffable(
-            &id,
-            mode,
-            rela_path,
-            kind,
-            &mut |_, out| {
-                let _ = entry.matching_attributes(out);
-            },
-            objects,
-            self.filter_mode,
-            &mut buf,
-        )?;
+        let retain_binary = self.options.skip_internal_diff_if_external_is_configured;
+        let out = if retain_binary {
+            self.filter.convert_to_diffable_retaining_binary(
+                &id,
+                mode,
+                rela_path,
+                kind,
+                &mut |_, out| {
+                    let _ = entry.matching_attributes(out);
+                },
+                objects,
+                self.filter_mode,
+                &mut buf,
+            )
+        } else {
+            self.filter.convert_to_diffable(
+                &id,
+                mode,
+                rela_path,
+                kind,
+                &mut |_, out| {
+                    let _ = entry.matching_attributes(out);
+                },
+                objects,
+                self.filter_mode,
+                &mut buf,
+            )
+        }?;
+        let binary_buffer_is_available = retain_binary && matches!(out.data, Some(pipeline::Data::Binary { .. }));
         let key = storage.clone();
         assert!(
             self.diff_cache
@@ -746,6 +782,7 @@ impl Platform {
                         conversion: out,
                         mode,
                         buffer: buf,
+                        binary_buffer_is_available,
                     },
                 )
                 .is_none(),

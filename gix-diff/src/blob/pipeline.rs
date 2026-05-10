@@ -241,6 +241,37 @@ impl Pipeline {
         convert: Mode,
         out: &mut Vec<u8>,
     ) -> Result<Outcome, convert_to_diffable::Error> {
+        self.convert_to_diffable_inner(id, mode, rela_path, kind, attributes, objects, convert, out, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn convert_to_diffable_retaining_binary(
+        &mut self,
+        id: &gix_hash::oid,
+        mode: EntryKind,
+        rela_path: &BStr,
+        kind: ResourceKind,
+        attributes: &mut dyn FnMut(&BStr, &mut gix_filter::attributes::search::Outcome),
+        objects: &dyn gix_object::FindObjectOrHeader,
+        convert: Mode,
+        out: &mut Vec<u8>,
+    ) -> Result<Outcome, convert_to_diffable::Error> {
+        self.convert_to_diffable_inner(id, mode, rela_path, kind, attributes, objects, convert, out, true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn convert_to_diffable_inner(
+        &mut self,
+        id: &gix_hash::oid,
+        mode: EntryKind,
+        rela_path: &BStr,
+        kind: ResourceKind,
+        attributes: &mut dyn FnMut(&BStr, &mut gix_filter::attributes::search::Outcome),
+        objects: &dyn gix_object::FindObjectOrHeader,
+        convert: Mode,
+        out: &mut Vec<u8>,
+        retain_binary: bool,
+    ) -> Result<Outcome, convert_to_diffable::Error> {
         let is_symlink = match mode {
             EntryKind::Link => true,
             EntryKind::Blob | EntryKind::BlobExecutable => false,
@@ -290,9 +321,10 @@ impl Pipeline {
                         Data::Buffer { is_derived: false }
                     })
                 } else {
-                    let need_size_only = is_binary == Some(true);
-                    let size_in_bytes = (need_size_only
-                        || (is_binary != Some(false) && self.options.large_file_threshold_bytes > 0))
+                    let need_size_only = !retain_binary && is_binary == Some(true);
+                    let size_in_bytes = (!retain_binary
+                        && (need_size_only
+                            || (is_binary != Some(false) && self.options.large_file_threshold_bytes > 0)))
                         .then(|| {
                             none_if_missing(self.path.metadata().map(|md| md.len())).map_err(|err| {
                                 convert_to_diffable::Error::OpenOrRead {
@@ -378,9 +410,16 @@ impl Pipeline {
                                                 })?;
                                             }
 
-                                            Some(if is_binary.unwrap_or_else(|| is_binary_buf(out)) {
+                                            let is_large = is_binary != Some(false)
+                                                && self.options.large_file_threshold_bytes > 0
+                                                && out.len() as u64 > self.options.large_file_threshold_bytes;
+                                            let is_binary = is_binary == Some(true)
+                                                || (is_binary != Some(false) && (is_large || is_binary_buf(out)));
+                                            Some(if is_binary {
                                                 let size = out.len() as u64;
-                                                out.clear();
+                                                if !retain_binary {
+                                                    out.clear();
+                                                }
                                                 Data::Binary { size }
                                             } else {
                                                 Data::Buffer { is_derived: false }
@@ -409,7 +448,7 @@ impl Pipeline {
                     {
                         is_binary = Some(true);
                     }
-                    let data = if is_binary == Some(true) {
+                    let data = if is_binary == Some(true) && !retain_binary {
                         Data::Binary { size: header.size }
                     } else {
                         objects
@@ -498,11 +537,21 @@ impl Pipeline {
                             }
                         }
 
+                        let is_large = is_binary != Some(false)
+                            && self.options.large_file_threshold_bytes > 0
+                            && out.len() as u64 > self.options.large_file_threshold_bytes;
                         if driver.is_none_or(|d| d.binary_to_text_command.is_none())
-                            && is_binary.unwrap_or_else(|| is_binary_buf(out))
+                            && (is_binary == Some(true)
+                                || (is_binary != Some(false) && (is_large || is_binary_buf(out))))
                         {
-                            let size = out.len() as u64;
-                            out.clear();
+                            let size = if is_binary == Some(true) {
+                                header.size
+                            } else {
+                                out.len() as u64
+                            };
+                            if !retain_binary {
+                                out.clear();
+                            }
                             Data::Binary { size }
                         } else {
                             Data::Buffer { is_derived }

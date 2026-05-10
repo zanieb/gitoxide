@@ -223,10 +223,85 @@ fn diff_binary() -> crate::Result {
     match platform.prepare_diff_command("test".into(), Default::default(), 0, 1) {
         Err(err) => assert_eq!(
             err.to_string(),
-            "Binary resources can't be diffed with an external command (as we don't have the data anymore)"
+            "Binary resources can't be diffed with an external command because their data wasn't retained"
         ),
         Ok(_) => unreachable!("must error"),
     }
+
+    Ok(())
+}
+
+#[test]
+fn external_command_receives_binary_resources_when_enabled() -> crate::Result {
+    let command: BString = "external-diff".into();
+    let mut platform = new_platform(
+        Some(gix_diff::blob::Driver {
+            name: "a".into(),
+            command: Some(command.clone()),
+            is_binary: Some(true),
+            ..Default::default()
+        }),
+        gix_diff::blob::pipeline::Mode::default(),
+    );
+    platform.options.skip_internal_diff_if_external_is_configured = true;
+
+    platform.set_resource(
+        gix_hash::Kind::Sha1.null(),
+        EntryKind::Blob,
+        "a".into(),
+        ResourceKind::OldOrSource,
+        &gix_object::find::Never,
+    )?;
+
+    let mut db = ObjectDb::default();
+    let new_content = "binary\0content";
+    let id = db.insert(new_content)?;
+    platform.set_resource(id, EntryKind::Blob, "a".into(), ResourceKind::NewOrDestination, &db)?;
+
+    let out = platform.prepare_diff()?;
+    assert_eq!(
+        out.operation,
+        Operation::ExternalCommand {
+            command: command.as_ref()
+        },
+        "external diff drivers must be able to handle binary resources themselves"
+    );
+
+    let (old, new) = platform.resources().expect("resources were set");
+    assert_eq!(
+        old.data,
+        platform::resource::Data::Binary {
+            size: 2,
+            data: Some(b"a\n")
+        }
+    );
+    assert_eq!(
+        new.data,
+        platform::resource::Data::Binary {
+            size: new_content.len() as u64,
+            data: Some(new_content.as_bytes())
+        }
+    );
+    assert_eq!(
+        comparable_ext_diff(platform.prepare_diff_command(
+            command,
+            gix_diff::command::Context {
+                git_dir: Some(".".into()),
+                ..Default::default()
+            },
+            0,
+            1
+        )),
+        format!(
+            "{}external-diff a <tmp-path> 0000000000000000000000000000000000000000 100644 <tmp-path> {id} 100644",
+            if !cfg!(windows) {
+                "GIT_DIFF_PATH_COUNTER=1 GIT_DIFF_PATH_TOTAL=1 GIT_DIR=. "
+            } else {
+                Default::default()
+            }
+        ),
+        "binary resources are materialized as temporary files for the external command"
+    );
 
     Ok(())
 }
