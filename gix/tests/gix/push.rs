@@ -379,11 +379,6 @@ mod blocking_io {
         do_push(&repo, &bare_url, &["refs/heads/main:refs/heads/main"])?;
         verify_push_result(&bare_path, "refs/heads/main", &original_oid);
 
-        // Configure bare repo to reject non-fast-forward updates, matching the
-        // behavior of hosted Git services (GitHub, GitLab) and C Git's
-        // receive.denyNonFastForwards setting.
-        git_in(&bare_path, &["config", "receive.denyNonFastForwards", "true"]);
-
         // Amend to create divergence
         let working_path = dir.path().join("working");
         git_in(
@@ -392,31 +387,78 @@ mod blocking_io {
         );
         let repo = gix::open_opts(&working_path, crate::restricted())?;
 
-        // Non-force push should fail because the remote denies non-fast-forward updates.
-        let result = do_push(&repo, &bare_url, &["refs/heads/main:refs/heads/main"]);
+        let outcome = do_push(&repo, &bare_url, &["refs/heads/main:refs/heads/main"])?;
+        assert_eq!(outcome.updates.len(), 1);
+        assert!(matches!(
+            &outcome.updates[0],
+            gix::remote::push::RefUpdateStatus::Ng { ref_name, reason }
+                if ref_name.as_ref() as &[u8] == b"refs/heads/main"
+                    && reason.as_ref() as &[u8] == b"non-fast-forward"
+        ));
+        verify_push_result(&bare_path, "refs/heads/main", &original_oid);
 
-        match result {
-            Ok(outcome) => {
-                // If the push "succeeded" at the protocol level, check that the
-                // server rejected the update.
-                let rejected = outcome
-                    .updates
-                    .iter()
-                    .any(|s| matches!(s, gix::remote::push::RefUpdateStatus::Ng { .. }));
-                assert!(
-                    rejected,
-                    "non-fast-forward push without force should be rejected by the remote"
-                );
-                // The remote should still have the original oid
-                verify_push_result(&bare_path, "refs/heads/main", &original_oid);
-            }
-            Err(_) => {
-                // Protocol-level error is also acceptable -- the push was rejected.
-                // Verify the remote ref is unchanged.
-                verify_push_result(&bare_path, "refs/heads/main", &original_oid);
-            }
-        }
+        Ok(())
+    }
 
+    #[test]
+    fn push_force_with_lease_allows_matching_non_fast_forward() -> gix_testtools::Result {
+        let (repo, bare_path, dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        let original_oid = repo.head_id()?.detach();
+
+        do_push(&repo, &bare_url, &["refs/heads/main:refs/heads/main"])?;
+        verify_push_result(&bare_path, "refs/heads/main", &original_oid.to_string());
+
+        let working_path = dir.path().join("working");
+        git_in(
+            &working_path,
+            &["commit", "--amend", "-m", "amended commit", "--allow-empty"],
+        );
+        let repo = gix::open_opts(&working_path, crate::restricted())?;
+        let amended_oid = repo.head_id()?.to_string();
+
+        let remote = repo
+            .remote_at(bare_url.as_str())?
+            .with_refspecs(["refs/heads/main:refs/heads/main"].iter().copied(), Direction::Push)?;
+        let mut expected = std::collections::HashMap::new();
+        expected.insert("refs/heads/main".into(), original_oid);
+        remote
+            .connect(Direction::Push)?
+            .prepare_push(gix::progress::Discard, Default::default())?
+            .with_expected_old_ids(expected)
+            .send(gix::progress::Discard, &AtomicBool::default())?;
+
+        verify_push_result(&bare_path, "refs/heads/main", &amended_oid);
+        Ok(())
+    }
+
+    #[test]
+    fn push_rejects_unforced_tag_overwrite() -> gix_testtools::Result {
+        let (repo, bare_path, dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        do_push(&repo, &bare_url, &["refs/tags/v1.0:refs/tags/v1.0"])?;
+        let original_tag = git_in(&bare_path, &["rev-parse", "refs/tags/v1.0"]);
+
+        let working_path = dir.path().join("working");
+        git_in(&working_path, &["tag", "-f", "v1.0", "refs/heads/feature"]);
+        let repo = gix::open_opts(&working_path, crate::restricted())?;
+
+        let outcome = do_push(&repo, &bare_url, &["refs/tags/v1.0:refs/tags/v1.0"])?;
+        assert_eq!(outcome.updates.len(), 1);
+        assert!(matches!(
+            &outcome.updates[0],
+            gix::remote::push::RefUpdateStatus::Ng { ref_name, reason }
+                if ref_name.as_ref() as &[u8] == b"refs/tags/v1.0"
+                    && reason.as_ref() as &[u8] == b"already exists"
+        ));
+        verify_push_result(&bare_path, "refs/tags/v1.0", &original_tag);
+
+        do_push(&repo, &bare_url, &["+refs/tags/v1.0:refs/tags/v1.0"])?;
+        verify_push_result(
+            &bare_path,
+            "refs/tags/v1.0",
+            &repo.find_reference("refs/tags/v1.0")?.id().to_string(),
+        );
         Ok(())
     }
 

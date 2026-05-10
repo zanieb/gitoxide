@@ -1,6 +1,9 @@
 use std::sync::atomic::AtomicBool;
 
-use crate::bstr::{BString, ByteSlice, ByteVec};
+use crate::{
+    bstr::{BString, ByteSlice, ByteVec},
+    ext::ObjectIdExt,
+};
 use gix_object::Exists as _;
 use gix_object::Write as _;
 use gix_refspec::match_group::SourceRef;
@@ -213,6 +216,7 @@ struct SupplementalUpdate {
     src: BString,
     dst: BString,
     new_id: gix_hash::ObjectId,
+    allow_non_fast_forward: bool,
 }
 
 fn build_push_commands(
@@ -266,8 +270,11 @@ fn build_push_commands(
 
     let mut supplemental_updates = Vec::new();
     for (spec_index, spec) in specs.iter().enumerate() {
-        if let gix_refspec::Instruction::Push(gix_refspec::instruction::Push::Matching { src, dst, .. }) =
-            spec.instruction()
+        if let gix_refspec::Instruction::Push(gix_refspec::instruction::Push::Matching {
+            src,
+            dst,
+            allow_non_fast_forward,
+        }) = spec.instruction()
         {
             if matched.updates.iter().any(|update| update.spec_index == spec_index) {
                 continue;
@@ -287,6 +294,7 @@ fn build_push_commands(
                 src: src.to_owned(),
                 dst: expand_push_destination(dst),
                 new_id: new_id.detach(),
+                allow_non_fast_forward,
             });
         }
     }
@@ -330,15 +338,28 @@ fn build_push_commands(
             continue;
         }
 
-        if let Some(expected_ids) = expected_old_ids {
-            if let Some(expected_oid) = expected_ids.get(&update.dst) {
-                if remote_old_id != *expected_oid {
-                    client_updates.push(gix_protocol::push::response::StatusV1::Ng {
-                        ref_name: update.dst,
-                        reason: "stale info".into(),
-                    });
-                    continue;
-                }
+        let expected_old_id = expected_old_ids.and_then(|ids| ids.get(&update.dst));
+        if let Some(reason) = client_side_push_rejection(
+            repo,
+            update.dst.as_ref(),
+            remote_old_id,
+            new_id,
+            update.allow_non_fast_forward || expected_old_id.is_some(),
+        ) {
+            client_updates.push(gix_protocol::push::response::StatusV1::Ng {
+                ref_name: update.dst,
+                reason: reason.into(),
+            });
+            continue;
+        }
+
+        if let Some(expected_oid) = expected_old_id {
+            if remote_old_id != *expected_oid {
+                client_updates.push(gix_protocol::push::response::StatusV1::Ng {
+                    ref_name: update.dst,
+                    reason: "stale info".into(),
+                });
+                continue;
             }
         }
 
@@ -361,15 +382,28 @@ fn build_push_commands(
             continue;
         }
 
-        if let Some(expected_ids) = expected_old_ids {
-            if let Some(expected_oid) = expected_ids.get(&update.dst) {
-                if remote_old_id != *expected_oid {
-                    client_updates.push(gix_protocol::push::response::StatusV1::Ng {
-                        ref_name: update.dst,
-                        reason: "stale info".into(),
-                    });
-                    continue;
-                }
+        let expected_old_id = expected_old_ids.and_then(|ids| ids.get(&update.dst));
+        if let Some(reason) = client_side_push_rejection(
+            repo,
+            update.dst.as_ref(),
+            remote_old_id,
+            update.new_id,
+            update.allow_non_fast_forward || expected_old_id.is_some(),
+        ) {
+            client_updates.push(gix_protocol::push::response::StatusV1::Ng {
+                ref_name: update.dst,
+                reason: reason.into(),
+            });
+            continue;
+        }
+
+        if let Some(expected_oid) = expected_old_id {
+            if remote_old_id != *expected_oid {
+                client_updates.push(gix_protocol::push::response::StatusV1::Ng {
+                    ref_name: update.dst,
+                    reason: "stale info".into(),
+                });
+                continue;
             }
         }
 
@@ -410,6 +444,53 @@ fn build_push_commands(
     }
 
     Ok((commands, client_updates))
+}
+
+fn client_side_push_rejection(
+    repo: &crate::Repository,
+    dst: &crate::bstr::BStr,
+    old_id: gix_hash::ObjectId,
+    new_id: gix_hash::ObjectId,
+    allow_non_fast_forward: bool,
+) -> Option<&'static str> {
+    if allow_non_fast_forward || old_id.is_null() || new_id.is_null() || old_id == new_id {
+        return None;
+    }
+
+    if dst.starts_with(b"refs/tags/") {
+        return Some("already exists");
+    }
+
+    if dst.starts_with(b"refs/heads/") && !is_fast_forward(repo, old_id, new_id).unwrap_or(true) {
+        return Some("non-fast-forward");
+    }
+
+    None
+}
+
+fn is_fast_forward(
+    repo: &crate::Repository,
+    old_id: gix_hash::ObjectId,
+    new_id: gix_hash::ObjectId,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let old_commit_time = repo
+        .find_object(old_id)?
+        .try_into_commit()
+        .map_err(|err| Box::new(err) as Box<dyn std::error::Error + Send + Sync>)?
+        .committer()
+        .map_err(|err| Box::new(err) as Box<dyn std::error::Error + Send + Sync>)?
+        .seconds();
+    let mut ancestors = new_id
+        .attach(repo)
+        .ancestors()
+        .sorting(crate::revision::walk::Sorting::ByCommitTimeCutoff {
+            order: Default::default(),
+            seconds: old_commit_time,
+        })
+        .all()
+        .map_err(|err| Box::new(err) as Box<dyn std::error::Error + Send + Sync>)?;
+
+    Ok(ancestors.any(|info| info.is_ok_and(|info| info.id == old_id)))
 }
 
 fn record_push_destination(
