@@ -157,7 +157,7 @@ fn key_encoding_through_ref_record_prefix_compression() {
     };
 
     // Serialize the first record with no previous name
-    let first_bytes = gix_reftable::write::serialize_ref_record(&first, &[], 1, hash_size);
+    let first_bytes = gix_reftable::write::serialize_ref_record(&first, &[], 1, hash_size).expect("should serialize");
 
     // Parse it back
     let (parsed_first, _) =
@@ -171,7 +171,8 @@ fn key_encoding_through_ref_record_prefix_compression() {
         value: gix_reftable::RefRecordValue::Val1 { target: oid },
     };
 
-    let second_bytes = gix_reftable::write::serialize_ref_record(&second, b"refs/heads/master", 1, hash_size);
+    let second_bytes = gix_reftable::write::serialize_ref_record(&second, b"refs/heads/master", 1, hash_size)
+        .expect("should serialize");
 
     // Parse with the previous key as prefix context
     let (parsed_second, consumed) = gix_reftable::parse_ref_record(&second_bytes, b"refs/heads/master", hash_size, 1)
@@ -215,7 +216,8 @@ fn ref_record_roundtrip_all_types() {
             update_index: min_update_index,
             value: gix_reftable::RefRecordValue::Deletion,
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, consumed) = gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index)
             .expect("deletion record should parse");
         assert_eq!(consumed, bytes.len());
@@ -236,7 +238,8 @@ fn ref_record_roundtrip_all_types() {
                 target: ObjectId::from_bytes_or_panic(&oid_bytes),
             },
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, consumed) =
             gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("val1 record should parse");
         assert_eq!(consumed, bytes.len());
@@ -267,7 +270,8 @@ fn ref_record_roundtrip_all_types() {
                 target_value: ObjectId::from_bytes_or_panic(&oid2_bytes),
             },
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, consumed) =
             gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("val2 record should parse");
         assert_eq!(consumed, bytes.len());
@@ -296,7 +300,8 @@ fn ref_record_roundtrip_all_types() {
                 target: BString::from("target"),
             },
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, consumed) = gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index)
             .expect("symref record should parse");
         assert_eq!(consumed, bytes.len());
@@ -610,7 +615,8 @@ fn ref_record_update_index_delta() {
         },
     };
 
-    let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+    let bytes =
+        gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size).expect("should serialize");
 
     let (parsed, _) =
         gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("record should parse");
@@ -632,7 +638,8 @@ fn ref_record_update_index_delta_zero() {
         value: gix_reftable::RefRecordValue::Deletion,
     };
 
-    let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+    let bytes =
+        gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size).expect("should serialize");
 
     let (parsed, _) =
         gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("record should parse");
@@ -693,7 +700,8 @@ fn ref_record_long_name() {
         },
     };
 
-    let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+    let bytes =
+        gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size).expect("should serialize");
     let (parsed, consumed) = gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index)
         .expect("long name record should parse");
     assert_eq!(consumed, bytes.len());
@@ -824,7 +832,8 @@ fn ref_record_roundtrip_all_types_nonzero_min() {
             update_index: 105,
             value: gix_reftable::RefRecordValue::Deletion,
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, consumed) =
             gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("should parse");
         assert_eq!(consumed, bytes.len());
@@ -841,7 +850,8 @@ fn ref_record_roundtrip_all_types_nonzero_min() {
                 target: ObjectId::from_bytes_or_panic(&make_hash(10)),
             },
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, _) =
             gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("should parse");
         assert_eq!(parsed.update_index(), 150);
@@ -858,7 +868,8 @@ fn ref_record_roundtrip_all_types_nonzero_min() {
                 target_value: ObjectId::from_bytes_or_panic(&make_hash(2)),
             },
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, _) =
             gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("should parse");
         assert_eq!(parsed.update_index(), 200);
@@ -880,7 +891,8 @@ fn ref_record_roundtrip_all_types_nonzero_min() {
                 target: BString::from("refs/heads/main"),
             },
         };
-        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(&record, &[], min_update_index, hash_size)
+            .expect("should serialize");
         let (parsed, _) =
             gix_reftable::parse_ref_record(&bytes, &[], hash_size, min_update_index).expect("should parse");
         assert_eq!(parsed.update_index(), 100);
@@ -1063,7 +1075,8 @@ fn ref_record_sequential_prefix_compression() {
     let mut encoded_records: Vec<Vec<u8>> = Vec::new();
 
     for record in &records {
-        let bytes = gix_reftable::write::serialize_ref_record(record, &prev_name, min_update_index, hash_size);
+        let bytes = gix_reftable::write::serialize_ref_record(record, &prev_name, min_update_index, hash_size)
+            .expect("should serialize");
         encoded_records.push(bytes);
         prev_name = record.name().to_vec();
     }

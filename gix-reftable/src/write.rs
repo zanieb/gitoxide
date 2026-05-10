@@ -33,7 +33,12 @@ impl Default for Options {
 ///
 /// `prev_name` is the name of the previous record for prefix compression.
 /// Returns the serialized bytes.
-pub fn serialize_ref_record(record: &RefRecord, prev_name: &[u8], min_update_index: u64, hash_size: usize) -> Vec<u8> {
+pub fn serialize_ref_record(
+    record: &RefRecord,
+    prev_name: &[u8],
+    min_update_index: u64,
+    hash_size: usize,
+) -> Result<Vec<u8>, Error> {
     let name = record.name();
 
     // Calculate shared prefix with previous record
@@ -61,7 +66,14 @@ pub fn serialize_ref_record(record: &RefRecord, prev_name: &[u8], min_update_ind
         }
     };
 
-    let update_index_delta = record.update_index().saturating_sub(min_update_index);
+    let update_index_delta =
+        record
+            .update_index()
+            .checked_sub(min_update_index)
+            .ok_or(Error::UpdateIndexBelowMinimum {
+                update_index: record.update_index(),
+                min_update_index,
+            })?;
 
     let mut out = Vec::new();
     write_varint(prefix_len as u64, &mut out);
@@ -71,7 +83,7 @@ pub fn serialize_ref_record(record: &RefRecord, prev_name: &[u8], min_update_ind
     write_varint(update_index_delta, &mut out);
     out.extend_from_slice(&extra_data);
 
-    out
+    Ok(out)
 }
 
 /// Write a complete reftable file header.
@@ -209,7 +221,7 @@ pub fn write_ref_block_at(
             &prev_name
         };
 
-        let serialized = serialize_ref_record(record, use_prefix, min_update_index, hash_size);
+        let serialized = serialize_ref_record(record, use_prefix, min_update_index, hash_size)?;
 
         // Check if this record has prefix_len == 0 (the first varint in serialized).
         // If so, it's a restart point. The restart offset is a file-level position.
@@ -302,7 +314,7 @@ mod tests {
     #[test]
     fn serialize_ref_record_no_prefix() {
         let record = make_val1("refs/heads/main", 0xAA, 1);
-        let bytes = serialize_ref_record(&record, &[], 1, 20);
+        let bytes = serialize_ref_record(&record, &[], 1, 20).expect("should serialize");
         // Should be parseable
         let (parsed, _consumed) = crate::parse_ref_record(&bytes, &[], 20, 1).expect("should parse");
         assert_eq!(parsed.name(), b"refs/heads/main");
@@ -319,7 +331,7 @@ mod tests {
     fn serialize_ref_record_with_prefix() {
         let record = make_val1("refs/heads/feature", 0xBB, 1);
         let prev = b"refs/heads/main";
-        let bytes = serialize_ref_record(&record, prev, 1, 20);
+        let bytes = serialize_ref_record(&record, prev, 1, 20).expect("should serialize");
         // Parse back with the prefix
         let (parsed, _) = crate::parse_ref_record(&bytes, prev, 20, 1).expect("should parse");
         assert_eq!(parsed.name(), b"refs/heads/feature");
@@ -334,7 +346,7 @@ mod tests {
                 target: BString::from("refs/heads/main"),
             },
         };
-        let bytes = serialize_ref_record(&record, &[], 1, 20);
+        let bytes = serialize_ref_record(&record, &[], 1, 20).expect("should serialize");
         let (parsed, _) = crate::parse_ref_record(&bytes, &[], 20, 1).expect("should parse");
         assert_eq!(parsed.name, "HEAD");
         match parsed.value {
@@ -352,11 +364,37 @@ mod tests {
             update_index: 5,
             value: crate::RefRecordValue::Deletion,
         };
-        let bytes = serialize_ref_record(&record, &[], 1, 20);
+        let bytes = serialize_ref_record(&record, &[], 1, 20).expect("should serialize");
         let (parsed, _) = crate::parse_ref_record(&bytes, &[], 20, 1).expect("should parse");
         assert_eq!(parsed.name, "refs/heads/old");
         assert_eq!(parsed.update_index, 5);
         assert!(matches!(parsed.value, crate::RefRecordValue::Deletion));
+    }
+
+    #[test]
+    fn serialize_ref_record_rejects_update_index_below_minimum() {
+        let record = make_val1("refs/heads/main", 0xAA, 4);
+
+        assert!(matches!(
+            serialize_ref_record(&record, &[], 5, 20),
+            Err(Error::UpdateIndexBelowMinimum {
+                update_index: 4,
+                min_update_index: 5
+            })
+        ));
+    }
+
+    #[test]
+    fn write_ref_block_rejects_update_index_below_minimum() {
+        let records = vec![make_val1("refs/heads/main", 0xAA, 4)];
+
+        assert!(matches!(
+            write_ref_block(&records, 5, 20, 0),
+            Err(Error::UpdateIndexBelowMinimum {
+                update_index: 4,
+                min_update_index: 5
+            })
+        ));
     }
 
     #[test]
