@@ -70,6 +70,12 @@ pub enum ReadStateError {
         content: String,
         source: gix_hash::decode::Error,
     },
+    #[error("object id in '{path}' uses hash kind {actual:?}, expected {expected:?}")]
+    ObjectHashKind {
+        path: PathBuf,
+        expected: gix_hash::Kind,
+        actual: gix_hash::Kind,
+    },
     #[error("could not parse step number from '{path}': '{content}'")]
     ParseNumber { path: PathBuf, content: String },
     #[error("could not parse todo list")]
@@ -699,7 +705,7 @@ fn read_file_bytes(dir: &Path, name: &str) -> Result<Vec<u8>, ReadStateError> {
     std::fs::read(&path).map_err(|source| ReadStateError::ReadFile { path, source })
 }
 
-fn read_object_id(dir: &Path, name: &str, _hash_kind: gix_hash::Kind) -> Result<ObjectId, ReadStateError> {
+fn read_object_id(dir: &Path, name: &str, hash_kind: gix_hash::Kind) -> Result<ObjectId, ReadStateError> {
     let content = read_file_trimmed(dir, name)?;
     let path = dir.join(name);
     let hex = content.to_str_lossy();
@@ -707,11 +713,20 @@ fn read_object_id(dir: &Path, name: &str, _hash_kind: gix_hash::Kind) -> Result<
     // C Git always writes full hex hashes in rebase state files.
     // Reject abbreviated hashes rather than silently zero-padding them,
     // which would produce an incorrect ObjectId.
-    ObjectId::from_hex(hex_trimmed.as_bytes()).map_err(|source| ReadStateError::ParseObjectId {
-        path,
+    let id = ObjectId::from_hex(hex_trimmed.as_bytes()).map_err(|source| ReadStateError::ParseObjectId {
+        path: path.clone(),
         content: hex_trimmed.to_string(),
         source,
-    })
+    })?;
+    let actual = id.kind();
+    if actual != hash_kind {
+        return Err(ReadStateError::ObjectHashKind {
+            path,
+            expected: hash_kind,
+            actual,
+        });
+    }
+    Ok(id)
 }
 
 fn read_number(dir: &Path, name: &str) -> Result<usize, ReadStateError> {

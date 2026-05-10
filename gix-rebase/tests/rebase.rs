@@ -401,6 +401,53 @@ mod errors {
         assert!(result.is_err(), "invalid hex in state file should be rejected");
     }
 
+    #[cfg(all(feature = "sha1", feature = "sha256"))]
+    #[test]
+    fn state_file_hash_kind_must_match_repository_hash_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        std::fs::create_dir_all(&rebase_dir).unwrap();
+        std::fs::write(rebase_dir.join("head-name"), b"refs/heads/feature").unwrap();
+        std::fs::write(
+            rebase_dir.join("onto"),
+            b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .unwrap();
+        std::fs::write(
+            rebase_dir.join("orig-head"),
+            b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        )
+        .unwrap();
+        std::fs::write(rebase_dir.join("git-rebase-todo"), b"").unwrap();
+
+        let result = MergeState::read_from(&rebase_dir, Kind::Sha1);
+        assert!(matches!(
+            result,
+            Err(gix_rebase::ReadStateError::ObjectHashKind {
+                expected: Kind::Sha1,
+                actual: Kind::Sha256,
+                ..
+            })
+        ));
+
+        std::fs::write(rebase_dir.join("onto"), b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        std::fs::write(
+            rebase_dir.join("orig-head"),
+            b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        )
+        .unwrap();
+
+        let result = MergeState::read_from(&rebase_dir, Kind::Sha256);
+        assert!(matches!(
+            result,
+            Err(gix_rebase::ReadStateError::ObjectHashKind {
+                expected: Kind::Sha256,
+                actual: Kind::Sha1,
+                ..
+            })
+        ));
+    }
+
     #[test]
     fn nonexistent_directory_errors() {
         let dir = tempfile::tempdir().unwrap();
