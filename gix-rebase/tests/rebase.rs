@@ -729,7 +729,7 @@ mod state_files {
 
 mod driver {
     use super::*;
-    use gix_rebase::{CherryPickError, CherryPickOutcome, Driver, StepOutcome};
+    use gix_rebase::{CherryPickError, CherryPickOutcome, Driver, StepError, StepOutcome};
     use std::cell::RefCell;
     use std::collections::HashMap;
 
@@ -1864,7 +1864,7 @@ mod driver {
     }
 
     #[test]
-    fn fixup_without_previous_commit_does_not_use_head_message() {
+    fn fixup_without_previous_commit_is_rejected_before_execution() {
         let dir = tempfile::tempdir().unwrap();
         let rebase_dir = dir.path().join("rebase-merge");
         let hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1879,10 +1879,89 @@ mod driver {
             amend_message: gix_sequencer::todo::AmendMessage::No,
         }]);
 
-        state.step(&driver, &rebase_dir).unwrap();
+        let err = state.step(&driver, &rebase_dir).unwrap_err();
+        assert!(matches!(err, StepError::NoPreviousCommit { operation: "fixup" }));
+        assert!(
+            driver.cherry_pick_calls.borrow().is_empty(),
+            "invalid fixup should not execute"
+        );
+        assert_eq!(
+            state.todo.operations.len(),
+            1,
+            "invalid todo entry should remain editable"
+        );
+        assert_eq!(
+            state.done.operations.len(),
+            0,
+            "invalid todo entry should not move to done"
+        );
+        assert_eq!(state.current_step, 0, "invalid todo entry should not advance msgnum");
+    }
 
-        let calls = driver.cherry_pick_calls.borrow();
-        assert_eq!(calls[0].1, None, "there is no previous todo commit to preserve");
+    #[test]
+    fn squash_without_previous_commit_is_rejected_before_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(hex, hex, b"Squash message\n");
+
+        let mut state = make_state_with_ops(vec![Operation::Squash {
+            commit: make_oid(hex).into(),
+            summary: "Squash".into(),
+        }]);
+
+        let err = state.step(&driver, &rebase_dir).unwrap_err();
+        assert!(matches!(err, StepError::NoPreviousCommit { operation: "squash" }));
+        assert!(
+            driver.cherry_pick_calls.borrow().is_empty(),
+            "invalid squash should not execute"
+        );
+        assert_eq!(
+            state.todo.operations.len(),
+            1,
+            "invalid todo entry should remain editable"
+        );
+        assert_eq!(
+            state.done.operations.len(),
+            0,
+            "invalid todo entry should not move to done"
+        );
+    }
+
+    #[test]
+    fn fixup_after_drop_without_previous_commit_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let hex_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let hex_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(hex_b, hex_b, b"Fixup message\n");
+
+        let mut state = make_state_with_ops(vec![
+            Operation::Drop {
+                commit: make_oid(hex_a).into(),
+                summary: "Dropped".into(),
+            },
+            Operation::Fixup {
+                commit: make_oid(hex_b).into(),
+                summary: "Fixup".into(),
+                amend_message: gix_sequencer::todo::AmendMessage::Replace,
+            },
+        ]);
+
+        assert_eq!(state.step(&driver, &rebase_dir).unwrap(), StepOutcome::Skipped);
+
+        let err = state.step(&driver, &rebase_dir).unwrap_err();
+        assert!(matches!(err, StepError::NoPreviousCommit { operation: "fixup" }));
+        assert!(
+            driver.cherry_pick_calls.borrow().is_empty(),
+            "drop does not create a commit for the following fixup to amend"
+        );
+        assert_eq!(state.todo.operations.len(), 1, "invalid fixup should remain in todo");
+        assert_eq!(state.done.operations.len(), 1, "only the drop should be done");
     }
 
     #[test]
