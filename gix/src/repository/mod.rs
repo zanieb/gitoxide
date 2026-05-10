@@ -593,6 +593,10 @@ pub mod add_to_index {
             path: std::path::PathBuf,
             source: std::time::SystemTimeError,
         },
+        #[error("Pathspecs did not match any files: {pathspecs:?}")]
+        PathspecsDidNotMatch { pathspecs: Vec<crate::bstr::BString> },
+        #[error("The following paths are ignored by one of your exclude files: {paths:?}")]
+        Ignored { paths: Vec<crate::bstr::BString> },
         #[error(transparent)]
         WriteIndex(#[from] gix_index::file::write::Error),
     }

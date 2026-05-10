@@ -162,6 +162,43 @@ mod index {
             assert!(repo.open_index()?.entry_by_path(b"gone.txt".as_bstr()).is_none());
             Ok(())
         }
+
+        #[test]
+        fn errors_when_pathspec_matches_nothing() -> crate::Result {
+            let (repo, _tmp) = repo_rw()?;
+
+            let err = repo
+                .add_to_index([b"missing.txt".as_bstr()], Default::default())
+                .unwrap_err();
+
+            match err {
+                gix::repository::add_to_index::Error::PathspecsDidNotMatch { pathspecs } => {
+                    assert_eq!(pathspecs, [b"missing.txt".as_bstr()]);
+                }
+                err => panic!("unexpected error: {err}"),
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn errors_for_explicit_ignored_path_without_force() -> crate::Result {
+            let (repo, _tmp) = repo_rw()?;
+            let workdir = repo.workdir().expect("worktree");
+            std::fs::write(workdir.join(".gitignore"), "*.log\n")?;
+            std::fs::write(workdir.join("ignored.log"), "ignored\n")?;
+
+            let err = repo
+                .add_to_index([b"ignored.log".as_bstr()], Default::default())
+                .unwrap_err();
+
+            match err {
+                gix::repository::add_to_index::Error::Ignored { paths } => {
+                    assert_eq!(paths, [b"ignored.log".as_bstr()]);
+                }
+                err => panic!("unexpected error: {err}"),
+            }
+            Ok(())
+        }
     }
 }
 
