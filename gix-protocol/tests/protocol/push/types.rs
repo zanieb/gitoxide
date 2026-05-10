@@ -197,8 +197,8 @@ mod options {
 
 mod outcome {
     use gix_protocol::push::{
-        response::{StatusV1, UnpackStatus},
         Outcome,
+        response::{StatusV1, UnpackStatus},
     };
 
     #[test]

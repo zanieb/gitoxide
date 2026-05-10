@@ -79,7 +79,11 @@ pick bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb Second
 
     #[test]
     fn commit_hash_shorter_than_4_chars_errors() {
-        for input in [b"pick a Too short\n" as &[u8], b"pick ab Too short\n", b"pick abc Too short\n"] {
+        for input in [
+            b"pick a Too short\n" as &[u8],
+            b"pick ab Too short\n",
+            b"pick abc Too short\n",
+        ] {
             let err = TodoList::parse(input.as_bstr(), Kind::Sha1).unwrap_err();
             assert!(
                 matches!(err, gix_sequencer::todo::parse::Error::InvalidCommit { .. }),

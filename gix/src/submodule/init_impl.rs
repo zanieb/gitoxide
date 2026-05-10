@@ -7,7 +7,7 @@
 //! 3. Optionally writes `submodule.<name>.update` if configured in `.gitmodules`
 //!    (but writes `none` for `!command` values, matching git's security behavior)
 
-use crate::{bstr::BStr, Submodule};
+use crate::{Submodule, bstr::BStr};
 
 /// Initialization
 impl Submodule<'_> {

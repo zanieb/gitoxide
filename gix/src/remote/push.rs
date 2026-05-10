@@ -1,1 +1,1 @@
-pub use super::connection::push::{prepare, Error, Outcome, PreparePush, RefUpdateStatus};
+pub use super::connection::push::{Error, Outcome, PreparePush, RefUpdateStatus, prepare};

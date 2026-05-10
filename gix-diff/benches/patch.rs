@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 fn generate_lines(count: usize, prefix: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(count * 30);

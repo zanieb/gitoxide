@@ -6,7 +6,7 @@
 use std::sync::atomic::AtomicBool;
 
 use crate::bstr::BString;
-pub use gix_bundle::{create, header, verify, Header, Prerequisite, Ref, Version};
+pub use gix_bundle::{Header, Prerequisite, Ref, Version, create, header, verify};
 use gix_ref::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
 
 /// The outcome of unbundling a git bundle into a repository.

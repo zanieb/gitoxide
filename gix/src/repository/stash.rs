@@ -1602,9 +1602,7 @@ fn line_diff_hunks(base: &[u8], target: &[u8]) -> Vec<LineMergeHunk> {
         hunks: Vec<LineMergeHunk>,
     }
 
-    impl gix_diff::blob::Sink for HunkCollector {
-        type Out = Vec<LineMergeHunk>;
-
+    impl HunkCollector {
         fn process_change(&mut self, before: std::ops::Range<u32>, after: std::ops::Range<u32>) {
             self.hunks.push(LineMergeHunk {
                 base: before.start as usize..before.end as usize,
@@ -1612,20 +1610,20 @@ fn line_diff_hunks(base: &[u8], target: &[u8]) -> Vec<LineMergeHunk> {
             });
         }
 
-        fn finish(self) -> Self::Out {
+        fn finish(self) -> Vec<LineMergeHunk> {
             self.hunks
         }
     }
 
-    let input = gix_diff::blob::intern::InternedInput::new(
-        gix_diff::blob::sources::byte_lines_with_terminator(base),
-        gix_diff::blob::sources::byte_lines_with_terminator(target),
+    let input = gix_diff::blob::InternedInput::new(
+        gix_diff::blob::sources::byte_lines(base),
+        gix_diff::blob::sources::byte_lines(target),
     );
-    gix_diff::blob::diff(
-        gix_diff::blob::Algorithm::Histogram,
-        &input,
-        HunkCollector { hunks: Vec::new() },
-    )
+    let mut collector = HunkCollector { hunks: Vec::new() };
+    for hunk in gix_diff::blob::Diff::compute(gix_diff::blob::Algorithm::Histogram, &input).hunks() {
+        collector.process_change(hunk.before, hunk.after);
+    }
+    collector.finish()
 }
 
 fn split_lines(data: &[u8]) -> Vec<&[u8]> {

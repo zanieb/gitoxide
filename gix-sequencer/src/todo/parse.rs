@@ -231,8 +231,7 @@ fn parse_hex_prefix(hash_str: &str, line_number: usize, hash_kind: gix_hash::Kin
         });
     }
 
-    Prefix::from_hex(hash_str)
-    .map_err(|source| Error::InvalidCommit {
+    Prefix::from_hex(hash_str).map_err(|source| Error::InvalidCommit {
         hash: hash_str.to_owned(),
         line_number,
         source,

@@ -225,7 +225,7 @@ mod signing {
         );
 
         // Verify the captured data can be parsed as a commit
-        let parsed = gix_object::CommitRef::from_bytes(&captured);
+        let parsed = gix_object::CommitRef::from_bytes(&captured, repo.object_hash());
         assert!(
             parsed.is_ok(),
             "captured data should be a parseable commit: {:?}",

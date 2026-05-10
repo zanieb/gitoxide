@@ -3,7 +3,7 @@ use gix_hash::ObjectId;
 use gix_object::tree::{EntryKind, EntryMode};
 use smallvec::SmallVec;
 
-use crate::{entry, extension, State};
+use crate::{State, entry, extension};
 
 /// The error returned by [`State::write_tree_to()`].
 #[derive(Debug, thiserror::Error)]

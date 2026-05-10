@@ -1,5 +1,5 @@
 use bstr::BString;
-use gix_protocol::push::response::{parse_v1, StatusV1, UnpackStatus};
+use gix_protocol::push::response::{StatusV1, UnpackStatus, parse_v1};
 
 /// Ported from git/t/t5516-fetch-push.sh and the git push protocol specification.
 /// Tests cover the v1 push response parsing including:

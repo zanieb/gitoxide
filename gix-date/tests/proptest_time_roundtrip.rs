@@ -3,7 +3,7 @@
 //! The "raw" format used in git commit headers is: `<seconds> +HHMM` or `<seconds> -HHMM`.
 //! We verify that Time -> write_to -> parse_header roundtrips correctly.
 
-use gix_date::{parse::TimeBuf, Time};
+use gix_date::{Time, parse::TimeBuf};
 use proptest::prelude::*;
 
 /// Generate a valid Time with reasonable offset constraints.

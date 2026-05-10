@@ -3,7 +3,7 @@ use gix_error::ResultExt;
 use std::ops::DerefMut;
 
 use gix_hash::ObjectId;
-use gix_object::{tree::EntryKind, Exists, Find, FindExt, ObjectRef, Write};
+use gix_object::{Exists, Find, FindExt, ObjectRef, Write, tree::EntryKind};
 use gix_odb::{Header, HeaderExt};
 use gix_ref::{FullName, transaction::PreviousValue};
 use smallvec::SmallVec;

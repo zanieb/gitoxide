@@ -1,9 +1,9 @@
 use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 
 use crate::{
+    Repository,
     bstr::{BStr, BString, ByteSlice, ByteVec},
     repository::add_to_index::{Error, Options, Outcome},
-    Repository,
 };
 
 impl Repository {

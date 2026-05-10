@@ -207,7 +207,7 @@ impl<'a> ObjectRef<'a> {
     /// Deserialize an object of `kind` from the given `data`, using `object_hash`.
     pub fn from_bytes(data: &'a [u8], kind: Kind, hash_kind: gix_hash::Kind) -> Result<ObjectRef<'a>> {
         Ok(match kind {
-            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes(data, object_hash)?),
+            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes_with_hash(data, object_hash)?),
             Kind::Blob => ObjectRef::Blob(BlobRef { data }),
             Kind::Commit => ObjectRef::Commit(CommitRef::from_bytes(data, object_hash)?),
             Kind::Tag => ObjectRef::Tag(TagRef::from_bytes(data, object_hash)?),

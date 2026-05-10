@@ -1,10 +1,10 @@
-use gix_fsck::{write_lost_found, Connectivity, Error, Options};
+use gix_fsck::{Connectivity, Error, Options, write_lost_found};
 use gix_hash::ObjectId;
 use gix_hashtable::{HashMap, HashSet};
-use gix_object::{tree::EntryKind, Data, Kind};
+use gix_object::{Data, Kind, tree::EntryKind};
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
     LazyLock,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use crate::hex_to_id;

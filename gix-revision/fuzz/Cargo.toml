@@ -12,7 +12,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 gix-hash = { path = "../../gix-hash" }
 gix-error = { path = "../../gix-error" }
-bstr = { version = "1.5.0", default-features = false }
+bstr = { version = "1.12.0", default-features = false }
 
 [dependencies.gix-revision]
 path = ".."

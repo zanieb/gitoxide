@@ -54,17 +54,14 @@ where
 }
 
 impl<'a> TreeRefIter<'a> {
-    /// Instantiate an iterator from tree data using the shortest supported hash kind.
-    ///
-    /// Use [`TreeRefIter::from_bytes_with_hash()`] when parsing tree data from a repository
-    /// that can use a different object hash.
-    pub fn from_bytes(data: &'a [u8]) -> TreeRefIter<'a> {
-        TreeRefIter::from_bytes_with_hash(data, gix_hash::Kind::shortest())
+    /// Instantiate an iterator from the given tree `data` and `object_hash`.
+    pub fn from_bytes(data: &'a [u8], hash_kind: gix_hash::Kind) -> TreeRefIter<'a> {
+        TreeRefIter { data, hash_kind }
     }
 
     /// Instantiate an iterator from the given tree data and the hash kind used by its embedded object ids.
     pub fn from_bytes_with_hash(data: &'a [u8], object_hash: gix_hash::Kind) -> TreeRefIter<'a> {
-        TreeRefIter { data, object_hash }
+        TreeRefIter::from_bytes(data, object_hash)
     }
 
     /// Follow a sequence of `path` components starting from this instance, and look them up in `odb` one by one using `buffer`
@@ -89,7 +86,7 @@ impl<'a> TreeRefIter<'a> {
         buffer.extend_from_slice(self.data);
 
         let mut iter = path.into_iter().peekable();
-        let mut data = crate::Data::new_with_hash(crate::Kind::Tree, buffer, self.object_hash);
+        let mut data = crate::Data::new_with_hash(crate::Kind::Tree, buffer, self.hash_kind);
 
         loop {
             data = match next_entry(&mut iter, data) {
@@ -182,7 +179,7 @@ impl<'a> Iterator for TreeRefIter<'a> {
         if self.data.is_empty() {
             return None;
         }
-        match decode::fast_entry(self.data, self.object_hash.len_in_bytes()) {
+        match decode::fast_entry(self.data, self.hash_kind.len_in_bytes()) {
             Some((data_left, entry)) => {
                 self.data = data_left;
                 Some(Ok(entry))

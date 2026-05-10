@@ -8,8 +8,8 @@ use std::{
 };
 
 use crate::{
-    bstr::{BString, ByteSlice},
     Repository, Submodule,
+    bstr::{BString, ByteSlice},
 };
 
 /// Update operations

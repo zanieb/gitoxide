@@ -29,12 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use gix_ref::file::ReferenceExt;
     let head_id = head.peel_to_id(&refs, &objects)?;
 
-    let index = gix_index::File::at(
-        git_dir.join("index"),
-        gix_hash::Kind::Sha1,
-        false,
-        Default::default(),
-    )?;
+    let index = gix_index::File::at(git_dir.join("index"), gix_hash::Kind::Sha1, false, Default::default())?;
     let attr_stack = gix_worktree::Stack::from_state_and_ignore_case(
         worktree_path,
         false,

@@ -173,11 +173,7 @@ impl crate::Repository {
                     } else {
                         path.join(gitdir)
                     };
-                    if gitdir_path.is_dir() {
-                        Some(gitdir_path)
-                    } else {
-                        None
-                    }
+                    if gitdir_path.is_dir() { Some(gitdir_path) } else { None }
                 } else {
                     None
                 }
@@ -225,7 +221,7 @@ impl crate::Repository {
             Err(_) => {
                 return Err(Error::RepositoryNotFound {
                     path: worktree_path.to_owned(),
-                })
+                });
             }
         };
 

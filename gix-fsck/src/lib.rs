@@ -7,10 +7,10 @@ use std::collections::VecDeque;
 use gix_hash::ObjectId;
 use gix_hashtable::{HashMap, HashSet};
 use gix_object::{
+    Data, Exists, Find, FindExt, Kind, ObjectRef,
     bstr::{BStr, BString},
     find::{existing, existing_object},
     tree::{EntryKind, EntryMode, EntryRef},
-    Data, Exists, Find, FindExt, Kind, ObjectRef,
 };
 
 /// Options to use while performing a connectivity check.

@@ -1,9 +1,7 @@
-use gix_ref::{bstr::ByteSlice, Category, FullName};
+use gix_ref::{Category, FullName, bstr::ByteSlice};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "main".to_owned());
+    let input = std::env::args().nth(1).unwrap_or_else(|| "main".to_owned());
 
     let name = if input.starts_with("refs/") || input == "HEAD" {
         FullName::try_from(input.as_str())?

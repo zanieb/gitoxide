@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use crate::{
+    Repository,
     config::tree::Core,
     hook::{self, Name, Outcome, Prepared},
-    Repository,
 };
 
 impl Repository {
