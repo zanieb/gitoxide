@@ -126,6 +126,115 @@ fn builder_v3_sha256_object_format_capability() {
     assert_eq!(parsed.capabilities, [BString::from("object-format=sha256")]);
 }
 
+/// Builder should reject refs whose object id hash kind doesn't match the bundle format.
+#[test]
+#[cfg(all(feature = "sha1", feature = "sha256"))]
+fn builder_write_rejects_ref_with_wrong_hash_kind() {
+    let mut builder = Builder::new(Version::V2, gix_hash::Kind::Sha1);
+    let sha256_id = gix_hash::ObjectId::null(gix_hash::Kind::Sha256);
+    builder.add_ref("refs/heads/main", sha256_id);
+
+    let pack_writer_called = std::cell::Cell::new(false);
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        pack_writer_called.set(true);
+        Ok(true)
+    });
+
+    assert!(
+        matches!(
+            result,
+            Err(Error::ObjectHashKind {
+                id,
+                expected: gix_hash::Kind::Sha1,
+                actual: gix_hash::Kind::Sha256,
+            }) if id == sha256_id
+        ),
+        "builder should reject refs with the wrong object format"
+    );
+    assert!(
+        !pack_writer_called.get(),
+        "validation should run before pack generation"
+    );
+    assert!(buf.is_empty(), "validation should run before writing the header");
+}
+
+/// Builder should reject prerequisites whose object id hash kind doesn't match the bundle format.
+#[test]
+#[cfg(all(feature = "sha1", feature = "sha256"))]
+fn builder_write_rejects_prerequisite_with_wrong_hash_kind() {
+    let mut builder = Builder::new(Version::V2, gix_hash::Kind::Sha1);
+    let sha256_id = gix_hash::ObjectId::null(gix_hash::Kind::Sha256);
+    builder
+        .add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"))
+        .add_prerequisite(sha256_id, None);
+
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        Ok(true)
+    });
+
+    assert!(
+        matches!(
+            result,
+            Err(Error::ObjectHashKind {
+                id,
+                expected: gix_hash::Kind::Sha1,
+                actual: gix_hash::Kind::Sha256,
+            }) if id == sha256_id
+        ),
+        "builder should reject prerequisites with the wrong object format"
+    );
+    assert!(buf.is_empty(), "validation should run before writing the header");
+}
+
+/// Builder should reject unsupported object-format capabilities before writing output.
+#[test]
+fn builder_write_rejects_unsupported_object_format_capability() {
+    let mut builder = Builder::new(Version::V3, gix_hash::Kind::Sha1);
+    builder
+        .add_capability("object-format=sha999")
+        .add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        Ok(true)
+    });
+
+    assert!(
+        matches!(result, Err(Error::UnsupportedObjectFormat { format }) if format == "sha999"),
+        "builder should reject unsupported object-format capabilities"
+    );
+    assert!(buf.is_empty(), "validation should run before writing the header");
+}
+
+/// Builder should reject conflicting object-format capabilities before writing output.
+#[test]
+#[cfg(all(feature = "sha1", feature = "sha256"))]
+fn builder_write_rejects_conflicting_object_format_capability() {
+    let mut builder = Builder::new(Version::V3, gix_hash::Kind::Sha1);
+    builder
+        .add_capability("object-format=sha256")
+        .add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        Ok(true)
+    });
+
+    assert!(
+        matches!(
+            result,
+            Err(Error::ObjectFormatMismatch {
+                expected: gix_hash::Kind::Sha1,
+                actual: gix_hash::Kind::Sha256,
+            })
+        ),
+        "builder should reject conflicting object-format capabilities"
+    );
+    assert!(buf.is_empty(), "validation should run before writing the header");
+}
+
 /// Ported from t5607: 'Refusing to create empty bundle'
 /// Builder with no refs should fail.
 #[test]

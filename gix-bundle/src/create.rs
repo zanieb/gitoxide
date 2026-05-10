@@ -35,6 +35,27 @@ pub enum Error {
     NoRefs,
     #[error("bundle pack writer produced no objects")]
     EmptyPack,
+    #[error("bundle object id {id} uses {actual}, but builder object format is {expected}")]
+    ObjectHashKind {
+        /// The object id whose hash kind didn't match the builder.
+        id: ObjectId,
+        /// The hash kind configured for the builder.
+        expected: gix_hash::Kind,
+        /// The hash kind of the object id.
+        actual: gix_hash::Kind,
+    },
+    #[error("unsupported bundle object format capability: {format:?}")]
+    UnsupportedObjectFormat {
+        /// The object format value from the `object-format` capability.
+        format: BString,
+    },
+    #[error("bundle object format capability is {actual}, but builder object format is {expected}")]
+    ObjectFormatMismatch {
+        /// The hash kind configured for the builder.
+        expected: gix_hash::Kind,
+        /// The hash kind advertised by the capability.
+        actual: gix_hash::Kind,
+    },
     #[error(transparent)]
     Header(#[from] std::io::Error),
     #[error("failed to generate pack data")]
@@ -56,6 +77,7 @@ pub enum Error {
 #[derive(Debug)]
 pub struct Builder {
     header: Header,
+    object_hash: gix_hash::Kind,
     /// Tip object ids that the packfile must contain (i.e., the ref targets).
     tips: Vec<ObjectId>,
     /// Objects that the recipient is expected to already have (prerequisites).
@@ -72,6 +94,7 @@ impl Builder {
                 refs: Vec::new(),
                 capabilities: Vec::new(),
             },
+            object_hash,
             tips: Vec::new(),
             exclude: Vec::new(),
         };
@@ -130,6 +153,8 @@ impl Builder {
         if self.header.refs.is_empty() {
             return Err(Error::NoRefs);
         }
+        self.validate_object_ids()?;
+        self.validate_object_format_capabilities()?;
 
         self.header.write_to(&mut writer).map_err(Error::Header)?;
 
@@ -137,6 +162,42 @@ impl Builder {
             return Err(Error::EmptyPack);
         }
 
+        Ok(())
+    }
+
+    fn validate_object_ids(&self) -> Result<(), Error> {
+        for id in self.tips.iter().chain(self.exclude.iter()).copied() {
+            let actual = id.kind();
+            if actual != self.object_hash {
+                return Err(Error::ObjectHashKind {
+                    id,
+                    expected: self.object_hash,
+                    actual,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_object_format_capabilities(&self) -> Result<(), Error> {
+        for capability in &self.header.capabilities {
+            let capability: &[u8] = capability.as_ref();
+            let Some(format) = capability.strip_prefix(b"object-format=") else {
+                continue;
+            };
+            let actual = std::str::from_utf8(format)
+                .ok()
+                .and_then(|format| format.parse().ok())
+                .ok_or_else(|| Error::UnsupportedObjectFormat {
+                    format: BString::from(format),
+                })?;
+            if actual != self.object_hash {
+                return Err(Error::ObjectFormatMismatch {
+                    expected: self.object_hash,
+                    actual,
+                });
+            }
+        }
         Ok(())
     }
 }
