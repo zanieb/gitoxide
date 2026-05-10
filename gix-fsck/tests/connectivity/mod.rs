@@ -489,6 +489,52 @@ fn blob_entries_reject_non_blob_objects_without_hash_validation() {
 }
 
 #[test]
+fn previously_seen_object_is_revalidated_when_referenced_as_a_blob() {
+    let mut db = MemoryDb::default();
+    let commit_id = db.insert(
+        Kind::Commit,
+        MemoryDb::commit_data(ObjectId::empty_tree(gix_hash::Kind::Sha1), "not-a-blob"),
+    );
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "file", commit_id));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("the commit object is present"));
+    check.check_commit(&commit_id).expect("commit root is valid");
+    let err = check
+        .check_index_tree_cache([tree_id])
+        .expect_err("a seen commit object still cannot satisfy a blob entry");
+
+    assert!(matches!(
+        err,
+        gix_object::find::existing_object::Error::ObjectKind {
+            oid,
+            actual: Kind::Commit,
+            expected: Kind::Blob,
+        } if oid == commit_id
+    ));
+}
+
+#[test]
+fn previously_seen_object_is_revalidated_when_referenced_as_a_tree() {
+    let mut db = MemoryDb::default();
+    let blob_id = db.insert(Kind::Blob, b"not-a-tree".to_vec());
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("the blob object is present"));
+    check.check_object(&blob_id).expect("blob root is valid");
+    let err = check
+        .check_index_tree_cache([blob_id])
+        .expect_err("a seen blob object still cannot satisfy a tree entry");
+
+    assert!(matches!(
+        err,
+        gix_object::find::existing_object::Error::ObjectKind {
+            oid,
+            actual: Kind::Blob,
+            expected: Kind::Tree,
+        } if oid == blob_id
+    ));
+}
+
+#[test]
 fn skipped_objects_are_ignored() {
     let mut db = MemoryDb::default();
     let missing_blob = hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
