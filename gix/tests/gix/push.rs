@@ -224,6 +224,32 @@ mod blocking_io {
     }
 
     #[test]
+    fn push_rejects_conflicting_destinations() -> gix_testtools::Result {
+        let (repo, bare_path, _dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        let result = do_push(
+            &repo,
+            &bare_url,
+            &[
+                "refs/heads/main:refs/heads/conflict",
+                "refs/heads/feature:refs/heads/conflict",
+            ],
+        );
+
+        let err = match result {
+            Ok(_) => panic!("conflicting push destinations should fail before sending commands"),
+            Err(err) => err,
+        };
+        let error = err.to_string();
+        assert!(
+            error.contains("Multiple push sources map to destination"),
+            "error should mention conflicting destinations: {error}"
+        );
+        verify_ref_absent(&bare_path, "refs/heads/conflict");
+        Ok(())
+    }
+
+    #[test]
     fn push_delete_remote_ref() -> gix_testtools::Result {
         // Mirrors: 'allow deleting an invalid remote ref'
         // First push a branch, then delete it.
