@@ -43,7 +43,14 @@ impl Entry {
         out.write_all(&stat.uid.to_be_bytes())?;
         out.write_all(&stat.gid.to_be_bytes())?;
         out.write_all(&stat.size.to_be_bytes())?;
-        out.write_all(self.id.as_bytes())?;
+        let id = self.id.as_bytes();
+        if id.len() != state.object_hash.len_in_bytes() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "entry object id length does not match index object hash",
+            ));
+        }
+        out.write_all(id)?;
         let path = self.path(state);
         let path_len: u16 = if path.len() >= entry::Flags::PATH_LEN.bits() as usize {
             entry::Flags::PATH_LEN.bits() as u16
@@ -70,4 +77,27 @@ fn common_prefix_len(previous: &BStr, current: &BStr) -> usize {
         .zip(current.iter())
         .take_while(|(previous, current)| previous == current)
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{entry, Entry, State};
+
+    #[test]
+    fn write_to_rejects_object_hash_mismatch() {
+        let mut state = State::new(gix_hash::Kind::Sha256);
+        state.path_backing.extend_from_slice(b"a");
+        state.entries.push(Entry {
+            stat: entry::Stat::default(),
+            id: gix_hash::ObjectId::from_bytes_or_panic(&[0; 20]),
+            flags: entry::Flags::empty(),
+            mode: entry::Mode::FILE,
+            path: 0..1,
+        });
+
+        let mut out = Vec::new();
+        let err = state.entries[0].write_to(&mut out, &state).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
 }
