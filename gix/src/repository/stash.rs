@@ -41,6 +41,11 @@ fn path_has_worktree_escape_component(path: &[u8]) -> bool {
 type StashIndexChange = (Vec<u8>, ObjectId, gix_index::entry::Mode);
 type StashUntrackedFile = (Vec<u8>, ObjectId, gix_index::entry::Mode);
 
+struct WorktreeEntryData {
+    content: Vec<u8>,
+    mode: gix_index::entry::Mode,
+}
+
 /// A single entry from the stash reflog.
 #[derive(Debug)]
 pub struct StashEntry<'repo> {
@@ -684,7 +689,7 @@ impl Repository {
         // Uses binary search on sorted indexes instead of HashMaps.
         let mut conflicts: Vec<BString> = Vec::new();
         let mut merged_worktree_files: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-        for (path, stash_id, _mode) in &changed {
+        for (path, stash_id, mode) in &changed {
             use crate::bstr::ByteSlice;
             let path_bstr = path.as_bstr();
             if let Some(current_entry) = current_index.entry_by_path_and_stage(path_bstr, unconflicted) {
@@ -700,18 +705,18 @@ impl Repository {
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
                 )));
-                if let Ok(content) = std::fs::read(&file_path) {
+                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path) {
                     if let Ok(worktree_oid) =
-                        gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)
+                        gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &entry_data.content)
                     {
-                        if worktree_oid != current_entry.id {
+                        if worktree_oid != current_entry.id || entry_data.mode != current_entry.mode {
                             if let Some(merged) = self.try_auto_merge_stash_worktree_file(
                                 path,
                                 parent_index
                                     .entry_by_path_and_stage(path_bstr, unconflicted)
                                     .map(|e| e.id),
                                 *stash_id,
-                                &content,
+                                &entry_data.content,
                             )? {
                                 merged_worktree_files.push((path.clone(), merged));
                             } else {
@@ -727,11 +732,11 @@ impl Repository {
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
                 )));
-                if let Ok(content) = std::fs::read(&file_path) {
+                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path) {
                     if let Ok(worktree_oid) =
-                        gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)
+                        gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &entry_data.content)
                     {
-                        if worktree_oid != *stash_id {
+                        if worktree_oid != *stash_id || entry_data.mode != *mode {
                             conflicts.push(BString::from(path.as_slice()));
                         }
                     }
@@ -753,11 +758,11 @@ impl Repository {
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
                 )));
-                if let Ok(content) = std::fs::read(&file_path) {
+                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path) {
                     if let Ok(worktree_oid) =
-                        gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)
+                        gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &entry_data.content)
                     {
-                        if worktree_oid != current_entry.id {
+                        if worktree_oid != current_entry.id || entry_data.mode != current_entry.mode {
                             conflicts.push(BString::from(path.as_slice()));
                         }
                     }
@@ -1329,14 +1334,19 @@ impl Repository {
         use std::collections::HashMap;
 
         let stat_options = gix_index::entry::stat::Options::default();
-        let mut worktree_overrides: HashMap<Vec<u8>, ObjectId> = HashMap::new();
+        let mut worktree_overrides: HashMap<Vec<u8>, (ObjectId, gix_index::entry::Mode)> = HashMap::new();
         let mut worktree_deletions: Vec<Vec<u8>> = Vec::new();
 
         for entry in index.entries() {
             if entry.stage() != gix_index::entry::Stage::Unconflicted {
                 continue;
             }
-            if entry.mode != gix_index::entry::Mode::FILE && entry.mode != gix_index::entry::Mode::FILE_EXECUTABLE {
+            if !matches!(
+                entry.mode,
+                gix_index::entry::Mode::FILE
+                    | gix_index::entry::Mode::FILE_EXECUTABLE
+                    | gix_index::entry::Mode::SYMLINK
+            ) {
                 continue;
             }
 
@@ -1355,30 +1365,38 @@ impl Repository {
                 Err(e) => return Err(SaveError::ReadWorktreeFile(e)),
             };
 
-            // If stat conversion fails (e.g. time before epoch), fall back to default.
-            let fs_stat = gix_index::entry::Stat::from_fs(&fs_meta).unwrap_or_default();
-
-            if entry.stat.matches(&fs_stat, stat_options) {
-                // Stat matches the index entry -- file is unchanged, skip it.
+            let Some(worktree_mode) = mode_from_worktree_metadata(&fs_meta) else {
+                let path_bytes: &[u8] = path;
+                worktree_deletions.push(path_bytes.to_vec());
                 continue;
-            }
-
-            // Stat differs, read and hash the file to confirm it actually changed.
-            let content = match std::fs::read(&file_path) {
-                Ok(c) => c,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    let path_bytes: &[u8] = path;
-                    worktree_deletions.push(path_bytes.to_vec());
-                    continue;
-                }
-                Err(e) => return Err(SaveError::ReadWorktreeFile(e)),
             };
 
-            let worktree_oid = gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &content)?;
-            if worktree_oid != entry.id {
-                let blob_id = self.write_blob(&content)?;
+            if worktree_mode == entry.mode && worktree_mode != gix_index::entry::Mode::SYMLINK {
+                // If stat conversion fails (e.g. time before epoch), fall back to default.
+                let fs_stat = gix_index::entry::Stat::from_fs(&fs_meta).unwrap_or_default();
+
+                if entry.stat.matches(&fs_stat, stat_options) {
+                    // Stat matches the index entry -- file is unchanged, skip it.
+                    continue;
+                }
+            }
+
+            // Stat differs, mode differs, or the entry is a symlink. Read and hash
+            // the worktree data to confirm whether it actually changed.
+            let Some(entry_data) =
+                worktree_entry_data_with_mode(&file_path, worktree_mode).map_err(SaveError::ReadWorktreeFile)?
+            else {
                 let path_bytes: &[u8] = path;
-                worktree_overrides.insert(path_bytes.to_vec(), blob_id.detach());
+                worktree_deletions.push(path_bytes.to_vec());
+                continue;
+            };
+
+            let worktree_oid =
+                gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &entry_data.content)?;
+            if worktree_oid != entry.id || entry_data.mode != entry.mode {
+                let blob_id = self.write_blob(&entry_data.content)?;
+                let path_bytes: &[u8] = path;
+                worktree_overrides.insert(path_bytes.to_vec(), (blob_id.detach(), entry_data.mode));
             }
         }
 
@@ -1409,13 +1427,11 @@ impl Repository {
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
                 )));
-                let content = match std::fs::read(&file_path) {
-                    Ok(c) => c,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(e) => return Err(SaveError::ReadWorktreeFile(e)),
+                let Some(entry_data) = worktree_entry_data(&file_path).map_err(SaveError::ReadWorktreeFile)? else {
+                    continue;
                 };
-                let blob_id = self.write_blob(&content)?;
-                worktree_overrides.insert(path.clone(), blob_id.detach());
+                let blob_id = self.write_blob(&entry_data.content)?;
+                worktree_overrides.insert(path.clone(), (blob_id.detach(), entry_data.mode));
             }
         }
 
@@ -1435,8 +1451,9 @@ impl Repository {
         }
         for (entry, entry_path) in worktree_index.entries_mut_with_paths() {
             let path_bytes: &[u8] = entry_path;
-            if let Some(&new_oid) = worktree_overrides.get(path_bytes) {
+            if let Some(&(new_oid, new_mode)) = worktree_overrides.get(path_bytes) {
                 entry.id = new_oid;
+                entry.mode = new_mode;
             }
         }
 
@@ -1470,6 +1487,44 @@ fn tree_mode_from_index_mode(mode: gix_index::entry::Mode) -> gix_object::tree::
     } else {
         gix_object::tree::EntryKind::Blob.into()
     }
+}
+
+fn mode_from_worktree_metadata(meta: &gix_index::fs::Metadata) -> Option<gix_index::entry::Mode> {
+    if meta.is_symlink() {
+        Some(gix_index::entry::Mode::SYMLINK)
+    } else if meta.is_file() {
+        Some(if meta.is_executable() {
+            gix_index::entry::Mode::FILE_EXECUTABLE
+        } else {
+            gix_index::entry::Mode::FILE
+        })
+    } else {
+        None
+    }
+}
+
+fn worktree_entry_data(path: &std::path::Path) -> std::io::Result<Option<WorktreeEntryData>> {
+    let meta = match gix_index::fs::Metadata::from_path_no_follow(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    let Some(mode) = mode_from_worktree_metadata(&meta) else {
+        return Ok(None);
+    };
+    worktree_entry_data_with_mode(path, mode)
+}
+
+fn worktree_entry_data_with_mode(
+    path: &std::path::Path,
+    mode: gix_index::entry::Mode,
+) -> std::io::Result<Option<WorktreeEntryData>> {
+    let content = if mode == gix_index::entry::Mode::SYMLINK {
+        gix_path::into_bstr(std::fs::read_link(path)?).into_owned().into()
+    } else {
+        std::fs::read(path)?
+    };
+    Ok(Some(WorktreeEntryData { content, mode }))
 }
 
 #[derive(Debug, Clone)]
