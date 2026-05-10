@@ -259,7 +259,7 @@ pub fn write_to(
             .iter()
             .filter_map(|dir| dir.exclude_file_oid.as_ref())
         {
-            data.write_all(oid.as_bytes())?;
+            write_object_id(oid, object_hash, &mut data)?;
         }
         data.write_all(b"\0")?;
     }
@@ -277,13 +277,29 @@ fn write_oid_stat(
     match stat {
         Some(stat) => {
             write_stat(&stat.stat, out)?;
-            out.write_all(stat.id.as_bytes())
+            write_object_id(&stat.id, object_hash, out)
         }
         None => {
             write_stat(&entry::Stat::default(), out)?;
-            out.write_all(ObjectId::null(object_hash).as_bytes())
+            write_object_id(&ObjectId::null(object_hash), object_hash, out)
         }
     }
+}
+
+fn write_object_id(
+    id: &ObjectId,
+    object_hash: gix_hash::Kind,
+    out: &mut dyn std::io::Write,
+) -> Result<(), std::io::Error> {
+    let bytes = id.as_bytes();
+    let expected = object_hash.len_in_bytes();
+    if bytes.len() != expected {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "object id length does not match index object hash",
+        ));
+    }
+    out.write_all(bytes)
 }
 
 fn write_stat(stat: &entry::Stat, out: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
@@ -358,8 +374,10 @@ fn write_bitmap(
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, write_bitmap, write_oid_stat};
+    use super::{decode, write_bitmap, write_oid_stat, OidStat};
+    use crate::entry;
     use crate::util::write_var_int;
+    use gix_hash::ObjectId;
 
     #[test]
     fn var_int_roundtrips_through_the_decoder() {
@@ -411,5 +429,18 @@ mod tests {
         data.push(0);
 
         assert!(decode(&data, object_hash).is_none());
+    }
+
+    #[test]
+    fn write_oid_stat_rejects_object_hash_mismatch() {
+        let stat = OidStat {
+            stat: entry::Stat::default(),
+            id: ObjectId::from_bytes_or_panic(&[0; 20]),
+        };
+        let mut out = Vec::new();
+
+        let err = write_oid_stat(Some(&stat), gix_hash::Kind::Sha256, &mut out).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
 }
