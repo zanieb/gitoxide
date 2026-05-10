@@ -9,7 +9,7 @@
 //! will FAIL with the current LEB128 implementation until the varint
 //! code is rewritten.
 
-use gix_reftable::{read_varint, write_varint, RefRecord};
+use gix_reftable::{read_varint, write_varint, Error, RefRecord};
 
 // ---------------------------------------------------------------------------
 // Varint tests
@@ -100,6 +100,20 @@ fn varint_overflow() {
 fn varint_empty_input() {
     let result = read_varint(&[]);
     assert!(result.is_err(), "empty input should fail");
+}
+
+#[test]
+fn ref_record_update_index_overflow_errors() {
+    let mut data = Vec::new();
+    write_varint(0, &mut data);
+    write_varint(0, &mut data);
+    write_varint(u64::MAX, &mut data);
+
+    let result = gix_reftable::parse_ref_record(&data, &[], 20, 1);
+    assert!(
+        matches!(result, Err(Error::InvalidVarint)),
+        "overflowing update-index deltas must be rejected instead of panicking or wrapping: {result:?}"
+    );
 }
 
 /// Single-byte values (0..=127) should encode to exactly one byte.
