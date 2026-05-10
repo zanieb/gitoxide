@@ -634,6 +634,41 @@ mod state_files {
     }
 
     #[test]
+    fn write_removes_stale_interactive_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+
+        let mut state = MergeState {
+            head_name: "refs/heads/main".into(),
+            onto: make_oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            orig_head: make_oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            interactive: true,
+            todo: TodoList {
+                operations: std::collections::VecDeque::new(),
+            },
+            done: TodoList {
+                operations: std::collections::VecDeque::new(),
+            },
+            current_step: 1,
+            total_steps: 0,
+            stopped_sha: None,
+            accumulated_squash_message: None,
+        };
+
+        state.write_to(&rebase_dir).unwrap();
+        assert!(rebase_dir.join("interactive").exists());
+
+        state.interactive = false;
+        state.write_to(&rebase_dir).unwrap();
+
+        assert!(
+            !MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap().interactive,
+            "writer should persist non-interactive state over a previous interactive marker"
+        );
+        assert!(!rebase_dir.join("interactive").exists());
+    }
+
+    #[test]
     fn done_file_absent_produces_empty_done_list() {
         let dir = tempfile::tempdir().unwrap();
         let rebase_dir = dir.path().join("rebase-merge");
