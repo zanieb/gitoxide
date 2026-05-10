@@ -829,14 +829,10 @@ fn check_blob<T, F>(
     options: Options<'_>,
 ) -> Result<(), Error>
 where
-    T: FindExt + Exists,
+    T: Find,
     F: FnMut(&ObjectId, Kind),
 {
-    if options.verify_hashes {
-        if find_optional_object(db, oid, buf, Kind::Blob, options)?.is_none() {
-            missing_cb(oid, Kind::Blob);
-        }
-    } else if !db.exists(oid) {
+    if find_optional_object(db, oid, buf, Kind::Blob, options)?.is_none() {
         missing_cb(oid, Kind::Blob);
     }
     Ok(())
