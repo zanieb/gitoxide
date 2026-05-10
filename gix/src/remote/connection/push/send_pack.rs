@@ -1,8 +1,9 @@
 use std::sync::atomic::AtomicBool;
 
-use crate::bstr::ByteSlice;
+use crate::bstr::{BString, ByteSlice};
 use gix_object::Exists as _;
 use gix_object::Write as _;
+use gix_refspec::match_group::SourceRef;
 #[cfg(feature = "async-network-client")]
 use gix_transport::client::async_io::Transport;
 #[cfg(feature = "blocking-network-client")]
@@ -186,9 +187,25 @@ where
 }
 
 struct PushCommand {
-    ref_name: crate::bstr::BString,
+    ref_name: BString,
     old_id: gix_hash::ObjectId,
     new_id: gix_hash::ObjectId,
+}
+
+struct LocalRef {
+    name: BString,
+    target: gix_hash::ObjectId,
+    object: Option<gix_hash::ObjectId>,
+}
+
+impl LocalRef {
+    fn to_item(&self) -> gix_refspec::match_group::Item<'_> {
+        gix_refspec::match_group::Item {
+            full_ref_name: self.name.as_ref(),
+            target: &self.target,
+            object: self.object.as_ref().map(AsRef::as_ref),
+        }
+    }
 }
 
 fn build_push_commands(
@@ -226,111 +243,174 @@ fn build_push_commands(
     let mut commands = Vec::new();
     let mut lease_rejected = Vec::new();
 
-    // Process all refspecs (both explicit and implicit).
-    // For push, refspec source is the local ref and destination is the remote ref.
-    let all_specs = ref_map.refspecs.iter().chain(ref_map.extra_refspecs.iter());
+    let local_refs = local_refs_for_push(repo)?;
+    let null = gix_hash::ObjectId::null(object_hash);
+    let specs: Vec<_> = ref_map
+        .refspecs
+        .iter()
+        .chain(ref_map.extra_refspecs.iter())
+        .map(gix_refspec::RefSpec::to_ref)
+        .collect();
+    let matched = gix_refspec::MatchGroup::from_push_specs(specs.iter().copied()).match_push(
+        local_refs.iter().map(LocalRef::to_item),
+        ref_map.remote_refs.iter().map(|r| remote_ref_to_item(r, &null)),
+    );
 
-    for spec in all_specs {
-        let spec_ref = spec.to_ref();
-        let src = spec_ref.source();
-        let dst = spec_ref.destination();
-
-        match (src, dst) {
-            (Some(src), Some(dst)) => {
-                // Normal push: src:dst -- push local `src` to remote `dst`.
-                // The source can be either a reference name or a raw object ID (hex).
-                let new_id = if let Ok(oid) = gix_hash::ObjectId::from_hex(src.as_bytes()) {
-                    // Source is a raw object ID — verify it exists in the local repo.
-                    if !repo.has_object(oid) {
-                        return Err(Error::FindObject {
-                            oid,
-                            source: Box::new(std::io::Error::new(
-                                std::io::ErrorKind::NotFound,
-                                format!("object {oid} not found in local repository"),
-                            )),
-                        });
-                    }
-                    oid
-                } else {
-                    let src_name = crate::bstr::BString::from(src.as_bytes());
-                    let reference = repo.find_reference(src).map_err(|e| Error::FindLocalRef {
-                        name: src_name,
-                        source: Box::new(e),
-                    })?;
-                    reference.id().detach()
-                };
-
-                // Look up the remote ref's current oid for old_id (compare-and-swap).
-                let remote_old_id = remote_ref_by_name
-                    .get(dst.as_bytes())
-                    .and_then(|oid| *oid)
-                    .unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
-
-                let dst_bstr = crate::bstr::BString::from(dst.as_bytes());
-
-                // No-op check: if the remote already points to our target, skip.
-                // This takes priority over force-with-lease — a no-op push always succeeds.
-                if remote_old_id == new_id {
-                    continue;
-                }
-
-                // Force-with-lease check: if the caller specified an expected old_id,
-                // verify the remote's actual value matches.
-                if let Some(expected_ids) = expected_old_ids {
-                    if let Some(expected_oid) = expected_ids.get(&dst_bstr) {
-                        if remote_old_id != *expected_oid {
-                            // Remote moved unexpectedly — reject this ref update.
-                            lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
-                                ref_name: dst_bstr,
-                                reason: "stale info".into(),
-                            });
-                            continue;
-                        }
-                    }
-                }
-
-                commands.push(PushCommand {
-                    ref_name: dst_bstr,
-                    old_id: remote_old_id,
-                    new_id,
+    for (spec_index, spec) in specs.iter().enumerate() {
+        if let gix_refspec::Instruction::Push(gix_refspec::instruction::Push::Matching { src, .. }) = spec.instruction()
+        {
+            if matched.updates.iter().any(|update| update.spec_index == spec_index) {
+                continue;
+            }
+            if gix_hash::ObjectId::from_hex(src.as_bytes()).is_ok() {
+                continue;
+            }
+            if repo
+                .try_find_reference(src)
+                .map_err(|e| Error::FindLocalRef {
+                    name: src.to_owned(),
+                    source: Box::new(e),
+                })?
+                .is_none()
+            {
+                return Err(Error::FindLocalRef {
+                    name: src.to_owned(),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("reference {src} not found in local repository"),
+                    )),
                 });
-            }
-            (None, Some(dst)) => {
-                // Deletion refspec: :dst -- delete remote ref `dst`.
-                let dst_bstr = crate::bstr::BString::from(dst.as_bytes());
-
-                let remote_old_id = remote_ref_by_name.get(dst.as_bytes()).and_then(|oid| *oid);
-
-                // Force-with-lease check for deletions.
-                if let Some(expected_ids) = expected_old_ids {
-                    if let Some(expected_oid) = expected_ids.get(&dst_bstr) {
-                        let actual = remote_old_id.unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
-                        if actual != *expected_oid {
-                            lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
-                                ref_name: dst_bstr,
-                                reason: "stale info".into(),
-                            });
-                            continue;
-                        }
-                    }
-                }
-
-                if let Some(old_id) = remote_old_id {
-                    commands.push(PushCommand {
-                        ref_name: dst_bstr,
-                        old_id,
-                        new_id: gix_hash::ObjectId::null(object_hash),
-                    });
-                }
-                // If the remote doesn't have the ref, there's nothing to delete.
-            }
-            _ => {
-                // Other refspec forms (e.g., no destination) are not applicable for push commands.
             }
         }
     }
 
+    for update in matched.updates {
+        let new_id = match update.src {
+            SourceRef::ObjectId(oid) => {
+                if !repo.has_object(oid) {
+                    return Err(Error::FindObject {
+                        oid,
+                        source: Box::new(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("object {oid} not found in local repository"),
+                        )),
+                    });
+                }
+                oid
+            }
+            SourceRef::FullName(name) => update
+                .local_item_index
+                .and_then(|idx| local_refs.get(idx))
+                .map(|item| item.target)
+                .ok_or_else(|| Error::FindLocalRef {
+                    name: name.into_owned(),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "matched local reference was not available",
+                    )),
+                })?,
+        };
+
+        let remote_old_id = remote_ref_by_name
+            .get(update.dst.as_bytes())
+            .and_then(|oid| *oid)
+            .unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
+
+        if remote_old_id == new_id {
+            continue;
+        }
+
+        if let Some(expected_ids) = expected_old_ids {
+            if let Some(expected_oid) = expected_ids.get(&update.dst) {
+                if remote_old_id != *expected_oid {
+                    lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
+                        ref_name: update.dst,
+                        reason: "stale info".into(),
+                    });
+                    continue;
+                }
+            }
+        }
+
+        commands.push(PushCommand {
+            ref_name: update.dst,
+            old_id: remote_old_id,
+            new_id,
+        });
+    }
+
+    for deletion in matched.deletions {
+        let remote_old_id = remote_ref_by_name.get(deletion.dst.as_bytes()).and_then(|oid| *oid);
+
+        if let Some(expected_ids) = expected_old_ids {
+            if let Some(expected_oid) = expected_ids.get(&deletion.dst) {
+                let actual = remote_old_id.unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
+                if actual != *expected_oid {
+                    lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
+                        ref_name: deletion.dst,
+                        reason: "stale info".into(),
+                    });
+                    continue;
+                }
+            }
+        }
+
+        if let Some(old_id) = remote_old_id {
+            commands.push(PushCommand {
+                ref_name: deletion.dst,
+                old_id,
+                new_id: gix_hash::ObjectId::null(object_hash),
+            });
+        }
+    }
+
     Ok((commands, lease_rejected))
+}
+
+fn local_refs_for_push(repo: &crate::Repository) -> Result<Vec<LocalRef>, Error> {
+    let mut out = Vec::new();
+    if let Ok(head) = repo.head() {
+        if let Some(id) = head.id() {
+            out.push(LocalRef {
+                name: BString::from("HEAD"),
+                target: id.detach(),
+                object: None,
+            });
+        }
+    }
+
+    let references = repo
+        .references()
+        .map_err(|err| Error::ListLocalRefs { source: Box::new(err) })?;
+    for reference in references
+        .all()
+        .map_err(|err| Error::ListLocalRefs { source: Box::new(err) })?
+    {
+        let reference = reference.map_err(|err| Error::ListLocalRefs { source: err })?;
+        let raw = reference.detach();
+        let target = match raw.target {
+            gix_ref::Target::Object(id) => id,
+            gix_ref::Target::Symbolic(_) => continue,
+        };
+        out.push(LocalRef {
+            name: raw.name.as_bstr().to_owned(),
+            target,
+            object: raw.peeled,
+        });
+    }
+    Ok(out)
+}
+
+fn remote_ref_to_item<'a>(
+    r: &'a gix_protocol::handshake::Ref,
+    null: &'a gix_hash::ObjectId,
+) -> gix_refspec::match_group::Item<'a> {
+    let (full_ref_name, target, object) = r.unpack();
+    gix_refspec::match_group::Item {
+        full_ref_name,
+        target: target.unwrap_or(null.as_ref()),
+        object,
+    }
 }
 
 fn write_pack_for_push(

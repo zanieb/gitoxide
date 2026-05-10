@@ -23,6 +23,10 @@ pub enum Error {
         name: BString,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("Could not list local references for push matching")]
+    ListLocalRefs {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("Could not find object {oid} in local repository")]
     FindObject {
         oid: gix_hash::ObjectId,

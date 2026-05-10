@@ -145,6 +145,30 @@ mod blocking_io {
     }
 
     #[test]
+    fn push_source_only_branch_uses_matching_remote_branch() -> gix_testtools::Result {
+        let (repo, bare_path, _dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        let head_oid = repo.head_id()?.to_string();
+
+        do_push(&repo, &bare_url, &["main"])?;
+
+        verify_push_result(&bare_path, "refs/heads/main", &head_oid);
+        Ok(())
+    }
+
+    #[test]
+    fn push_partial_destination_is_expanded() -> gix_testtools::Result {
+        let (repo, bare_path, _dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        let head_oid = repo.head_id()?.to_string();
+
+        do_push(&repo, &bare_url, &["main:new-branch"])?;
+
+        verify_push_result(&bare_path, "refs/heads/new-branch", &head_oid);
+        Ok(())
+    }
+
+    #[test]
     fn push_tag() -> gix_testtools::Result {
         // Mirrors: 'push tag with non-existent, incomplete dest'
         let (repo, bare_path, _dir) = setup_push_repos()?;
@@ -214,6 +238,24 @@ mod blocking_io {
         assert!(outcome.unpack_ok, "unpack should succeed for deletion");
 
         verify_ref_absent(&bare_path, "refs/heads/feature");
+        Ok(())
+    }
+
+    #[test]
+    fn push_delete_partial_remote_ref_is_expanded() -> gix_testtools::Result {
+        let (repo, bare_path, _dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+
+        do_push(&repo, &bare_url, &["refs/heads/feature:refs/heads/obsolete"])?;
+        verify_push_result(
+            &bare_path,
+            "refs/heads/obsolete",
+            &repo.find_reference("refs/heads/feature")?.id().to_string(),
+        );
+
+        do_push(&repo, &bare_url, &[":obsolete"])?;
+
+        verify_ref_absent(&bare_path, "refs/heads/obsolete");
         Ok(())
     }
 
