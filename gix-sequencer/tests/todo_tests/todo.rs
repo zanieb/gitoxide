@@ -414,6 +414,35 @@ m my-branch # Merge
     }
 
     #[test]
+    fn hash_longer_than_repository_hash_kind_errors() {
+        let input = b"pick aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Too long\n";
+        let result = TodoList::parse(input.as_bstr(), Kind::Sha1);
+
+        assert!(matches!(
+            result,
+            Err(gix_sequencer::todo::parse::Error::CommitHashTooLong {
+                line_number: 1,
+                hash_kind: Kind::Sha1,
+                ..
+            })
+        ));
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn sha256_full_hash_is_accepted_for_sha256_repositories() {
+        let input = b"pick aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa SHA-256 hash\n";
+        let list = TodoList::parse(input.as_bstr(), Kind::Sha256).unwrap();
+
+        match &list.operations[0] {
+            Operation::Pick { commit, .. } => {
+                assert_eq!(commit.hex_len(), 64);
+            }
+            other => panic!("expected Pick, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn leading_whitespace_on_lines_is_trimmed() {
         let input = b"  pick aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Indented\n";
         let list = TodoList::parse(input.as_bstr(), Kind::Sha1).unwrap();
