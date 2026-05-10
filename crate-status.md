@@ -980,7 +980,8 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 ### gix-bundle
 * [ ] create a bundle from an archive
    * [ ] respect `export-ignore` and `export-subst`
-* [ ] extract a branch from a bundle into a repository
+* [x] extract a branch from a bundle into a repository
+   * implemented via `Repository::bundle_unbundle()`, which verifies prerequisites, writes the embedded pack, and imports non-pseudo refs while preserving `HEAD`
 * [ ] integrate bundle bootstrapping and bundle-uri metadata for clone/fetch
 * [x] API documentation
     * [x] Some examples

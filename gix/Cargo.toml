@@ -219,8 +219,8 @@ merge = ["tree-editor", "blob-diff", "dep:gix-merge", "attributes"]
 ## Add blame command similar to `git blame`.
 blame = ["dep:gix-blame", "blob-diff"]
 
-## Read and write git bundle files.
-bundle = ["dep:gix-bundle"]
+## Read, write, and import git bundle files.
+bundle = ["dep:gix-bundle", "gix-pack/streaming-input"]
 
 ## Support for git notes (add, read, list, remove).
 note = ["dep:gix-note"]
