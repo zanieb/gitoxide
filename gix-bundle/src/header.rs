@@ -145,6 +145,11 @@ impl Header {
                     });
                 }
                 let refname = &line[hex_len + 1..];
+                if refname.is_empty() {
+                    return Err(Error::InvalidRef {
+                        line: BString::from(line.as_bytes()),
+                    });
+                }
                 refs.push(Ref {
                     id,
                     name: BString::from(refname.as_bytes()),

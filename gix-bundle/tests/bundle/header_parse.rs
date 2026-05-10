@@ -261,6 +261,16 @@ fn error_on_ref_line_missing_refname() {
     assert!(result.is_err(), "ref line without refname should be rejected");
 }
 
+/// Error when a ref line has a separator but an empty refname.
+#[test]
+fn error_on_ref_line_empty_refname() {
+    let data = b"# v2 git bundle\n\
+                 abcdef0123456789abcdef0123456789abcdef01 \n\
+                 \n";
+    let result = header::decode(data.as_slice(), gix_hash::Kind::Sha1);
+    assert!(matches!(result, Err(header::Error::InvalidRef { .. })));
+}
+
 /// V3 bundle with multiple capabilities.
 /// Ported from C Git's bundle.c which supports multiple capabilities
 /// (e.g. @object-format=sha1 and @filter=blob:none).
