@@ -83,6 +83,49 @@ fn builder_v3_capability() {
     assert_eq!(parsed.refs.len(), 1);
 }
 
+/// Builder v3 automatically records the object format capability.
+#[test]
+fn builder_v3_adds_object_format_capability() {
+    let mut builder = Builder::new(Version::V3, gix_hash::Kind::Sha1);
+    builder.add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let mut buf = Vec::new();
+    builder.write_to(&mut buf, write_dummy_pack).unwrap();
+
+    let (parsed, _) = header::decode(&buf, gix_hash::Kind::Sha1).unwrap();
+    assert_eq!(parsed.capabilities, [BString::from("object-format=sha1")]);
+}
+
+/// Builder v3 should not duplicate capabilities supplied by default.
+#[test]
+fn builder_v3_capabilities_are_unique() {
+    let mut builder = Builder::new(Version::V3, gix_hash::Kind::Sha1);
+    builder
+        .add_capability("object-format=sha1")
+        .add_capability("object-format=sha1")
+        .add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let mut buf = Vec::new();
+    builder.write_to(&mut buf, write_dummy_pack).unwrap();
+
+    let (parsed, _) = header::decode(&buf, gix_hash::Kind::Sha1).unwrap();
+    assert_eq!(parsed.capabilities, [BString::from("object-format=sha1")]);
+}
+
+/// Builder v3 records SHA-256 object-format when built for SHA-256 repositories.
+#[test]
+#[cfg(feature = "sha256")]
+fn builder_v3_sha256_object_format_capability() {
+    let mut builder = Builder::new(Version::V3, gix_hash::Kind::Sha256);
+    builder.add_ref("refs/heads/main", gix_hash::ObjectId::null(gix_hash::Kind::Sha256));
+
+    let mut buf = Vec::new();
+    builder.write_to(&mut buf, write_dummy_pack).unwrap();
+
+    let (parsed, _) = header::decode(&buf, gix_hash::Kind::Sha256).unwrap();
+    assert_eq!(parsed.capabilities, [BString::from("object-format=sha256")]);
+}
+
 /// Ported from t5607: 'Refusing to create empty bundle'
 /// Builder with no refs should fail.
 #[test]

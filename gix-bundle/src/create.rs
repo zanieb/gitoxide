@@ -64,8 +64,8 @@ pub struct Builder {
 
 impl Builder {
     /// Create a new bundle builder for the given version and hash kind.
-    pub fn new(version: Version, _object_hash: gix_hash::Kind) -> Self {
-        Builder {
+    pub fn new(version: Version, object_hash: gix_hash::Kind) -> Self {
+        let mut builder = Builder {
             header: Header {
                 version,
                 prerequisites: Vec::new(),
@@ -74,7 +74,11 @@ impl Builder {
             },
             tips: Vec::new(),
             exclude: Vec::new(),
+        };
+        if version == Version::V3 {
+            builder.add_capability(format!("object-format={object_hash}"));
         }
+        builder
     }
 
     /// Add a reference to the bundle.
@@ -93,7 +97,10 @@ impl Builder {
 
     /// Add a v3 capability.
     pub fn add_capability(&mut self, capability: impl Into<BString>) -> &mut Self {
-        self.header.capabilities.push(capability.into());
+        let capability = capability.into();
+        if !self.header.capabilities.contains(&capability) {
+            self.header.capabilities.push(capability);
+        }
         self
     }
 
