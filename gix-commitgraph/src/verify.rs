@@ -2,7 +2,7 @@
 use gix_error::Result;
 use std::{
     cmp::{max, min},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
 };
 
 use gix_error::{ResultExt, bail};
@@ -45,9 +45,7 @@ impl Graph {
             parent_counts: BTreeMap::new(),
         };
         let mut max_generation = 0u32;
-
-        // TODO: Detect duplicate commit IDs across different files. Not sure how to do this without
-        //   a separate loop, e.g. self.iter_sorted_ids().
+        let mut seen_ids = HashSet::new();
 
         for (file_index, file) in self.files.iter().enumerate() {
             if usize::from(file.base_graph_count()) != file_index {
@@ -79,6 +77,14 @@ impl Graph {
             }
 
             let file_stats = file.traverse(|commit| {
+                if !seen_ids.insert(commit.id().to_owned()) {
+                    return Err(message!(
+                        "Commit {} appears more than once in the commit-graph chain",
+                        commit.id()
+                    )
+                    .raise_erased());
+                }
+
                 let mut max_parent_generation = 0u32;
                 let mut has_uncomputed_parent_generation = false;
                 for parent_pos in commit.iter_parents() {
