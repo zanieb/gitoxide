@@ -9,3 +9,12 @@ impl crate::Repository {
         note::Platform::new(self)
     }
 }
+
+fn count_first_nibble(counts: &mut [u8; 16], target: &ObjectId) {
+    let bucket = usize::from(target.as_bytes()[0] >> 4);
+    counts[bucket] = counts[bucket].saturating_add(1).min(2);
+}
+
+fn is_flat_note_entry(entry: &gix_object::tree::Entry, hash_kind: gix_hash::Kind) -> bool {
+    entry.mode.is_blob() && gix_note::target_from_path(entry.filename.as_ref(), hash_kind).is_ok()
+}
