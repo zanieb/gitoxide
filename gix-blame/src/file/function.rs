@@ -236,12 +236,7 @@ pub fn file_with_progress(
             collect_parents(commit, &odb, cache.as_ref(), &mut buf2)?
         };
 
-        // --ignore-rev support: when a commit is in the ignore set, lines that it
-        // *changed* are still "pinned" to it (matching C Git's fallback behavior when no
-        // fuzzy match is found), while lines it didn't change pass through to the parent
-        // naturally via process_changes. The `_is_ignored` flag is reserved for future
-        // fuzzy line matching (C Git's `blame_chunk` with `ignore_suspect`).
-        let _is_ignored = ignore_revs.contains(&suspect);
+        let is_ignored = ignore_revs.contains(&suspect);
 
         // oldest_commit support: filter out parents that match the cutoff OID.
         // When a parent would be filtered, we stop traversal there and mark entries as boundary.
@@ -301,33 +296,38 @@ pub fn file_with_progress(
         // identical to the corresponding lines in the *Source File*.
         #[cfg(debug_assertions)]
         {
-            let source_blob = odb.find_blob(&entry_id, &mut buf)?.data.to_vec();
-            let mut source_interner = gix_diff::blob::Interner::new(source_blob.len() / 100);
-            let source_lines_as_tokens: Vec<_> = tokens_for_diffing(&source_blob)
-                .tokenize()
-                .map(|token| source_interner.intern(token))
-                .collect();
+            // `--ignore-rev` can intentionally pass blame through a commit whose content differs
+            // from the blamed file. The traversal still works on source ranges, but this invariant
+            // no longer holds for all hunks.
+            if ignore_revs.is_empty() {
+                let source_blob = odb.find_blob(&entry_id, &mut buf)?.data.to_vec();
+                let mut source_interner = gix_diff::blob::Interner::new(source_blob.len() / 100);
+                let source_lines_as_tokens: Vec<_> = tokens_for_diffing(&source_blob)
+                    .tokenize()
+                    .map(|token| source_interner.intern(token))
+                    .collect();
 
-            let mut blamed_interner = gix_diff::blob::Interner::new(blamed_file_blob.len() / 100);
-            let blamed_lines_as_tokens: Vec<_> = tokens_for_diffing(&blamed_file_blob)
-                .tokenize()
-                .map(|token| blamed_interner.intern(token))
-                .collect();
+                let mut blamed_interner = gix_diff::blob::Interner::new(blamed_file_blob.len() / 100);
+                let blamed_lines_as_tokens: Vec<_> = tokens_for_diffing(&blamed_file_blob)
+                    .tokenize()
+                    .map(|token| blamed_interner.intern(token))
+                    .collect();
 
-            for hunk in hunks_to_blame.iter() {
-                if let Some(range_in_suspect) = hunk.get_range(&suspect) {
-                    let range_in_blamed_file = hunk.range_in_blamed_file.clone();
+                for hunk in hunks_to_blame.iter() {
+                    if let Some(range_in_suspect) = hunk.get_range(&suspect) {
+                        let range_in_blamed_file = hunk.range_in_blamed_file.clone();
 
-                    let source_lines = range_in_suspect
-                        .clone()
-                        .map(|i| BString::new(source_interner[source_lines_as_tokens[i as usize]].into()))
-                        .collect::<Vec<_>>();
-                    let blamed_lines = range_in_blamed_file
-                        .clone()
-                        .map(|i| BString::new(blamed_interner[blamed_lines_as_tokens[i as usize]].into()))
-                        .collect::<Vec<_>>();
+                        let source_lines = range_in_suspect
+                            .clone()
+                            .map(|i| BString::new(source_interner[source_lines_as_tokens[i as usize]].into()))
+                            .collect::<Vec<_>>();
+                        let blamed_lines = range_in_blamed_file
+                            .clone()
+                            .map(|i| BString::new(blamed_interner[blamed_lines_as_tokens[i as usize]].into()))
+                            .collect::<Vec<_>>();
 
-                    assert_eq!(source_lines, blamed_lines);
+                        assert_eq!(source_lines, blamed_lines);
+                    }
                 }
             }
         }
@@ -433,7 +433,7 @@ pub fn file_with_progress(
                     }
                 }
                 TreeDiffChange::Modification { previous_id, id } => {
-                    let changes = blob_changes(
+                    let mut changes = blob_changes(
                         &odb,
                         resource_cache,
                         id,
@@ -443,6 +443,9 @@ pub fn file_with_progress(
                         options.diff_algorithm,
                         &mut stats,
                     )?;
+                    if is_ignored && !more_than_one_parent {
+                        changes = changes_for_ignored_suspect(changes);
+                    }
                     hunks_to_blame = process_changes(hunks_to_blame, changes.clone(), suspect, *parent_id);
                     if let Some(ref mut blame_path) = blame_path {
                         let has_blame_been_passed = hunks_to_blame.iter().any(|hunk| hunk.has_suspect(parent_id));
@@ -465,7 +468,7 @@ pub fn file_with_progress(
                     source_id,
                     id,
                 } => {
-                    let changes = blob_changes(
+                    let mut changes = blob_changes(
                         &odb,
                         resource_cache,
                         id,
@@ -475,6 +478,9 @@ pub fn file_with_progress(
                         options.diff_algorithm,
                         &mut stats,
                     )?;
+                    if is_ignored && !more_than_one_parent {
+                        changes = changes_for_ignored_suspect(changes);
+                    }
                     hunks_to_blame = process_changes(hunks_to_blame, changes, suspect, *parent_id);
 
                     let mut has_blame_been_passed = false;
@@ -1025,6 +1031,26 @@ fn blob_changes(
 
     stats.blobs_diffed += 1;
     Ok(changes)
+}
+
+/// For ignored single-parent commits, same-sized replacements can be mapped directly to the parent range.
+///
+/// This covers the deterministic subset of C Git's `--ignore-rev` behavior without attempting its
+/// fuzzy line matching. Merge commits keep their normal parent-selection behavior, while pure
+/// additions and unequal-size replacements remain pinned to the ignored commit, matching Git's
+/// fallback for lines that cannot be matched to the parent.
+fn changes_for_ignored_suspect(changes: Vec<Change>) -> Vec<Change> {
+    changes
+        .into_iter()
+        .map(|change| match change {
+            Change::AddedOrReplaced(added, number_of_lines_deleted)
+                if number_of_lines_deleted != 0 && added.end - added.start == number_of_lines_deleted =>
+            {
+                Change::Unchanged(added)
+            }
+            other => other,
+        })
+        .collect()
 }
 
 /// Diff a worktree blob against the HEAD blob using the given diff algorithm and return

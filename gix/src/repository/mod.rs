@@ -116,8 +116,9 @@ pub mod blame_file {
         pub rewrites: Option<gix_diff::Rewrites>,
         /// A set of commits to ignore when blaming.
         ///
-        /// Changes made by these commits are passed through to their parents instead
-        /// of being attributed to them. Equivalent to `git blame --ignore-rev`.
+        /// Same-sized replacements made by ignored single-parent commits are passed through to
+        /// their parents instead of being attributed to them. More complex replacement hunks that
+        /// need C Git's fuzzy ignore-rev matching remain attributed to the ignored commit.
         pub ignore_revs: Vec<gix_hash::ObjectId>,
         /// If set, the blame operation checks this flag periodically and aborts
         /// if it has been set to `true`. This allows the caller to implement

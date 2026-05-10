@@ -166,12 +166,14 @@ pub struct Options {
     pub debug_track_path: bool,
     /// A set of commits to ignore when blaming.
     ///
-    /// When a commit in this set is encountered during the blame traversal, its changes are
-    /// passed through to its parent(s) rather than being attributed to the ignored commit.
-    /// This is equivalent to `git blame --ignore-rev` / `--ignore-revs-file`.
+    /// When a single-parent commit in this set is encountered during the blame traversal,
+    /// same-sized replacements are passed through to its parent rather than being attributed to the
+    /// ignored commit. Pure additions and replacements that cannot be directly mapped to the parent
+    /// stay attributed to the ignored commit, matching Git's fallback for unblamable lines.
     ///
-    /// Lines that cannot be matched back to a parent remain attributed to the ignored commit,
-    /// matching C Git's fallback behavior.
+    /// This implements the deterministic subset of `git blame --ignore-rev` /
+    /// `--ignore-revs-file`; C Git's fuzzy line matching for more complex replacement hunks is not
+    /// implemented yet.
     ///
     /// See [Git documentation](https://git-scm.com/docs/git-blame#Documentation/git-blame.txt---ignore-revltrevgt).
     pub ignore_revs: Vec<ObjectId>,
