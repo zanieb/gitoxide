@@ -122,7 +122,11 @@ pub fn read_ref_records_at(
 
     // The restart offsets occupy restart_count * 3 bytes before the restart_count field
     let restart_table_size = (restart_count as usize) * 3 + 2;
-    let records_end = data_end.saturating_sub(restart_table_size);
+    let available_after_header = data_end - header_size;
+    if restart_table_size > available_after_header {
+        return Err(Error::UnexpectedEof);
+    }
+    let records_end = data_end - restart_table_size;
 
     let mut records = Vec::new();
     let mut pos = header_size;
@@ -461,6 +465,18 @@ mod tests {
             read_ref_records(&block, 20, 1),
             Err(Error::InvalidRefValueType { value_type: 7 })
         ));
+    }
+
+    #[test]
+    fn read_ref_records_rejects_truncated_restart_table() {
+        let mut block = Vec::new();
+        block.push(b'r');
+        block.extend_from_slice(&[0, 0, 0]);
+        block.extend_from_slice(&1u16.to_be_bytes());
+        let block_len = block.len() as u32;
+        crate::put_be24((&mut block[1..4]).try_into().expect("3 bytes"), block_len);
+
+        assert!(matches!(read_ref_records(&block, 20, 1), Err(Error::UnexpectedEof)));
     }
 
     #[test]
