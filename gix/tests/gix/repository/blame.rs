@@ -61,3 +61,28 @@ fn with_options() -> crate::Result {
 
     Ok(())
 }
+
+#[test]
+fn shallow_boundary_is_reported_without_missing_parent_error() -> crate::Result {
+    let shallow_base = gix_testtools::scripted_fixture_read_only("make_shallow_repo.sh")?;
+    let repo = gix::open_opts(shallow_base.join("shallow"), crate::restricted())?;
+    assert!(repo.is_shallow(), "fixture should be a shallow clone");
+
+    let suspect = repo.head_id()?;
+    let outcome = repo.blame_file("a".into(), suspect, Default::default())?;
+
+    assert_eq!(
+        outcome.entries.iter().map(|entry| entry.len.get()).sum::<u32>(),
+        2,
+        "the entire shallow HEAD file should be covered"
+    );
+    assert!(
+        outcome
+            .entries
+            .iter()
+            .all(|entry| entry.commit_id == suspect.detach() && entry.boundary),
+        "missing parents behind a shallow boundary should attribute remaining lines to the boundary commit"
+    );
+
+    Ok(())
+}

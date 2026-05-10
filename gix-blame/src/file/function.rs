@@ -247,34 +247,28 @@ pub fn file_with_progress(
         };
 
         if parent_ids.is_empty() {
-            if queue.is_empty() {
-                // I’m not entirely sure if this is correct yet. `suspect`, at this point, is the
-                // `id` of the last `item` that was yielded by `queue`, so it makes sense to assign
-                // the remaining lines to it, even though we don’t explicitly check whether that is
-                // true here. We could perhaps use diff-tree-to-tree to compare `suspect` against
-                // an empty tree to validate this assumption.
-                if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, true) {
-                    if let Some(ref mut blame_path) = blame_path {
-                        let entry = previous_entry
-                            .take()
-                            .filter(|(id, _)| *id == suspect)
-                            .map(|(_, entry)| entry);
+            // Root commits and shallow-boundary commits both stop traversal for the hunks that
+            // still point at them. Other queued suspects may still be able to resolve more hunks.
+            if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, true) {
+                if let Some(ref mut blame_path) = blame_path {
+                    let entry = previous_entry
+                        .take()
+                        .filter(|(id, _)| *id == suspect)
+                        .map(|(_, entry)| entry);
 
-                        let blame_path_entry = BlamePathEntry {
-                            source_file_path: current_file_path.clone(),
-                            previous_source_file_path: None,
-                            commit_id: suspect,
-                            blob_id: entry.unwrap_or(gix_hash::Kind::shortest().null()),
-                            previous_blob_id: gix_hash::Kind::shortest().null(),
-                            parent_index: 0,
-                        };
-                        blame_path.push(blame_path_entry);
-                    }
-
-                    break 'outer;
+                    let blame_path_entry = BlamePathEntry {
+                        source_file_path: current_file_path.clone(),
+                        previous_source_file_path: None,
+                        commit_id: suspect,
+                        blob_id: entry.unwrap_or(ObjectId::null(suspect.kind())),
+                        previous_blob_id: ObjectId::null(suspect.kind()),
+                        parent_index: 0,
+                    };
+                    blame_path.push(blame_path_entry);
                 }
+
+                break 'outer;
             }
-            // There is more, keep looking.
             continue;
         }
 
@@ -396,12 +390,13 @@ pub fn file_with_progress(
                         // it was modified, not added.
                     } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
                         if let Some(ref mut blame_path) = blame_path {
+                            let null_id = ObjectId::null(id.kind());
                             let blame_path_entry = BlamePathEntry {
                                 source_file_path: current_file_path.clone(),
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: id,
-                                previous_blob_id: gix_hash::Kind::shortest().null(),
+                                previous_blob_id: null_id,
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
@@ -417,12 +412,13 @@ pub fn file_with_progress(
                         // looking at other parents before attributing it to the merge commit.
                     } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
                         if let Some(ref mut blame_path) = blame_path {
+                            let null_id = ObjectId::null(entry_id.kind());
                             let blame_path_entry = BlamePathEntry {
                                 source_file_path: current_file_path.clone(),
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: entry_id,
-                                previous_blob_id: ObjectId::null(gix_hash::Kind::Sha1),
+                                previous_blob_id: null_id,
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
@@ -1140,9 +1136,13 @@ fn collect_parents(
         }
         gix_traverse::commit::Either::CommitRefIter(commit_ref_iter) => {
             for id in commit_ref_iter.parent_ids() {
-                let parent = odb.find_commit_iter(id.as_ref(), buf).ok();
+                let Ok(parent) = odb.find_commit_iter(id.as_ref(), buf) else {
+                    continue;
+                };
                 let parent_commit_time = parent
-                    .and_then(|parent| parent.committer().ok().map(|committer| committer.seconds()))
+                    .committer()
+                    .ok()
+                    .map(|committer| committer.seconds())
                     .unwrap_or_default();
                 parent_ids.push((id, parent_commit_time));
             }
