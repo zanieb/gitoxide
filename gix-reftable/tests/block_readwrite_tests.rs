@@ -534,7 +534,6 @@ fn full_file_sequential_50_records() {
 /// Port of `test_reftable_readwrite__write_empty_key` from C Git.
 ///
 /// Writing a ref with an empty name should be rejected.
-/// (This tests the principle; the current API may not reject it at write time.)
 #[test]
 fn full_file_reject_empty_key() {
     let record = RefRecord {
@@ -543,18 +542,13 @@ fn full_file_reject_empty_key() {
         value: RefRecordValue::Deletion,
     };
 
-    // The record name is empty. C Git rejects this at the writer level
-    // with REFTABLE_API_ERROR. This test documents the expected behavior.
-    assert_eq!(record.name(), b"", "empty name should be empty bytes");
+    assert!(matches!(write_ref_block(&[record], 1, 20, 0), Err(Error::EmptyRefName)));
 }
 
 /// Port of `test_reftable_readwrite__write_key_order` from C Git.
 ///
 /// Writing refs out of order should be rejected. "b" then "a" is wrong.
 ///
-/// NOTE: The current Rust API does not enforce ordering in write_ref_block.
-/// This test documents the expected behavior for when ordering enforcement
-/// is added.
 #[test]
 fn full_file_key_ordering_check() {
     let records = vec![
@@ -574,16 +568,9 @@ fn full_file_key_ordering_check() {
         },
     ];
 
-    // Currently write_ref_block does not reject out-of-order records.
-    // When ordering enforcement is added, this should return an error.
-    // For now, we just verify the records are written (incorrectly).
     let result = write_ref_block(&records, 1, 20, 0);
 
-    // Document that this SHOULD fail but currently doesn't:
-    // Future: assert!(result.is_err(), "out-of-order keys should be rejected");
-    // The block will be written but reading it back may produce wrong results
-    // due to prefix compression assuming sorted order.
-    let _ = result;
+    assert!(matches!(result, Err(Error::RefRecordsOutOfOrder)));
 }
 
 /// Verify that BE24 helper functions work correctly.

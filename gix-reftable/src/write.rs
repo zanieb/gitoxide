@@ -215,6 +215,13 @@ pub fn write_ref_block_at(
     let restart_interval = 16;
 
     for (i, record) in records.iter().enumerate() {
+        if record.name().is_empty() {
+            return Err(Error::EmptyRefName);
+        }
+        if i > 0 && prev_name.as_slice() >= record.name() {
+            return Err(Error::RefRecordsOutOfOrder);
+        }
+
         let use_prefix = if i % restart_interval == 0 {
             &[] as &[u8]
         } else {
@@ -394,6 +401,27 @@ mod tests {
                 update_index: 4,
                 min_update_index: 5
             })
+        ));
+    }
+
+    #[test]
+    fn write_ref_block_rejects_empty_names() {
+        let mut record = make_val1("refs/heads/main", 0xAA, 1);
+        record.name = BString::from("");
+
+        assert!(matches!(write_ref_block(&[record], 1, 20, 0), Err(Error::EmptyRefName)));
+    }
+
+    #[test]
+    fn write_ref_block_rejects_unsorted_names() {
+        let records = vec![
+            make_val1("refs/heads/main", 0xAA, 1),
+            make_val1("refs/heads/feature", 0xBB, 1),
+        ];
+
+        assert!(matches!(
+            write_ref_block(&records, 1, 20, 0),
+            Err(Error::RefRecordsOutOfOrder)
         ));
     }
 
