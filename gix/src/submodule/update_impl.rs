@@ -357,6 +357,7 @@ fn update_current_branch_strategy(
         match ancestry(repo, head, target_commit)? {
             Ancestry::Same | Ancestry::HeadContainsTarget => Ok(None),
             Ancestry::TargetContainsHead => {
+                ensure_checkout_would_not_overwrite_local_changes(repo, target_commit)?;
                 set_head_to_commit(
                     repo,
                     target_commit,
@@ -439,6 +440,7 @@ fn merge_current_branch(
     };
     let merge_commit = repo.write_object(&commit)?.detach();
 
+    ensure_checkout_would_not_overwrite_local_changes(repo, merge_commit)?;
     set_head_to_commit(
         repo,
         merge_commit,
@@ -476,6 +478,7 @@ fn rebase_current_branch(
         }
     }
 
+    ensure_checkout_would_not_overwrite_local_changes(repo, target_commit)?;
     set_head_to_commit(
         repo,
         target_commit,
@@ -542,6 +545,7 @@ fn replay_commit_onto_head(
         extra_headers: Default::default(),
     };
     let rebased = repo.write_object(&rebased)?.detach();
+    ensure_checkout_would_not_overwrite_local_changes(repo, rebased)?;
     set_head_to_commit(repo, rebased, &format!("submodule update: rebase {commit_id}"), false)?;
     Ok(rebased)
 }

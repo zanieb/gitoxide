@@ -473,6 +473,58 @@ mod update {
         assert_branch_strategy_fast_forwards_current_branch("update-rebase-ff", gix::submodule::config::Update::Rebase)
     }
 
+    fn assert_branch_strategy_rejects_dirty_tracked_file(fixture: &str) -> crate::Result {
+        let (repo, _tmp) = repo_rw(fixture)?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+
+        let sm_repo = sm.open()?.expect("submodule repo exists");
+        let workdir = sm_repo.workdir().expect("submodule has a worktree");
+        let head_before = sm_repo.head_id()?.detach();
+        std::fs::write(workdir.join("file"), "local change\n")?;
+
+        let err = sm
+            .update_submodule(
+                gix::progress::Discard,
+                &std::sync::atomic::AtomicBool::default(),
+                &Default::default(),
+            )
+            .expect_err("dirty tracked file should block branch-preserving update");
+
+        assert!(
+            matches!(
+                err,
+                gix::submodule::update::Error::CheckoutWouldOverwrite { ref path } if &path[..] == b"file"
+            ),
+            "expected dirty-checkout error for file, got {err:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("file"))?,
+            "local change\n",
+            "failed update must not overwrite local content"
+        );
+        assert_eq!(
+            sm_repo.head_id()?.detach(),
+            head_before,
+            "failed update must not move the current branch"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn update_with_strategy_merge_rejects_dirty_tracked_file() -> crate::Result {
+        assert_branch_strategy_rejects_dirty_tracked_file("update-merge-ff")
+    }
+
+    #[test]
+    fn update_with_strategy_rebase_rejects_dirty_tracked_file() -> crate::Result {
+        assert_branch_strategy_rejects_dirty_tracked_file("update-rebase-ff")
+    }
+
     /// A custom update command from local config should be executed in the submodule worktree
     /// with the target commit as its argument.
     #[test]
