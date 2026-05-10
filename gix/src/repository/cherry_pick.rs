@@ -49,6 +49,8 @@ pub enum Error {
     TreeMergeOptions(#[from] crate::repository::tree_merge_options::Error),
     #[error("cherry-pick or revert resulted in conflicts")]
     Conflict,
+    #[error("cherry-pick or revert of commit {id} is empty")]
+    Empty { id: ObjectId },
     #[error(transparent)]
     WriteObject(#[from] crate::object::write::Error),
     #[error(transparent)]
@@ -194,12 +196,13 @@ impl Repository {
         let parent_tree_id = self.resolve_parent_tree_id(pick_id, &parent_ids, options.mainline)?;
 
         // Get tree IDs.
-        let pick_tree_id = pick_commit.tree_id()?;
+        let pick_tree_id = pick_commit.tree_id()?.detach();
         let head_tree_id = self
             .find_object(head_id)?
             .try_into_commit()
             .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: head_id.detach() }))?
-            .tree_id()?;
+            .tree_id()?
+            .detach();
 
         // Write state files before the merge so they persist on conflict/error.
         let cherry_pick_head_path = self.git_dir().join("CHERRY_PICK_HEAD");
@@ -225,6 +228,17 @@ impl Repository {
 
         // Write the merged tree.
         let result_tree_id = outcome.tree.write()?.detach();
+        if result_tree_id == head_tree_id {
+            if options.no_commit {
+                let _ = std::fs::remove_file(&cherry_pick_head_path);
+                let _ = std::fs::remove_file(&merge_msg_path);
+                return Ok(Outcome {
+                    commit_id: None,
+                    tree_id: result_tree_id,
+                });
+            }
+            return Err(Error::Empty { id: pick_id });
+        }
 
         // Update index and worktree.
         self.update_index_and_worktree_to_tree(result_tree_id)?;
@@ -312,12 +326,13 @@ impl Repository {
         let parent_tree_id = self.resolve_parent_tree_id(revert_id, &parent_ids, options.mainline)?;
 
         // Get tree IDs.
-        let revert_tree_id = revert_commit.tree_id()?;
+        let revert_tree_id = revert_commit.tree_id()?.detach();
         let head_tree_id = self
             .find_object(head_id)?
             .try_into_commit()
             .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: head_id.detach() }))?
-            .tree_id()?;
+            .tree_id()?
+            .detach();
 
         // Build the revert commit message.
         let orig_message = revert_commit.message_raw_sloppy();
@@ -352,6 +367,17 @@ impl Repository {
 
         // Write the merged tree.
         let result_tree_id = outcome.tree.write()?.detach();
+        if result_tree_id == head_tree_id {
+            if options.no_commit {
+                let _ = std::fs::remove_file(&revert_head_path);
+                let _ = std::fs::remove_file(&merge_msg_path);
+                return Ok(Outcome {
+                    commit_id: None,
+                    tree_id: result_tree_id,
+                });
+            }
+            return Err(Error::Empty { id: revert_id });
+        }
 
         // Update index and worktree.
         self.update_index_and_worktree_to_tree(result_tree_id)?;
