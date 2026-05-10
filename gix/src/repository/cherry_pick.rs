@@ -410,11 +410,11 @@ impl Repository {
             Self::remove_worktree_files_not_in_index(old_idx, &index, &workdir, true);
         }
 
-        // Write the new index.
-        index.write(Default::default())?;
-
         // Check out files to the working tree.
         self.checkout_index_to_worktree_impl(&mut index, &workdir)?;
+
+        // Checkout updates stat information in the index entries it writes.
+        index.write(Default::default())?;
 
         Ok(())
     }

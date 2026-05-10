@@ -61,6 +61,36 @@ mod cherry_pick {
     }
 
     #[test]
+    fn cherry_pick_persists_checkout_stat_information() -> crate::Result {
+        let (repo, _tmp) = repo_cherry_pick()?;
+
+        let feature_tip = branch_tip(&repo, "feature");
+        repo.cherry_pick(feature_tip, Options::default())?;
+
+        let index = repo.open_index()?;
+        let entry = index
+            .entries()
+            .iter()
+            .find(|entry| {
+                let path: &[u8] = entry.path(&index);
+                path == b"new_file.txt"
+            })
+            .expect("new_file.txt should be in the persisted index");
+
+        assert_eq!(
+            entry.stat.size as usize,
+            "new file content\n".len(),
+            "checkout should write refreshed stat information back to the index"
+        );
+        assert_ne!(
+            entry.stat.mtime.secs, 0,
+            "checkout should persist non-default mtime information"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn cherry_pick_modifies_existing_file() -> crate::Result {
         let (repo, _tmp) = repo_cherry_pick()?;
 
