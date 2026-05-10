@@ -4,21 +4,38 @@ use crate::{Id, Repository};
 use gix_hash::ObjectId;
 
 /// Validate that a path constructed from a tree/index entry stays within the worktree.
-/// Rejects paths containing `..` components that could escape the worktree boundary.
+/// Rejects paths containing `..` or absolute path components that could escape the worktree boundary.
 ///
 /// Security: Mitigates path traversal via crafted tree entries (e.g. `../../etc/passwd`).
 /// Similar in spirit to CVE-2018-11235 (malicious .gitmodules path traversal).
 fn validate_path_within_worktree(path: &[u8]) -> Result<(), ApplyError> {
-    use std::path::Component;
-    let os_path = gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(path));
-    for component in os_path.components() {
-        if matches!(component, Component::ParentDir) {
-            return Err(ApplyError::PathTraversal {
-                path: BString::from(path),
-            });
-        }
+    if path_has_worktree_escape_component(path) {
+        return Err(ApplyError::PathTraversal {
+            path: BString::from(path),
+        });
     }
     Ok(())
+}
+
+fn validate_save_path_within_worktree(path: &[u8]) -> Result<(), SaveError> {
+    if path_has_worktree_escape_component(path) {
+        return Err(SaveError::PathTraversal {
+            path: BString::from(path),
+        });
+    }
+    Ok(())
+}
+
+fn path_has_worktree_escape_component(path: &[u8]) -> bool {
+    use std::path::Component;
+
+    let os_path = gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(path));
+    os_path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    })
 }
 
 type StashIndexChange = (Vec<u8>, ObjectId, gix_index::entry::Mode);
@@ -115,6 +132,8 @@ pub enum SaveError {
     WriteIndex(#[from] gix_index::file::write::Error),
     #[error("Failed to remove untracked file from worktree")]
     RemoveFile(std::io::Error),
+    #[error("Path traversal rejected: entry path '{path}' escapes the worktree")]
+    PathTraversal { path: BString },
 }
 
 /// The error returned by [`Repository::stash_apply()`].
@@ -295,6 +314,10 @@ impl Repository {
             Ok(idx) => idx,
             Err(_) => self.index_from_tree(&head_tree_id)?,
         };
+        for entry in index.entries() {
+            let path: &[u8] = entry.path(&index);
+            validate_save_path_within_worktree(path)?;
+        }
         let outcome = index.write_tree_to(|tree| self.write_object(tree).map(super::super::types::Id::detach))?;
         let index_tree_id = outcome.tree_id;
 
