@@ -34,6 +34,16 @@ pub enum Error {
         /// The object format value from the `object-format` capability.
         format: BString,
     },
+    #[error("unsupported bundle capability: {capability:?}")]
+    UnsupportedCapability {
+        /// The unsupported capability.
+        capability: BString,
+    },
+    #[error("invalid bundle filter capability: {spec:?}")]
+    InvalidFilter {
+        /// The invalid filter specification.
+        spec: BString,
+    },
     #[error("bundle object format is {actual}, but {expected} was requested")]
     ObjectFormatMismatch {
         /// The object format requested by the caller.
@@ -72,10 +82,7 @@ impl Header {
         let mut refs = Vec::new();
 
         // For v3, read capabilities (lines starting with '@') until we hit a blank line or
-        // a prerequisite/ref line. Capabilities end with a blank line.
-        // Actually the v3 format is: after the signature, capabilities are lines that don't
-        // start with '-' or a hex char. They end at a blank line, then prerequisites and refs
-        // follow. But the most common layout is:
+        // a prerequisite/ref line. The common layout is:
         //   # v3 git bundle
         //   @capability1
         //   @capability2
@@ -85,8 +92,6 @@ impl Header {
         //
         //   <packdata>
         //
-        // However, looking at git source (bundle.c), v3 capabilities are key=value lines
-        // between the signature and the first blank line (the capabilities section).
         // For v2, there are no capabilities and we go straight to prerequisites/refs.
 
         // Track whether we've already consumed the v3 capabilities section separator.
@@ -137,15 +142,10 @@ impl Header {
                     None
                 };
                 prerequisites.push(Prerequisite { id, comment });
-            } else if version == Version::V3
-                && refs.is_empty()
-                && prerequisites.is_empty()
-                && !line[0].is_ascii_hexdigit()
-            {
+            } else if version == Version::V3 && refs.is_empty() && prerequisites.is_empty() && line.starts_with(b"@") {
                 // V3 capability line (before any refs or prerequisites).
-                // Multiple capabilities are allowed, e.g. @object-format=sha1 and @filter=blob:none.
-                let cap = line.strip_prefix(b"@").unwrap_or(line);
-                validate_object_format_capability(cap, object_hash)?;
+                let cap = &line[1..];
+                validate_capability(cap, object_hash)?;
                 capabilities.push(BString::from(cap));
             } else {
                 // Reference line: <hex-oid> <refname>
@@ -225,23 +225,139 @@ impl Header {
     }
 }
 
-fn validate_object_format_capability(capability: &[u8], object_hash: Kind) -> Result<(), Error> {
-    let Some(format) = capability.strip_prefix(b"object-format=") else {
+pub(crate) fn validate_capability(capability: &[u8], object_hash: Kind) -> Result<(), CapabilityError> {
+    if let Some(format) = capability.strip_prefix(b"object-format=") {
+        let actual = std::str::from_utf8(format)
+            .ok()
+            .and_then(|format| format.parse().ok())
+            .ok_or_else(|| CapabilityError::UnsupportedObjectFormat {
+                format: BString::from(format),
+            })?;
+        if actual != object_hash {
+            return Err(CapabilityError::ObjectFormatMismatch {
+                expected: object_hash,
+                actual,
+            });
+        }
         return Ok(());
-    };
-    let actual = std::str::from_utf8(format)
-        .ok()
-        .and_then(|format| format.parse().ok())
-        .ok_or_else(|| Error::UnsupportedObjectFormat {
-            format: BString::from(format),
-        })?;
-    if actual != object_hash {
-        return Err(Error::ObjectFormatMismatch {
-            expected: object_hash,
-            actual,
+    }
+
+    if let Some(spec) = capability.strip_prefix(b"filter=") {
+        if validate_filter_spec(spec, 0) {
+            return Ok(());
+        }
+        return Err(CapabilityError::InvalidFilter {
+            spec: BString::from(spec),
         });
     }
-    Ok(())
+
+    Err(CapabilityError::UnsupportedCapability {
+        capability: BString::from(capability),
+    })
+}
+
+#[derive(Debug)]
+pub(crate) enum CapabilityError {
+    UnsupportedObjectFormat { format: BString },
+    ObjectFormatMismatch { expected: Kind, actual: Kind },
+    UnsupportedCapability { capability: BString },
+    InvalidFilter { spec: BString },
+}
+
+impl From<CapabilityError> for Error {
+    fn from(err: CapabilityError) -> Self {
+        match err {
+            CapabilityError::UnsupportedObjectFormat { format } => Error::UnsupportedObjectFormat { format },
+            CapabilityError::ObjectFormatMismatch { expected, actual } => {
+                Error::ObjectFormatMismatch { expected, actual }
+            }
+            CapabilityError::UnsupportedCapability { capability } => Error::UnsupportedCapability { capability },
+            CapabilityError::InvalidFilter { spec } => Error::InvalidFilter { spec },
+        }
+    }
+}
+
+fn validate_filter_spec(spec: &[u8], depth: usize) -> bool {
+    if spec.is_empty() || depth > 8 {
+        return false;
+    }
+    if spec == b"blob:none" {
+        return true;
+    }
+    if let Some(size) = spec.strip_prefix(b"blob:limit=") {
+        return validate_scaled_number(size);
+    }
+    if let Some(kind) = spec.strip_prefix(b"object:type=") {
+        return matches!(kind, b"tag" | b"commit" | b"tree" | b"blob");
+    }
+    if let Some(depth) = spec.strip_prefix(b"tree:") {
+        return validate_decimal(depth);
+    }
+    if let Some(oid) = spec.strip_prefix(b"sparse:oid=") {
+        return !oid.is_empty() && !oid.contains(&0);
+    }
+    if let Some(specs) = spec.strip_prefix(b"combine:") {
+        return validate_filter_combination(specs, depth + 1);
+    }
+    false
+}
+
+fn validate_filter_combination(specs: &[u8], depth: usize) -> bool {
+    if specs.is_empty() {
+        return false;
+    }
+    specs.split(|byte| *byte == b'+').all(|spec| {
+        !spec.is_empty()
+            && percent_decode(spec)
+                .as_deref()
+                .is_some_and(|decoded| validate_filter_spec(decoded, depth))
+    })
+}
+
+fn validate_scaled_number(value: &[u8]) -> bool {
+    let number = value
+        .strip_suffix(b"k")
+        .or_else(|| value.strip_suffix(b"K"))
+        .or_else(|| value.strip_suffix(b"m"))
+        .or_else(|| value.strip_suffix(b"M"))
+        .or_else(|| value.strip_suffix(b"g"))
+        .or_else(|| value.strip_suffix(b"G"))
+        .unwrap_or(value);
+    validate_decimal(number)
+}
+
+fn validate_decimal(value: &[u8]) -> bool {
+    !value.is_empty() && value.iter().all(u8::is_ascii_digit)
+}
+
+fn percent_decode(value: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(value.len());
+    let mut pos = 0;
+    while pos < value.len() {
+        match value[pos] {
+            b'%' => {
+                let hex = value.get(pos + 1..pos + 3)?;
+                let high = hex_value(hex[0])?;
+                let low = hex_value(hex[1])?;
+                out.push(high << 4 | low);
+                pos += 3;
+            }
+            byte => {
+                out.push(byte);
+                pos += 1;
+            }
+        }
+    }
+    Some(out)
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn trim_line_ending(mut line: &[u8]) -> &[u8] {

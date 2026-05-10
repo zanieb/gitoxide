@@ -208,6 +208,46 @@ fn builder_write_rejects_unsupported_object_format_capability() {
     assert!(buf.is_empty(), "validation should run before writing the header");
 }
 
+/// Builder should reject unknown v3 capabilities before writing output.
+#[test]
+fn builder_write_rejects_unsupported_capability() {
+    let mut builder = Builder::new(Version::V3, gix_hash::Kind::Sha1);
+    builder
+        .add_capability("weird=yes")
+        .add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        Ok(true)
+    });
+
+    assert!(
+        matches!(result, Err(Error::UnsupportedCapability { capability }) if capability == "weird=yes"),
+        "builder should reject capabilities C Git would treat as unknown"
+    );
+    assert!(buf.is_empty(), "validation should run before writing the header");
+}
+
+/// Builder should reject invalid filter capabilities before writing output.
+#[test]
+fn builder_write_rejects_invalid_filter_capability() {
+    let mut builder = Builder::new(Version::V3, gix_hash::Kind::Sha1);
+    builder
+        .add_capability("filter=bogus")
+        .add_ref("refs/heads/main", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        Ok(true)
+    });
+
+    assert!(
+        matches!(result, Err(Error::InvalidFilter { spec }) if spec == "bogus"),
+        "builder should reject filter capabilities C Git would treat as invalid"
+    );
+    assert!(buf.is_empty(), "validation should run before writing the header");
+}
+
 /// Builder should reject invalid refnames before writing output.
 #[test]
 fn builder_write_rejects_invalid_refname() {
