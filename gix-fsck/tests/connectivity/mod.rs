@@ -386,6 +386,31 @@ fn hash_validation_checks_reachable_blobs() {
 }
 
 #[test]
+fn blob_entries_reject_non_blob_objects_without_hash_validation() {
+    let mut db = MemoryDb::default();
+    let commit_id = db.insert(
+        Kind::Commit,
+        MemoryDb::commit_data(ObjectId::empty_tree(gix_hash::Kind::Sha1), "not-a-blob"),
+    );
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "file", commit_id));
+    let tag_id = db.insert(Kind::Tag, MemoryDb::tag_data(tree_id, Kind::Tree, "tree-tag"));
+
+    let mut check = Connectivity::new(&db, |_, _| unreachable!("the commit object is present"));
+    let err = check
+        .check_tag(&tag_id)
+        .expect_err("a blob-mode tree entry must point to a blob object");
+
+    assert!(matches!(
+        err,
+        gix_object::find::existing_object::Error::ObjectKind {
+            oid,
+            actual: Kind::Commit,
+            expected: Kind::Blob,
+        } if oid == commit_id
+    ));
+}
+
+#[test]
 fn skipped_objects_are_ignored() {
     let mut db = MemoryDb::default();
     let missing_blob = hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
