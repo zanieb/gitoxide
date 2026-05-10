@@ -949,6 +949,35 @@ fn ref_record_truncated_oid() {
     assert!(result.is_err(), "missing OID bytes should fail");
 }
 
+/// Test parse_ref_record with a hash size that would overflow length arithmetic.
+#[test]
+fn ref_record_oversized_hash_length_errors() {
+    use gix_reftable::{write_varint, Error};
+
+    let mut data = Vec::new();
+    write_varint(0, &mut data); // prefix_len
+    write_varint(2, &mut data); // suffix_len=0, type=val2
+    write_varint(0, &mut data); // update_index_delta
+
+    let result = gix_reftable::parse_ref_record(&data, &[], usize::MAX, 1);
+    assert!(matches!(result, Err(Error::UnexpectedEof)));
+}
+
+/// Test parse_ref_record with a symref target length that overflows position arithmetic.
+#[test]
+fn ref_record_oversized_symref_target_length_errors() {
+    use gix_reftable::{write_varint, Error};
+
+    let mut data = Vec::new();
+    write_varint(0, &mut data); // prefix_len
+    write_varint(3, &mut data); // suffix_len=0, type=symref
+    write_varint(0, &mut data); // update_index_delta
+    write_varint(u64::MAX, &mut data); // target length
+
+    let result = gix_reftable::parse_ref_record(&data, &[], 20, 1);
+    assert!(matches!(result, Err(Error::UnexpectedEof)));
+}
+
 /// Test parse_ref_record where prefix_len exceeds the provided prefix.
 #[test]
 fn ref_record_prefix_len_exceeds_prefix() {
