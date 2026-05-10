@@ -14,16 +14,16 @@ impl TodoList {
         for op in &self.operations {
             match op {
                 Operation::Pick { commit, summary } => {
-                    writeln!(out, "pick {commit} {summary}")?;
+                    write_commit_operation(&mut out, "pick", commit, summary)?;
                 }
                 Operation::Reword { commit, summary } => {
-                    writeln!(out, "reword {commit} {summary}")?;
+                    write_commit_operation(&mut out, "reword", commit, summary)?;
                 }
                 Operation::Edit { commit, summary } => {
-                    writeln!(out, "edit {commit} {summary}")?;
+                    write_commit_operation(&mut out, "edit", commit, summary)?;
                 }
                 Operation::Squash { commit, summary } => {
-                    writeln!(out, "squash {commit} {summary}")?;
+                    write_commit_operation(&mut out, "squash", commit, summary)?;
                 }
                 Operation::Fixup {
                     commit,
@@ -35,7 +35,11 @@ impl TodoList {
                         AmendMessage::Replace => "-C ",
                         AmendMessage::Edit => "-c ",
                     };
-                    writeln!(out, "fixup {flag}{commit} {summary}")?;
+                    if summary.is_empty() {
+                        writeln!(out, "fixup {flag}{commit}")?;
+                    } else {
+                        writeln!(out, "fixup {flag}{commit} {summary}")?;
+                    }
                 }
                 Operation::Exec { command } => {
                     writeln!(out, "exec {command}")?;
@@ -47,10 +51,10 @@ impl TodoList {
                     writeln!(out, "noop")?;
                 }
                 Operation::Drop { commit, summary } => {
-                    writeln!(out, "drop {commit} {summary}")?;
+                    write_commit_operation(&mut out, "drop", commit, summary)?;
                 }
                 Operation::Revert { commit, summary } => {
-                    writeln!(out, "revert {commit} {summary}")?;
+                    write_commit_operation(&mut out, "revert", commit, summary)?;
                 }
                 Operation::Merge { commit, label, oneline } => {
                     if let Some((prefix, amend)) = commit {
@@ -83,6 +87,19 @@ impl TodoList {
             }
         }
         Ok(())
+    }
+}
+
+fn write_commit_operation(
+    mut out: impl io::Write,
+    command: &str,
+    commit: &gix_hash::Prefix,
+    summary: &bstr::BString,
+) -> io::Result<()> {
+    if summary.is_empty() {
+        writeln!(out, "{command} {commit}")
+    } else {
+        writeln!(out, "{command} {commit} {summary}")
     }
 }
 
@@ -128,6 +145,15 @@ update-ref refs/heads/main
     #[test]
     fn roundtrip_abbreviated() {
         let input = b"pick abcdef1 Short hash\n";
+        let list = TodoList::parse(input.as_bstr(), Kind::Sha1).unwrap();
+        let mut output = Vec::new();
+        list.write_to(&mut output).unwrap();
+        assert_eq!(output.as_bstr(), input.as_bstr());
+    }
+
+    #[test]
+    fn commit_operation_without_summary_has_no_trailing_space() {
+        let input = b"pick abcdef1\nfixup -C abcdef2\n";
         let list = TodoList::parse(input.as_bstr(), Kind::Sha1).unwrap();
         let mut output = Vec::new();
         list.write_to(&mut output).unwrap();
