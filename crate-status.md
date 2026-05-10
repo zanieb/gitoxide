@@ -155,7 +155,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
             * [x] shallow (remains shallow, options to adjust shallow boundary)
             * [ ] a way to auto-explode small packs to avoid them to pile up
             * [x] 'ref-in-want'
-            * [ ] 'wanted-ref'
+            * [x] 'wanted-ref'
             * [x] standard negotiation algorithms `consecutive`, `skipping` and `noop`.
         * [x] push
         * [x] ls-refs
