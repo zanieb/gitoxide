@@ -578,25 +578,57 @@ impl MergeState {
                     new_commit: result.new_commit_id,
                 })
             }
-            Operation::Fixup { commit, .. } => {
-                // Fixup is like squash but discards the fixup commit's message.
-                // The resulting commit keeps the previous commit's (or accumulated) message.
+            Operation::Fixup {
+                commit, amend_message, ..
+            } => {
                 let commit_id = driver.resolve_commit(commit)?;
-                let prev_msg = if let Some(ref accumulated) = self.accumulated_squash_message {
-                    Some(accumulated.clone())
-                } else {
-                    self.last_done_commit_message(driver)?
+
+                let message = match amend_message {
+                    gix_sequencer::todo::AmendMessage::No => {
+                        // Plain fixup discards this commit's message and keeps the
+                        // previous commit's (or accumulated) message.
+                        if let Some(ref accumulated) = self.accumulated_squash_message {
+                            Some(accumulated.clone())
+                        } else {
+                            self.last_done_commit_message(driver)?
+                        }
+                    }
+                    gix_sequencer::todo::AmendMessage::Replace | gix_sequencer::todo::AmendMessage::Edit => Some(
+                        driver
+                            .read_commit_message(commit_id)
+                            .map_err(StepError::ReadCommitMessage)?,
+                    ),
                 };
-                let result = driver.cherry_pick(commit_id, prev_msg.as_deref())?;
-                // Preserve the accumulated message for the next fixup/squash.
-                if self.accumulated_squash_message.is_none() {
-                    if let Some(msg) = prev_msg {
-                        self.accumulated_squash_message = Some(msg);
+
+                let result = driver.cherry_pick(commit_id, message.as_deref())?;
+                match amend_message {
+                    gix_sequencer::todo::AmendMessage::No => {
+                        if self.accumulated_squash_message.is_none() {
+                            if let Some(msg) = message {
+                                self.accumulated_squash_message = Some(msg);
+                            }
+                        }
+                        Ok(StepOutcome::Applied {
+                            new_commit: result.new_commit_id,
+                        })
+                    }
+                    gix_sequencer::todo::AmendMessage::Replace => {
+                        if let Some(msg) = message {
+                            self.accumulated_squash_message = Some(msg);
+                        }
+                        Ok(StepOutcome::Applied {
+                            new_commit: result.new_commit_id,
+                        })
+                    }
+                    gix_sequencer::todo::AmendMessage::Edit => {
+                        let original_message = message.unwrap_or_default();
+                        self.accumulated_squash_message = Some(original_message.clone());
+                        Ok(StepOutcome::Paused {
+                            commit_id: Some(result.new_commit_id),
+                            original_message: Some(original_message),
+                        })
                     }
                 }
-                Ok(StepOutcome::Applied {
-                    new_commit: result.new_commit_id,
-                })
             }
             Operation::Drop { .. } => {
                 self.accumulated_squash_message = None;
