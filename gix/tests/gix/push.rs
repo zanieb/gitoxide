@@ -33,6 +33,18 @@ mod blocking_io {
             .success()
     }
 
+    /// Helper: clone a local repository with C `git`, allowing the file transport explicitly.
+    fn git_clone_local(url: &str, destination: &std::path::Path) -> std::process::Output {
+        Command::new("git")
+            .arg("-c")
+            .arg("protocol.file.allow=always")
+            .arg("clone")
+            .arg(url)
+            .arg(destination)
+            .output()
+            .expect("failed to execute git clone")
+    }
+
     /// Set up writable push test repos.
     /// Returns (working_repo, bare_repo_path, _tempdir).
     fn setup_push_repos() -> gix_testtools::Result<(gix::Repository, std::path::PathBuf, tempfile::TempDir)> {
@@ -470,10 +482,7 @@ mod blocking_io {
 
         // Clone with C git into a new directory
         let clone_path = dir.path().join("clone_test");
-        let status = Command::new("git")
-            .args(["clone", &bare_url, clone_path.to_str().expect("valid path")])
-            .output()
-            .expect("failed to execute git clone");
+        let status = git_clone_local(&bare_url, &clone_path);
         assert!(
             status.status.success(),
             "C git clone of gix-pushed bare repo failed: {}",
@@ -572,14 +581,11 @@ mod blocking_io {
 
         // Verify C git can clone from the previously-empty bare repo
         let clone_path = dir.path().join("clone_from_empty");
+        let status = git_clone_local(&bare_url, &clone_path);
         assert!(
-            Command::new("git")
-                .args(["clone", &bare_url, clone_path.to_str().unwrap()])
-                .output()
-                .expect("git clone")
-                .status
-                .success(),
-            "C git should be able to clone from the bare repo after push"
+            status.status.success(),
+            "C git should be able to clone from the bare repo after push: {}",
+            String::from_utf8_lossy(&status.stderr)
         );
         let cloned_head = git_in(&clone_path, &["rev-parse", "HEAD"]);
         assert_eq!(cloned_head, head_oid);
@@ -615,12 +621,12 @@ mod blocking_io {
 
         // Verify the binary content is intact by cloning and checking
         let clone_path = dir.path().join("clone_binary");
-        assert!(Command::new("git")
-            .args(["clone", &bare_url, clone_path.to_str().unwrap()])
-            .output()
-            .expect("git clone")
-            .status
-            .success());
+        let status = git_clone_local(&bare_url, &clone_path);
+        assert!(
+            status.status.success(),
+            "C git should clone the bare repo containing the binary blob: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
         let cloned_binary = std::fs::read(clone_path.join("binary.bin")).expect("read cloned binary");
         assert_eq!(
             cloned_binary, binary_data,
