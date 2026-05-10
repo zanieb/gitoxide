@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use bstr::BStr;
 
@@ -201,8 +201,8 @@ impl<'spec> MatchGroup<'spec> {
 
         let mut updates = Vec::new();
         let mut deletions = Vec::new();
-        let mut seen_updates = BTreeSet::default();
-        let mut seen_deletions = BTreeSet::default();
+        let mut seen_updates = HashSet::default();
+        let mut seen_deletions = HashSet::default();
         let mut negative_matchers = Vec::new();
 
         for (spec_index, spec) in self.specs.iter().copied().enumerate() {
@@ -340,17 +340,20 @@ impl<'spec> MatchGroup<'spec> {
     }
 }
 
+fn push_unique<T>(item: T, seen: &mut HashSet<T>, out: &mut Vec<T>)
+where
+    T: Eq + std::hash::Hash + Clone,
+{
+    if seen.insert(item.clone()) {
+        out.push(item);
+    }
+}
+
 fn calculate_hash<T: std::hash::Hash>(t: &T) -> u64 {
     use std::hash::Hasher;
     let mut s = std::collections::hash_map::DefaultHasher::new();
     t.hash(&mut s);
     s.finish()
-}
-
-fn push_unique<T: std::hash::Hash>(item: T, seen: &mut BTreeSet<u64>, out: &mut Vec<T>) {
-    if seen.insert(calculate_hash(&item)) {
-        out.push(item);
-    }
 }
 
 fn is_branch(name: &BStr) -> bool {
