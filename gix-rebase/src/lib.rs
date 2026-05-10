@@ -294,8 +294,9 @@ impl MergeState {
             }
         };
 
-        let current_step = read_number(rebase_merge_dir, "msgnum").unwrap_or(1);
-        let total_steps = read_number(rebase_merge_dir, "end").unwrap_or(todo.operations.len() + done.operations.len());
+        let current_step = read_optional_number(rebase_merge_dir, "msgnum")?.unwrap_or(1);
+        let total_steps =
+            read_optional_number(rebase_merge_dir, "end")?.unwrap_or(todo.operations.len() + done.operations.len());
 
         let stopped_sha = if rebase_merge_dir.join("stopped-sha").exists() {
             Some(read_object_id(rebase_merge_dir, "stopped-sha", hash_kind)?)
@@ -729,14 +730,21 @@ fn read_object_id(dir: &Path, name: &str, hash_kind: gix_hash::Kind) -> Result<O
     Ok(id)
 }
 
-fn read_number(dir: &Path, name: &str) -> Result<usize, ReadStateError> {
-    let content = read_file_trimmed(dir, name)?;
+fn read_optional_number(dir: &Path, name: &str) -> Result<Option<usize>, ReadStateError> {
     let path = dir.join(name);
+    let content = match std::fs::read(&path) {
+        Ok(content) => content.trim_ascii().to_vec(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(ReadStateError::ReadFile { path, source }),
+    };
     let s = String::from_utf8_lossy(&content);
-    s.trim().parse::<usize>().map_err(|_| ReadStateError::ParseNumber {
-        path,
-        content: s.into_owned(),
-    })
+    s.trim()
+        .parse::<usize>()
+        .map(Some)
+        .map_err(|_| ReadStateError::ParseNumber {
+            path,
+            content: s.into_owned(),
+        })
 }
 
 fn write_file(dir: &Path, name: &str, content: &[u8]) -> Result<(), WriteStateError> {
