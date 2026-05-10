@@ -926,7 +926,7 @@ impl Repository {
             // Last stash entry: delete the ref entirely.
             self.edit_reference(RefEdit {
                 change: Change::Delete {
-                    expected: PreviousValue::Any,
+                    expected: PreviousValue::MustExistAndMatch(gix_ref::Target::Object(entries[0].commit_id.detach())),
                     log: RefLog::AndReference,
                 },
                 name: "refs/stash".try_into().expect("valid ref name"),
