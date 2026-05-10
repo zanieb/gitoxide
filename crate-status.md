@@ -148,7 +148,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * **remotes**
         * [x] clone
             * [x] shallow
-                * [ ] include-tags when shallow is used (needs separate fetch)
+                * [x] include-tags when shallow is used
                 * [x] prune non-existing shallow commits
             * [ ] [bundles](https://git-scm.com/docs/git-bundle)
         * [x] fetch
