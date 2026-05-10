@@ -125,6 +125,32 @@ mod blocking_io {
         ids
     }
 
+    static DRIVER: LazyLock<PathBuf> = LazyLock::new(|| {
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "-p=gix-filter", "--example", "arrow"])
+            .status()
+            .expect("cargo must run to build the arrow filter driver");
+        assert!(status.success(), "arrow filter driver build must succeed");
+
+        let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .ancestors()
+            .nth(1)
+            .expect("test target dir has a parent")
+            .join("debug")
+            .join("examples")
+            .join(if cfg!(windows) { "arrow.exe" } else { "arrow" });
+        assert!(path.is_file(), "arrow filter driver must exist at {}", path.display());
+        path
+    });
+
+    fn driver_exe() -> String {
+        let mut exe = DRIVER.to_string_lossy().into_owned();
+        if cfg!(windows) {
+            exe = exe.replace('\\', "/");
+        }
+        exe
+    }
+
     #[test]
     fn fetch_shallow_no_checkout_then_unshallow() -> TestResult {
         // Local Git transport children read ambient config independently of repository options.
