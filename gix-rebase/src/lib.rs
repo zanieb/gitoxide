@@ -343,6 +343,11 @@ impl MergeState {
 
         if self.interactive {
             write_file(rebase_merge_dir, "interactive", b"")?;
+        } else {
+            let interactive_path = rebase_merge_dir.join("interactive");
+            if interactive_path.exists() {
+                let _ = std::fs::remove_file(&interactive_path);
+            }
         }
 
         let mut todo_buf = Vec::new();
