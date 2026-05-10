@@ -57,6 +57,7 @@ impl Proxy<'_> {
         Ok(gix_discover::path::without_dot_git_dir(base_dot_git))
     }
 
+    #[cfg(feature = "worktree-mutation")]
     pub(crate) fn validate_gitfile_backlink(&self, base: &Path) -> std::io::Result<()> {
         let dot_git = base.join(gix_discover::DOT_GIT_DIR);
         let backlink = gix_discover::path::from_gitdir_file(&dot_git).map_err(|err| {
