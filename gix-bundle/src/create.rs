@@ -22,7 +22,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             version: Version::V2,
-            object_hash: gix_hash::Kind::Sha1,
+            object_hash: gix_hash::Kind::default(),
         }
     }
 }
