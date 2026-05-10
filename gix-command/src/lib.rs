@@ -463,9 +463,9 @@ pub mod shebang {
         line = line.strip_prefix(b"#!")?;
 
         let slash_idx = line.rfind_byteset(br"/\")?;
-        Some(match line[slash_idx..].find_byte(b' ') {
-            Some(space_idx) => {
-                let space = slash_idx + space_idx;
+        Some(match line[slash_idx..].find_byteset(b" \t") {
+            Some(ws_idx) => {
+                let space = slash_idx + ws_idx;
                 Data {
                     interpreter: gix_path::from_byte_slice(line[..space].trim()).to_owned(),
                     args: line

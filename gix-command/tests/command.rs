@@ -73,6 +73,11 @@ mod shebang {
                 "single arguments are OK too"
             );
             assert_eq!(
+                parse("#!/bin/sh\t-i -u\nunrelated content"),
+                exe_arg("/bin/sh", "-i -u"),
+                "tabs can separate the interpreter from arguments"
+            );
+            assert_eq!(
                 parse("#!/bin/exe anything goes\nunrelated content"),
                 exe_arg("/bin/exe", "anything goes"),
                 "any argument works"
