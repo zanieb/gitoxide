@@ -87,6 +87,7 @@ comfort = [
 #! Support for various hash algorithms is controlled here. The idea is to allow applications to
 #! compile in only the ones they need, which is why within the entire `gix` stack there is no
 #! crate that sets an algorithm, except for the top-level `gix` crate for convenience.
+#! Some legacy storage formats still require SHA-1 support internally even when SHA-256 is enabled.
 #!
 #! At least one hash algorithm must be enabled for compilation to succeed.
 
@@ -99,8 +100,33 @@ sha1 = [
 
 ## Enable support for the SHA-256 hash throughout the `gix` stack.
 sha256 = [
+    "gix-archive?/sha256",
+    "gix-blame?/sha256",
+    "gix-commitgraph/sha256",
+    "gix-config/sha256",
+    "gix-diff/sha256",
+    "gix-dir?/sha256",
+    "gix-discover/sha256",
+    "gix-filter?/sha256",
     "gix-hash/sha256",
+    "gix-hashtable/sha256",
+    "gix-index?/sha256",
+    "gix-merge?/sha256",
+    "gix-negotiate?/sha256",
+    "gix-object/sha256",
+    "gix-odb/sha256",
     "gix-pack/sha256",
+    "gix-protocol/sha256",
+    "gix-ref/sha256",
+    "gix-refspec/sha256",
+    "gix-revision/sha256",
+    "gix-revwalk/sha256",
+    "gix-shallow/sha256",
+    "gix-status?/sha256",
+    "gix-submodule?/sha256",
+    "gix-traverse/sha256",
+    "gix-worktree?/sha256",
+    "gix-worktree-state?/sha256",
     "gix-worktree-stream?/sha256",
 ]
 

@@ -91,7 +91,7 @@ lean-async = ["hashes", "fast", "tracing", "pretty-cli", "gitoxide-core-tools", 
 #! ### Building Blocks
 #! Typical combinations of features of our dependencies, some of which are referred to in the `gitoxide` crate's code for conditional compilation.
 
-## Provide support for all known hashes. If this isn't enabled, select an individual hash algorithms.
+## Provide support for all known hashes. If this isn't enabled, select individual hash algorithms.
 hashes = ["sha1", "sha256"]
 ## Enable support for the SHA-1 hash throughout the `gix` crate.
 sha1 = ["gix/sha1"]
