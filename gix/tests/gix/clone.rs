@@ -2,7 +2,12 @@ use crate::{remote, util::restricted};
 
 #[cfg(all(feature = "worktree-mutation", feature = "blocking-network-client"))]
 mod blocking_io {
-    use std::{borrow::Cow, path::Path, process::Command, sync::atomic::AtomicBool};
+    use std::{
+        borrow::Cow,
+        path::{Path, PathBuf},
+        process::Command,
+        sync::{atomic::AtomicBool, LazyLock},
+    };
 
     use crate::{
         remote,
@@ -41,6 +46,32 @@ mod blocking_io {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    static DRIVER: LazyLock<PathBuf> = LazyLock::new(|| {
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "-p=gix-filter", "--example", "arrow"])
+            .status()
+            .expect("cargo must run to build the arrow filter driver");
+        assert!(status.success(), "arrow filter driver build must succeed");
+
+        let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .ancestors()
+            .nth(1)
+            .expect("test target dir has a parent")
+            .join("debug")
+            .join("examples")
+            .join(if cfg!(windows) { "arrow.exe" } else { "arrow" });
+        assert!(path.is_file(), "arrow filter driver must exist at {}", path.display());
+        path
+    });
+
+    fn driver_exe() -> String {
+        let mut exe = DRIVER.to_string_lossy().into_owned();
+        if cfg!(windows) {
+            exe = exe.replace('\\', "/");
+        }
+        exe
     }
 
     #[test]
@@ -715,6 +746,52 @@ mod blocking_io {
             payload.metadata()?.permissions().mode() & 0o111,
             0,
             "payload keeps its executable bits"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fetch_and_checkout_uses_filter_drivers() -> crate::Result {
+        let remote_dir = gix_testtools::tempfile::TempDir::new()?;
+        git(remote_dir.path(), &["init", "-q"]);
+        git(remote_dir.path(), &["config", "user.name", "gitoxide"]);
+        git(remote_dir.path(), &["config", "user.email", "gitoxide@localhost"]);
+
+        let driver = driver_exe();
+        git(
+            remote_dir.path(),
+            &["config", "filter.arrow.clean", &format!("{driver} clean %f")],
+        );
+        git(
+            remote_dir.path(),
+            &["config", "filter.arrow.smudge", &format!("{driver} smudge %f")],
+        );
+        git(remote_dir.path(), &["config", "filter.arrow.required", "true"]);
+        std::fs::write(remote_dir.path().join(".gitattributes"), "*.txt filter=arrow\n")?;
+        std::fs::write(remote_dir.path().join("tracked.txt"), "hello\nthere\n")?;
+        git(remote_dir.path(), &["add", ".gitattributes", "tracked.txt"]);
+        git(remote_dir.path(), &["commit", "-q", "-m", "filtered"]);
+
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let mut prepare = gix::clone::PrepareFetch::new(
+            remote_dir.path(),
+            tmp.path(),
+            gix::create::Kind::WithWorktree,
+            Default::default(),
+            restricted(),
+        )?
+        .with_in_memory_config_overrides([
+            format!("filter.arrow.clean={driver} clean %f"),
+            format!("filter.arrow.smudge={driver} smudge %f"),
+            "filter.arrow.required=true".to_owned(),
+        ]);
+        let (mut checkout, _out) = prepare.fetch_then_checkout(gix::progress::Discard, &AtomicBool::default())?;
+        let (repo, _) = checkout.main_worktree(gix::progress::Discard, &AtomicBool::default())?;
+
+        assert_eq!(
+            std::fs::read(repo.workdir().expect("worktree").join("tracked.txt"))?.as_bstr(),
+            b"\xe2\x9e\xa1hello\n\xe2\x9e\xa1there\n".as_bstr(),
+            "checkout applies the smudge side of the configured filter driver"
         );
         Ok(())
     }
