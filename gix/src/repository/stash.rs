@@ -485,7 +485,7 @@ impl Repository {
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
                 )));
-                if file_path.exists() {
+                if file_path.symlink_metadata().is_ok() {
                     std::fs::remove_file(&file_path).map_err(SaveError::RemoveFile)?;
                     if let Some(parent) = file_path.parent() {
                         super::worktree_ops::remove_empty_parents(parent, &workdir).map_err(SaveError::RemoveFile)?;
