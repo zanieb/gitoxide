@@ -165,6 +165,7 @@ where
         let alternates = repo.objects.store_ref().alternate_db_paths()?;
         let mut negotiate = Negotiate {
             objects: &graph_repo.objects,
+            shallow_prune_objects: &repo.objects,
             refs: &graph_repo.refs,
             graph: &mut graph,
             alternates,
@@ -268,6 +269,7 @@ where
 
 struct Negotiate<'a, 'b, 'c> {
     objects: &'a crate::OdbHandle,
+    shallow_prune_objects: &'a crate::OdbHandle,
     refs: &'a gix_ref::file::Store,
     graph: &'a mut gix_negotiate::Graph<'b, 'c>,
     alternates: Vec<PathBuf>,
@@ -329,5 +331,9 @@ impl gix_protocol::fetch::Negotiate for Negotiate<'_, '_, '_> {
             arguments,
             previous_response,
         )
+    }
+
+    fn has_object_for_shallow_pruning(&mut self, id: &gix_hash::ObjectId) -> bool {
+        gix_object::Exists::exists(self.shallow_prune_objects, id)
     }
 }

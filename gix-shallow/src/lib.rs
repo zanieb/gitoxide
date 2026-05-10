@@ -88,8 +88,16 @@ pub mod write {
         ///
         /// ### Deviation
         ///
-        /// Git also prunes the set of shallow commits while writing, we don't until we support some sort of pruning.
         pub fn write(
+            file: gix_lock::File,
+            shallow_commits: Option<nonempty::NonEmpty<gix_hash::ObjectId>>,
+            updates: &[Update],
+        ) -> Result<(), Error> {
+            write_with_prune(file, shallow_commits, updates, |_| true)
+        }
+
+        /// Like [`write()`], but drops shallow commits for which `prune` returns `false`.
+        pub fn write_with_prune(
             mut file: gix_lock::File,
             shallow_commits: Option<nonempty::NonEmpty<gix_hash::ObjectId>>,
             updates: &[Update],
@@ -103,6 +111,9 @@ pub mod write {
                     Update::Unshallow(id) => shallow_commits.retain(|oid| oid != id),
                 }
             }
+            shallow_commits.sort();
+            shallow_commits.dedup();
+            shallow_commits.retain(|id| keep(id));
             if shallow_commits.is_empty() {
                 if let Err(err) = std::fs::remove_file(file.resource_path())
                     && err.kind() != std::io::ErrorKind::NotFound
@@ -112,7 +123,6 @@ pub mod write {
                 drop(file);
                 return Ok(());
             }
-            shallow_commits.sort();
             let mut buf = Vec::<u8>::new();
             for commit in shallow_commits {
                 commit

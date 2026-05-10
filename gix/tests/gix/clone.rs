@@ -327,6 +327,7 @@ mod blocking_io {
         let (repo, _change) = gix::prepare_clone(remote::repo("base.shallow").path(), tmp.path())?
             .with_in_memory_config_overrides(Some("my.marker=1"))
             .fetch_only(gix::progress::Discard, &AtomicBool::default())?;
+        let shallow_ids = shallow_ids(&repo, "present")?;
         assert_eq!(
             shallow_ids(&repo, "present")?,
             sorted([
