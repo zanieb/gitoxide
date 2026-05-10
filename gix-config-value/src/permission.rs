@@ -104,6 +104,9 @@ fn parse_octal(value: &str, input: &BStr) -> Result<Option<Permission>, Error> {
         c.to_digit(8)
             .map(|digit| acc.saturating_mul(8).saturating_add(digit as i64))
     }) else {
+        if digits.starts_with('0') && digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(permission_err(input));
+        }
         return Ok(None);
     };
 
