@@ -171,8 +171,11 @@ impl crate::Repository {
     /// ```
     pub fn has_object(&self, id: impl AsRef<gix_hash::oid>) -> bool {
         let id = id.as_ref();
-        if id.to_owned().is_empty_tree() {
+        let empty_tree = ObjectId::empty_tree(self.object_hash());
+        if id == empty_tree.as_ref() {
             true
+        } else if id.kind() != self.object_hash() {
+            false
         } else {
             self.objects.exists(id)
         }
@@ -349,9 +352,17 @@ impl crate::Repository {
         referenced_kind: gix_object::Kind,
         id: ObjectId,
     ) -> Result<(), object::write::Error> {
+        if id.kind() != self.object_hash() {
+            return Err(object::write::Error(Box::new(MissingObjectReference {
+                object_kind,
+                referenced_kind,
+                id,
+            })));
+        }
+
         let known_empty = match referenced_kind {
-            gix_object::Kind::Blob => ObjectId::empty_blob(id.kind()) == id,
-            gix_object::Kind::Tree => ObjectId::empty_tree(id.kind()) == id,
+            gix_object::Kind::Blob => ObjectId::empty_blob(self.object_hash()) == id,
+            gix_object::Kind::Tree => ObjectId::empty_tree(self.object_hash()) == id,
             gix_object::Kind::Commit | gix_object::Kind::Tag => false,
         };
         if known_empty {

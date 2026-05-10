@@ -439,6 +439,33 @@ mod write_object {
         Ok(())
     }
 
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn checked_commit_rejects_cross_hash_empty_tree() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo_with_object_hash(gix::hash::Kind::Sha256)?;
+        let sha1_empty_tree = gix::hash::ObjectId::empty_tree(gix::hash::Kind::Sha1);
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: sha1_empty_tree,
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "cross-hash empty tree".into(),
+            extra_headers: vec![],
+        };
+
+        assert_eq!(
+            repo.write_object_checked(commit).unwrap_err().to_string(),
+            format!("Cannot write commit object because it references missing tree object {sha1_empty_tree}")
+        );
+        Ok(())
+    }
+
     #[test]
     fn checked_tag_rejects_target_reference_to_wrong_kind() -> crate::Result {
         let repo = empty_bare_in_memory_repo()?;
@@ -608,6 +635,8 @@ fn writes_avoid_io_using_duplicate_check() -> crate::Result {
 mod find {
     use gix_pack::Find;
 
+    #[cfg(feature = "sha256")]
+    use crate::repository::object::empty_bare_repo_with_object_hash;
     use crate::repository::object::{empty_bare_in_memory_repo, empty_bare_repo};
     use crate::{basic_repo, util::hex_to_id};
 
@@ -686,6 +715,18 @@ mod find {
             repo.objects.try_find(&empty_tree, &mut buf)?.is_none(),
             "the lower level has no such special case so one can determine if this object exists or not"
         );
+        Ok(())
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn has_object_only_treats_repository_hash_empty_tree_as_virtual() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo_with_object_hash(gix::hash::Kind::Sha256)?;
+        let sha1_empty_tree = gix::hash::ObjectId::empty_tree(gix::hash::Kind::Sha1);
+        let sha256_empty_tree = gix::hash::ObjectId::empty_tree(gix::hash::Kind::Sha256);
+
+        assert!(!repo.has_object(sha1_empty_tree));
+        assert!(repo.has_object(sha256_empty_tree));
         Ok(())
     }
 
