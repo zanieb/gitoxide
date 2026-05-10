@@ -764,6 +764,94 @@ mod stash {
         Ok(())
     }
 
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn stash_save_include_untracked_preserves_non_utf8_paths() -> crate::Result {
+        use gix::repository::stash::StashSaveOptions;
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let (repo, tmp) = repo_rw_stash()?;
+        let workdir = tmp.path().to_owned();
+        let raw_name = b"non-utf8-\xff.txt".to_vec();
+        let path = workdir.join(OsString::from_vec(raw_name.clone()));
+        std::fs::write(&path, b"raw path\n")?;
+
+        let stash_id = repo.stash_save_opts(StashSaveOptions {
+            message: Some("non-utf8 untracked"),
+            keep_index: false,
+            include_untracked: true,
+        })?;
+
+        let stash_commit = repo.find_object(stash_id)?.into_commit();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
+        let untracked_commit = repo.find_object(parent_ids[2])?.into_commit();
+        let untracked_tree_id = untracked_commit.tree_id().expect("has tree");
+        let untracked_index = repo.index_from_tree(&untracked_tree_id)?;
+        let entry = untracked_index
+            .entries()
+            .iter()
+            .find(|entry| {
+                let path: &[u8] = entry.path(&untracked_index);
+                path == raw_name.as_slice()
+            })
+            .expect("raw non-UTF-8 path should be preserved in the untracked tree");
+        assert_eq!(entry.mode, gix_index::entry::Mode::FILE);
+        assert!(
+            path.symlink_metadata().is_err(),
+            "untracked file should be removed from the worktree after save"
+        );
+
+        repo.stash_apply(0)?;
+        assert_eq!(std::fs::read(path)?, b"raw path\n");
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stash_save_include_untracked_preserves_symlinks() -> crate::Result {
+        use gix::repository::stash::StashSaveOptions;
+        use std::os::unix::{ffi::OsStrExt, fs::symlink};
+
+        let (repo, tmp) = repo_rw_stash()?;
+        let workdir = tmp.path().to_owned();
+        let link_path = workdir.join("untracked-link");
+        symlink("file.txt", &link_path)?;
+
+        let stash_id = repo.stash_save_opts(StashSaveOptions {
+            message: Some("symlink untracked"),
+            keep_index: false,
+            include_untracked: true,
+        })?;
+
+        let stash_commit = repo.find_object(stash_id)?.into_commit();
+        let parent_ids: Vec<_> = stash_commit.parent_ids().map(gix::Id::detach).collect();
+        let untracked_commit = repo.find_object(parent_ids[2])?.into_commit();
+        let untracked_tree_id = untracked_commit.tree_id().expect("has tree");
+        let untracked_index = repo.index_from_tree(&untracked_tree_id)?;
+        let entry = untracked_index
+            .entries()
+            .iter()
+            .find(|entry| {
+                let path: &[u8] = entry.path(&untracked_index);
+                path == b"untracked-link"
+            })
+            .expect("symlink should be preserved in the untracked tree");
+        assert_eq!(entry.mode, gix_index::entry::Mode::SYMLINK);
+        let blob = repo.find_object(entry.id)?;
+        assert_eq!(blob.data, b"file.txt");
+        assert!(
+            link_path.symlink_metadata().is_err(),
+            "untracked symlink should be removed from the worktree after save"
+        );
+
+        repo.stash_apply(0)?;
+        let target = std::fs::read_link(&link_path)?;
+        assert_eq!(target.as_os_str().as_bytes(), b"file.txt");
+
+        Ok(())
+    }
+
     /// When include_untracked is set but there are no untracked files,
     /// the stash should still have 3 parents (with an empty tree for the 3rd parent).
     /// This matches C Git and libgit2 behavior -- consumers check parentcount == 3
