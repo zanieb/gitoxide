@@ -140,13 +140,16 @@ impl crate::Repository {
     ///
     /// The note content is stored as a blob, and the notes tree under `reference`
     /// (default: `refs/notes/commits`) is updated. A new commit is created on
-    /// the notes ref.
+    /// the notes ref unless an empty-message removal has no existing note to remove.
     ///
     /// If `force` is false and a note already exists for `target`, an error is returned.
     /// If `force` is true, the existing note is overwritten.
     ///
     /// If `message` is empty, the note is removed instead (matching git's behavior
-    /// of `git notes add -f -F /dev/null`).
+    /// of `git notes add -f -F /dev/null`). If the target has no note, the operation
+    /// is a successful no-op and returns `None`.
+    ///
+    /// Returns the new notes commit ID if the notes ref was updated.
     ///
     /// Matches the behavior of `git notes add [-f] -m <message> <object>`.
     ///
@@ -163,17 +166,19 @@ impl crate::Repository {
         message: &[u8],
         reference: Option<&str>,
         force: bool,
-    ) -> Result<ObjectId, Error> {
+    ) -> Result<Option<ObjectId>, Error> {
         let target = target.into();
         let notes_ref = self.effective_notes_ref(reference);
 
         // Verify the target object exists
         self.find_object(target).map_err(|_| Error::TargetNotFound { target })?;
 
-        // Get the existing notes tree, or start with an empty tree
-        let (existing_tree, parent_commit_id) = match self.notes_tree_and_commit(&notes_ref) {
-            Ok((tree, commit_id)) => (tree, Some(commit_id)),
-            Err(_) => (gix_object::Tree::empty(), None),
+        // Get the existing notes tree, or start with an empty tree if the ref
+        // doesn't exist yet. Other ref/object errors must surface to avoid
+        // replacing corrupt notes history with a fresh ref.
+        let (existing_tree, parent_commit_id) = match self.try_notes_tree_and_commit(&notes_ref)? {
+            Some((tree, commit_id)) => (tree, Some(commit_id)),
+            None => (gix_object::Tree::empty(), None),
         };
 
         // Use fanout-aware lookup to check for existing notes
@@ -190,14 +195,19 @@ impl crate::Repository {
 
         // Handle empty message = removal
         if message.is_empty() {
+            if !has_existing {
+                return Ok(None);
+            }
             let new_tree = self.remove_note_from_tree(&existing_tree, &target, fanout)?;
             let tree_id = self.write_object(&new_tree)?;
-            return self.commit_notes_tree(
-                tree_id.detach(),
-                parent_commit_id,
-                &notes_ref,
-                "Notes removed by 'git notes add'",
-            );
+            return self
+                .commit_notes_tree(
+                    tree_id.detach(),
+                    parent_commit_id,
+                    &notes_ref,
+                    "Notes removed by 'git notes add'",
+                )
+                .map(Some);
         }
 
         // Write the note blob
@@ -213,6 +223,7 @@ impl crate::Repository {
             "Notes added by 'git notes add'"
         };
         self.commit_notes_tree(tree_id.detach(), parent_commit_id, &notes_ref, msg)
+            .map(Some)
     }
 
     /// Remove the note for the given `target` object.
@@ -227,9 +238,9 @@ impl crate::Repository {
         let notes_ref = self.effective_notes_ref(reference);
 
         let (existing_tree, parent_commit_id) = self
-            .notes_tree_and_commit(&notes_ref)
+            .try_notes_tree_and_commit(&notes_ref)?
             .map(|(tree, commit_id)| (tree, Some(commit_id)))
-            .map_err(|_| Error::NoteNotFound { target: *target })?;
+            .ok_or(Error::NoteNotFound { target: *target })?;
 
         // Use fanout-aware lookup to check if the note exists
         let hash_kind = self.object_hash();
@@ -310,6 +321,25 @@ impl crate::Repository {
             source: e,
         })?;
 
+        self.notes_tree_and_commit_from_reference(reference)
+    }
+
+    /// Resolve an optional notes reference to its tree and the commit OID.
+    fn try_notes_tree_and_commit(&self, notes_ref: &str) -> Result<Option<(gix_object::Tree, ObjectId)>, Error> {
+        let reference = self.try_find_reference(notes_ref).map_err(|e| Error::FindReference {
+            reference: notes_ref.to_owned(),
+            source: e.into(),
+        })?;
+
+        reference
+            .map(|reference| self.notes_tree_and_commit_from_reference(reference))
+            .transpose()
+    }
+
+    fn notes_tree_and_commit_from_reference(
+        &self,
+        reference: crate::Reference<'_>,
+    ) -> Result<(gix_object::Tree, ObjectId), Error> {
         let commit_id = reference.id().detach();
         let commit_obj = reference.id().object()?.peel_to_kind(gix_object::Kind::Commit)?;
         let commit = commit_obj.try_into_commit()?;
@@ -322,18 +352,7 @@ impl crate::Repository {
 
     /// Resolve a notes reference to its tree.
     fn notes_tree(&self, notes_ref: &str) -> Result<gix_object::Tree, Error> {
-        let reference = self.find_reference(notes_ref).map_err(|e| Error::FindReference {
-            reference: notes_ref.to_owned(),
-            source: e,
-        })?;
-
-        let commit_obj = reference.id().object()?.peel_to_kind(gix_object::Kind::Commit)?;
-        let commit = commit_obj.try_into_commit()?;
-        let tree_id = commit.tree_id()?;
-        let tree_obj = tree_id.object()?;
-        let tree = tree_obj.try_into_tree()?;
-        let decoded = tree.decode()?;
-        Ok(decoded.into())
+        self.notes_tree_and_commit(notes_ref).map(|(tree, _commit_id)| tree)
     }
 
     /// Look up a sub-tree by OID for notes tree traversal.
