@@ -76,6 +76,10 @@ pub enum Error {
     MutuallyExclusiveOptions,
     #[error("Could not find branch '{name}'")]
     BranchNotFound { name: BString },
+    #[error("Branch '{name}' already exists")]
+    BranchAlreadyExists { name: BString },
+    #[error("Cannot detach unborn HEAD without a start point")]
+    UnbornHead,
     #[error("Failed to list worktrees")]
     ListWorktrees(#[source] std::io::Error),
 }
@@ -120,6 +124,7 @@ impl crate::Repository {
         }
 
         // Generate worktree id from path basename, sanitized
+        let default_branch_name = inferred_branch_name(path);
         let worktree_id = sanitize_worktree_id(path);
 
         // Create a unique worktree git dir under .git/worktrees/<id>
@@ -138,10 +143,14 @@ impl crate::Repository {
         let worktree_git_dir = find_unique_worktree_git_dir(&worktrees_dir, &worktree_id)?;
 
         // Determine what HEAD should point to
-        let head_target = self.resolve_head_target(&options)?;
+        let head_target = self.resolve_head_target(&options, default_branch_name.as_ref())?;
 
-        // Check if the branch is already checked out (unless detaching)
-        if let HeadTarget::Symbolic(ref branch_name) = head_target {
+        // Check if the branch is already checked out (unless detaching or creating a new branch)
+        if let HeadTarget::Symbolic {
+            branch: branch_name,
+            create: BranchCreation::None,
+        } = &head_target
+        {
             self.check_branch_not_checked_out(branch_name.as_ref())?;
         }
 
@@ -184,7 +193,7 @@ impl crate::Repository {
 
         // 3. HEAD: symbolic ref or detached commit id
         match &head_target {
-            HeadTarget::Symbolic(branch) => {
+            HeadTarget::Symbolic { branch, .. } => {
                 std::fs::write(
                     worktree_git_dir.join("HEAD"),
                     format!("ref: {}\n", branch.to_str_lossy()),
@@ -201,38 +210,21 @@ impl crate::Repository {
         std::fs::write(&worktree_dot_git, format!("gitdir: {}\n", worktree_git_dir.display()))
             .map_err(|source| Error::WriteFile { file: ".git", source })?;
 
-        // If a new branch is requested, create it in the main repo before opening the worktree
-        if let Some(new_branch_name) = options.new_branch {
-            // Determine the target commit for the new branch
-            let target_id = match &head_target {
-                HeadTarget::Detached(id) => *id,
-                HeadTarget::Symbolic(_) => {
-                    // This shouldn't happen given our logic, but handle it gracefully
-                    self.head()
-                        .ok()
-                        .and_then(|mut h| h.try_peel_to_id().ok().flatten())
-                        .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach)
-                }
-            };
-
-            // Create the new branch
-            let branch_ref_name = format!("refs/heads/{}", new_branch_name.to_str_lossy());
+        // Create inferred or requested branches before opening the worktree.
+        if let HeadTarget::Symbolic {
+            branch,
+            create: BranchCreation::At(target_id),
+        } = &head_target
+        {
             self.edit_reference(RefEdit {
                 change: Change::Update {
                     log: Default::default(),
                     expected: PreviousValue::MustNotExist,
-                    new: gix_ref::Target::Object(target_id),
+                    new: gix_ref::Target::Object(*target_id),
                 },
-                name: branch_ref_name.as_str().try_into()?,
+                name: branch.as_bstr().try_into()?,
                 deref: false,
             })?;
-
-            // Update the worktree's HEAD to point to the new branch
-            std::fs::write(
-                worktree_git_dir.join("HEAD"),
-                format!("ref: refs/heads/{}\n", new_branch_name.to_str_lossy()),
-            )
-            .map_err(|source| Error::WriteFile { file: "HEAD", source })?;
         }
 
         // Lock if requested
@@ -258,7 +250,7 @@ impl crate::Repository {
         Ok(crate::worktree::Proxy::new(self, worktree_git_dir))
     }
 
-    fn resolve_head_target(&self, options: &Options<'_>) -> Result<HeadTarget, Error> {
+    fn resolve_head_target(&self, options: &Options<'_>, default_branch_name: &BStr) -> Result<HeadTarget, Error> {
         // If start_point is specified, resolve it first
         let start_point_id = if let Some(spec) = options.start_point {
             Some(
@@ -275,14 +267,9 @@ impl crate::Repository {
 
         if options.detach {
             // Detached HEAD mode
-            let id = match start_point_id {
-                Some(id) => id,
-                None => self
-                    .head()
-                    .ok()
-                    .and_then(|mut h| h.try_peel_to_id().ok().flatten())
-                    .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach),
-            };
+            let id = start_point_id
+                .or_else(|| self.current_head_id())
+                .ok_or(Error::UnbornHead)?;
             Ok(HeadTarget::Detached(id))
         } else if let Some(branch) = options.branch {
             // Check out an existing branch
@@ -293,42 +280,49 @@ impl crate::Repository {
                     name: branch.to_owned(),
                 });
             }
-            Ok(HeadTarget::Symbolic(branch_ref.into()))
+            Ok(HeadTarget::Symbolic {
+                branch: branch_ref.into(),
+                create: BranchCreation::None,
+            })
         } else if let Some(new_branch) = options.new_branch {
-            // New branch will be created - return detached for now, branch creation happens later
-            let id = match start_point_id {
-                Some(id) => id,
-                None => self
-                    .head()
-                    .ok()
-                    .and_then(|mut h| h.try_peel_to_id().ok().flatten())
-                    .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach),
-            };
-            // We'll update HEAD to symbolic ref after creating the branch
-            let _branch_ref = format!("refs/heads/{}", new_branch.to_str_lossy());
+            let branch_ref = format!("refs/heads/{}", new_branch.to_str_lossy());
+            if self.try_find_reference(&*branch_ref)?.is_some() {
+                return Err(Error::BranchAlreadyExists {
+                    name: new_branch.to_owned(),
+                });
+            }
+            Ok(HeadTarget::Symbolic {
+                branch: branch_ref.into(),
+                create: start_point_id
+                    .or_else(|| self.current_head_id())
+                    .map_or(BranchCreation::Unborn, BranchCreation::At),
+            })
+        } else if let Some(id) = start_point_id {
             Ok(HeadTarget::Detached(id))
         } else {
-            // Default: check out current HEAD's branch or detach
-            match self.head() {
-                Ok(mut head) => {
-                    if let Some(referent_name) = head.referent_name() {
-                        Ok(HeadTarget::Symbolic(referent_name.as_bstr().to_owned()))
-                    } else {
-                        // Detached HEAD in main repo
-                        let id = head
-                            .try_peel_to_id()
-                            .ok()
-                            .flatten()
-                            .map_or_else(|| self.object_hash().null(), super::super::types::Id::detach);
-                        Ok(HeadTarget::Detached(id))
-                    }
-                }
-                Err(_) => {
-                    // No HEAD yet
-                    Ok(HeadTarget::Detached(self.object_hash().null()))
-                }
+            // Default: check out an existing branch named after the worktree path, or create it.
+            let branch_ref = format!("refs/heads/{}", default_branch_name.to_str_lossy());
+            if self.try_find_reference(&*branch_ref)?.is_some() {
+                Ok(HeadTarget::Symbolic {
+                    branch: branch_ref.into(),
+                    create: BranchCreation::None,
+                })
+            } else {
+                Ok(HeadTarget::Symbolic {
+                    branch: branch_ref.into(),
+                    create: self
+                        .current_head_id()
+                        .map_or(BranchCreation::Unborn, BranchCreation::At),
+                })
             }
         }
+    }
+
+    fn current_head_id(&self) -> Option<gix_hash::ObjectId> {
+        self.head()
+            .ok()
+            .and_then(|mut head| head.try_peel_to_id().ok().flatten())
+            .map(super::super::types::Id::detach)
     }
 
     fn check_branch_not_checked_out(&self, branch_name: &BStr) -> Result<(), Error> {
@@ -363,8 +357,14 @@ impl crate::Repository {
 }
 
 enum HeadTarget {
-    Symbolic(BString),
+    Symbolic { branch: BString, create: BranchCreation },
     Detached(gix_hash::ObjectId),
+}
+
+enum BranchCreation {
+    None,
+    At(gix_hash::ObjectId),
+    Unborn,
 }
 
 fn sanitize_worktree_id(path: &Path) -> String {
@@ -381,6 +381,12 @@ fn sanitize_worktree_id(path: &Path) -> String {
             }
         })
         .collect()
+}
+
+fn inferred_branch_name(path: &Path) -> BString {
+    path.file_name()
+        .and_then(|name| gix_path::os_str_into_bstr(name).ok())
+        .map_or_else(|| "worktree".into(), ToOwned::to_owned)
 }
 
 fn find_unique_worktree_git_dir(worktrees_dir: &Path, base_id: &str) -> Result<PathBuf, Error> {

@@ -359,6 +359,82 @@ mod mutation {
         }
 
         #[test]
+        fn default_creates_branch_from_path_basename() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let head_id = repo.head_id()?.detach();
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt.default-branch");
+
+            let proxy = repo.worktree_add(&worktree_path, Default::default())?;
+            let wt_repo = proxy.into_repo()?;
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/wt.default-branch"
+            );
+            assert_eq!(wt_repo.head_id()?.detach(), head_id);
+            assert!(worktree_path.join("a").is_file(), "files should be checked out");
+            Ok(())
+        }
+
+        #[test]
+        fn default_on_unborn_repo_creates_unborn_branch_from_path_basename() -> crate::Result {
+            let tmp = gix_testtools::tempfile::tempdir()?;
+            let repo_path = tmp.path().join("repo");
+            let repo = gix::ThreadSafeRepository::init_opts(
+                &repo_path,
+                gix::create::Kind::WithWorktree,
+                Default::default(),
+                crate::restricted(),
+            )?
+            .to_thread_local();
+            let worktree_path = tmp.path().join("wt-unborn");
+
+            let proxy = repo.worktree_add(&worktree_path, Default::default())?;
+            let wt_repo = proxy.into_repo()?;
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/wt-unborn"
+            );
+            let mut head = wt_repo.head()?;
+            assert!(head.try_peel_to_id()?.is_none(), "unborn branch has no object id");
+            assert!(
+                !repo.git_dir().join("refs").join("heads").join("wt-unborn").exists(),
+                "unborn branches are not materialized as refs"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn detach_on_unborn_repo_without_start_point_fails() -> crate::Result {
+            let tmp = gix_testtools::tempfile::tempdir()?;
+            let repo_path = tmp.path().join("repo");
+            let repo = gix::ThreadSafeRepository::init_opts(
+                &repo_path,
+                gix::create::Kind::WithWorktree,
+                Default::default(),
+                crate::restricted(),
+            )?
+            .to_thread_local();
+            let worktree_path = tmp.path().join("wt-detach-unborn");
+
+            let result = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            );
+
+            assert!(
+                matches!(result, Err(gix::worktree::add::Error::UnbornHead)),
+                "detaching an unborn HEAD without a start point must fail, got {result:?}"
+            );
+            assert!(!worktree_path.exists(), "failure happens before creating the worktree");
+            Ok(())
+        }
+
+        #[test]
         fn checkout_respects_configured_ntfs_protection() -> crate::Result {
             let (mut repo, _keep) = repo_rw()?;
             {
