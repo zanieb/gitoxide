@@ -913,6 +913,8 @@ fn full_file_structure_validation() {
     let parsed_records = read_ref_records(&file_data[block_start..block_end], 20, min_update_index)
         .expect("should read records from file");
     assert_eq!(parsed_records.len(), n);
+    let parsed_records = read_table_ref_records(&file_data).expect("full table should read legacy block lengths");
+    assert_eq!(parsed_records, records);
 
     // Verify footer can be parsed from the end of the file
     let footer_start = file_data.len() - gix_reftable::footer_size(version);
