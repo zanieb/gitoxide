@@ -155,7 +155,7 @@ fn block_ref_reject_empty_name() {
         value: RefRecordValue::Deletion,
     };
 
-    let bytes = serialize_ref_record(&record, &[], 1, 20);
+    let bytes = serialize_ref_record(&record, &[], 1, 20).expect("should serialize");
     // The serialized form should have prefix_len=0, suffix_len=0
     // This means the key is empty, which C Git rejects at the block_writer_add level.
     // We verify the record can still roundtrip (the block writer should reject it).
@@ -1061,7 +1061,7 @@ fn block_ref_empty_name_record_roundtrip() {
     };
 
     // Serialize directly (not through write_ref_block which doesn't validate)
-    let bytes = serialize_ref_record(&record, &[], 1, 20);
+    let bytes = serialize_ref_record(&record, &[], 1, 20).expect("should serialize");
     let (parsed, consumed) =
         gix_reftable::parse_ref_record(&bytes, &[], 20, 1).expect("should parse empty name record");
     assert_eq!(consumed, bytes.len());

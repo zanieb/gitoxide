@@ -232,6 +232,8 @@ pub enum Error {
     ZlibError,
     #[error("invalid reftable stack table name: {name}")]
     InvalidTableName { name: String },
+    #[error("record update index {update_index} is below table minimum {min_update_index}")]
+    UpdateIndexBelowMinimum { update_index: u64, min_update_index: u64 },
 }
 
 /// Read a varint from a byte slice using the reftable MSB-first encoding with +1 adjustment.
