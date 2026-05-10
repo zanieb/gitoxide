@@ -852,6 +852,62 @@ mod stash {
         Ok(())
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn stash_save_captures_tracked_symlink_target_changes() -> crate::Result {
+        use std::os::unix::{ffi::OsStrExt, fs::symlink};
+
+        let (repo, tmp) = repo_rw("make_reset_repo.sh")?;
+        let workdir = tmp.path().to_owned();
+        let link_path = workdir.join("tracked-link");
+
+        symlink("target-one", &link_path)?;
+        let status = std::process::Command::new("git")
+            .args(["add", "tracked-link"])
+            .current_dir(&workdir)
+            .status()?;
+        assert!(status.success(), "git add should track the symlink");
+        let status = std::process::Command::new("git")
+            .args(["commit", "-q", "-m", "add tracked symlink"])
+            .current_dir(&workdir)
+            .status()?;
+        assert!(status.success(), "git commit should record the symlink");
+
+        std::fs::remove_file(&link_path)?;
+        symlink("target-two", &link_path)?;
+
+        let stash_id = repo.stash_save(Some("tracked symlink"))?;
+        let stash_commit = repo.find_object(stash_id)?.into_commit();
+        let stash_tree_id = stash_commit.tree_id().expect("has tree");
+        let stash_index = repo.index_from_tree(&stash_tree_id)?;
+        let entry = stash_index
+            .entries()
+            .iter()
+            .find(|entry| {
+                let path: &[u8] = entry.path(&stash_index);
+                path == b"tracked-link"
+            })
+            .expect("tracked symlink should be present in the stash tree");
+        assert_eq!(entry.mode, gix_index::entry::Mode::SYMLINK);
+        let blob = repo.find_object(entry.id)?;
+        assert_eq!(blob.data, b"target-two");
+
+        assert_eq!(
+            std::fs::read_link(&link_path)?.as_os_str().as_bytes(),
+            b"target-one",
+            "saving the stash should reset the symlink to HEAD"
+        );
+
+        repo.stash_apply(0)?;
+        assert_eq!(
+            std::fs::read_link(&link_path)?.as_os_str().as_bytes(),
+            b"target-two",
+            "applying the stash should restore the changed symlink target"
+        );
+
+        Ok(())
+    }
+
     /// When include_untracked is set but there are no untracked files,
     /// the stash should still have 3 parents (with an empty tree for the 3rd parent).
     /// This matches C Git and libgit2 behavior -- consumers check parentcount == 3
