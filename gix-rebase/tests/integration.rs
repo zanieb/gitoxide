@@ -298,6 +298,10 @@ impl Driver for GitCliDriver {
         Ok(msg)
     }
 
+    fn read_head_message(&self) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+        self.read_commit_message(head_oid(&self.workdir)).map(Some)
+    }
+
     fn update_head(&self, commit_id: ObjectId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let hex = commit_id.to_hex().to_string();
         let output = Command::new("git")

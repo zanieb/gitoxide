@@ -229,6 +229,15 @@ pub trait Driver {
     /// Read the raw message of a commit.
     fn read_commit_message(&self, commit_id: ObjectId) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Read the raw message of the current `HEAD`, if the driver can provide it.
+    ///
+    /// This is used after user-edit pauses (`reword`, `edit`, and `fixup -c`) so follow-up
+    /// squash/fixup operations can preserve the amended message instead of falling back
+    /// to the original todo commit message.
+    fn read_head_message(&self) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(None)
+    }
+
     /// Update HEAD (and the branch it points to, if any) to the given commit.
     fn update_head(&self, commit_id: ObjectId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -486,6 +495,11 @@ impl MergeState {
         if stopped_path.exists() {
             let _ = std::fs::remove_file(&stopped_path);
         }
+        if self.accumulated_squash_message.is_some() {
+            if let Some(message) = driver.read_head_message().map_err(StepError::ReadCommitMessage)? {
+                self.accumulated_squash_message = Some(message);
+            }
+        }
 
         if self.todo.operations.is_empty() {
             driver.finish().map_err(StepError::Finish)?;
@@ -711,7 +725,9 @@ impl MergeState {
     /// executed (pushed to `done` before execution in `step()`).
     fn last_done_commit_message(&self, driver: &dyn Driver) -> Result<Option<Vec<u8>>, StepError> {
         use gix_sequencer::todo::Operation;
+
         // Skip the last entry (the current operation, already pushed to done).
+        let mut previous_commit_op = None;
         for op in self.done.operations.iter().rev().skip(1) {
             match op {
                 Operation::Pick { commit, .. }
@@ -719,16 +735,26 @@ impl MergeState {
                 | Operation::Edit { commit, .. }
                 | Operation::Squash { commit, .. }
                 | Operation::Fixup { commit, .. } => {
-                    let commit_id = driver.resolve_commit(commit)?;
-                    let msg = driver
-                        .read_commit_message(commit_id)
-                        .map_err(StepError::ReadCommitMessage)?;
-                    return Ok(Some(msg));
+                    previous_commit_op = Some(commit);
+                    break;
                 }
                 _ => continue,
             }
         }
-        Ok(None)
+
+        let Some(commit) = previous_commit_op else {
+            return Ok(None);
+        };
+
+        if let Some(message) = driver.read_head_message().map_err(StepError::ReadCommitMessage)? {
+            return Ok(Some(message));
+        }
+
+        let commit_id = driver.resolve_commit(commit)?;
+        let msg = driver
+            .read_commit_message(commit_id)
+            .map_err(StepError::ReadCommitMessage)?;
+        Ok(Some(msg))
     }
 }
 
