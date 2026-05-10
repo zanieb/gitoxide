@@ -976,3 +976,22 @@ fn empty_bare_repo() -> Result<(tempfile::TempDir, gix::Repository)> {
     .into();
     Ok((tmp, repo))
 }
+
+#[cfg(feature = "sha256")]
+fn empty_bare_repo_with_object_hash(
+    object_hash: gix::hash::Kind,
+) -> crate::Result<(tempfile::TempDir, gix::Repository)> {
+    let (tmp, repo) = empty_bare_repo()?;
+    if object_hash == repo.object_hash() {
+        return Ok((tmp, repo));
+    }
+
+    std::fs::write(
+        tmp.path().join("config"),
+        format!(
+            "[core]\n\trepositoryFormatVersion = 1\n\tfilemode = true\n\tbare = true\n[extensions]\n\tobjectFormat = {object_hash}\n"
+        ),
+    )?;
+    let repo = gix::open_opts(tmp.path(), gix::open::Options::isolated())?;
+    Ok((tmp, repo))
+}
