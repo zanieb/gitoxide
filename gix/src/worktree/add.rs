@@ -248,7 +248,7 @@ impl crate::Repository {
         // Checkout files (unless no_checkout is set)
         if !options.no_checkout {
             // Open the worktree as a repository and perform checkout
-            let worktree_repo = crate::open(&path)?;
+            let worktree_repo = crate::open_opts(&path, self.open_options().clone())?;
 
             // Perform checkout using the worktree's repository
             checkout_worktree(&worktree_repo)?;
@@ -422,7 +422,11 @@ fn checkout_worktree(repo: &crate::Repository) -> Result<(), Error> {
     };
 
     // Create index from tree
-    let index = gix_index::State::from_tree(&tree_id, &repo.objects, Default::default()).map_err(|e| {
+    let validate = repo
+        .config
+        .protect_options()
+        .map_err(crate::clone::checkout::main_worktree::Error::BooleanConfig)?;
+    let index = gix_index::State::from_tree(&tree_id, &repo.objects, validate).map_err(|e| {
         Error::Checkout(crate::clone::checkout::main_worktree::Error::IndexFromTree { id: tree_id, source: e })
     })?;
     let mut index = gix_index::File::from_state(index, repo.index_path());

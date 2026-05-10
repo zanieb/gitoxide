@@ -359,6 +359,59 @@ mod mutation {
         }
 
         #[test]
+        fn checkout_respects_configured_ntfs_protection() -> crate::Result {
+            let (mut repo, _keep) = repo_rw()?;
+            {
+                let mut config = repo.config_edit()?;
+                config.set_value(&gix::config::tree::Core::PROTECT_NTFS, "false")?;
+                config.commit()?;
+            }
+
+            let blob_id = repo.write_blob("content\n")?.detach();
+            let file_tree_id = repo
+                .write_object(gix::objs::TreeRef {
+                    entries: vec![gix::objs::tree::EntryRef {
+                        mode: gix::objs::tree::EntryKind::Blob.into(),
+                        filename: b"file".as_bstr(),
+                        oid: blob_id.as_ref(),
+                    }],
+                })?
+                .detach();
+            let root_tree_id = repo
+                .write_object(gix::objs::TreeRef {
+                    entries: vec![gix::objs::tree::EntryRef {
+                        mode: gix::objs::tree::EntryKind::Tree.into(),
+                        filename: b"git~1".as_bstr(),
+                        oid: file_tree_id.as_ref(),
+                    }],
+                })?
+                .detach();
+            let parent = repo.head_id()?.detach();
+            let commit_id = repo.commit("HEAD", "add ntfs opt-out path", root_tree_id, [parent])?;
+
+            let worktree_path = repo
+                .workdir()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("wt-protect-ntfs-disabled");
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            )?;
+
+            assert_eq!(proxy.into_repo()?.head_id()?.detach(), commit_id.detach());
+            assert!(
+                worktree_path.join("git~1").join("file").is_file(),
+                "worktree add should honor core.protectNTFS=false when creating the checkout index"
+            );
+            Ok(())
+        }
+
+        #[test]
         fn with_existing_branch() -> crate::Result {
             let (repo, _keep) = repo_rw()?;
             let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature");
