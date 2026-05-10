@@ -37,6 +37,11 @@ pub enum Error {
         /// The one-based line number.
         line: usize,
     },
+    /// The line does not contain a valid merge marker.
+    InvalidMergeMarker {
+        /// The one-based line number.
+        line: usize,
+    },
     /// The object id could not be decoded.
     InvalidObjectId {
         /// The one-based line number.
@@ -50,7 +55,7 @@ impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Error::InvalidObjectId { source, .. } => Some(source),
-            Error::EmptyLine { .. } | Error::MissingDescription { .. } => None,
+            Error::EmptyLine { .. } | Error::MissingDescription { .. } | Error::InvalidMergeMarker { .. } => None,
         }
     }
 }
@@ -61,6 +66,9 @@ impl fmt::Display for Error {
             Error::EmptyLine { line } => write!(f, "FETCH_HEAD line {line} is empty"),
             Error::MissingDescription { line } => {
                 write!(f, "FETCH_HEAD line {line} is missing its source description")
+            }
+            Error::InvalidMergeMarker { line } => {
+                write!(f, "FETCH_HEAD line {line} has an invalid merge marker")
             }
             Error::InvalidObjectId { line, source } => {
                 write!(f, "FETCH_HEAD line {line} has an invalid object id: {source}")
@@ -105,7 +113,10 @@ impl Line {
         })?;
         let (for_merge, description) = match metadata.strip_prefix("not-for-merge\t") {
             Some(description) => (false, description),
-            None => (true, metadata.strip_prefix('\t').unwrap_or(metadata)),
+            None => match metadata.strip_prefix('\t') {
+                Some(description) => (true, description),
+                None => return Err(Error::InvalidMergeMarker { line: line_number }),
+            },
         };
 
         Ok(Line::new(id, for_merge, description))

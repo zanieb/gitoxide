@@ -58,11 +58,24 @@ fn missing_description_is_an_error() {
     assert!(err.to_string().contains("missing its source description"));
 }
 
+#[test]
+fn missing_merge_marker_is_an_error() {
+    let err = Line::from_str("1b8d9e6a408e480ae1912e919c37a26e5c46639d\tbranch 'main' of https://example.com/repo.git")
+        .unwrap_err();
+    assert!(err.to_string().contains("invalid merge marker"));
+}
+
+#[test]
+fn incomplete_not_for_merge_marker_is_an_error() {
+    let err = Line::from_str("1b8d9e6a408e480ae1912e919c37a26e5c46639d\tnot-for-merge").unwrap_err();
+    assert!(err.to_string().contains("invalid merge marker"));
+}
+
 #[cfg(feature = "sha256")]
 #[test]
 fn parse_sha256_object_ids() {
     let line = Line::from_str(
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tbranch 'main' of https://example.com/repo.git",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\tbranch 'main' of https://example.com/repo.git",
     )
     .expect("sha256 is enabled");
 
