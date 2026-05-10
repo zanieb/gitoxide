@@ -90,6 +90,45 @@ mod from_tree {
         }
     }
 
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn sha256_entries_roundtrip_through_stream_protocol() {
+        let blob_data = b"hello\n".to_vec();
+        let blob_id = gix_object::compute_hash(gix_hash::Kind::Sha256, Kind::Blob, &blob_data).expect("blob hash");
+
+        let mut tree = b"100644 file\0".to_vec();
+        tree.extend_from_slice(blob_id.as_bytes());
+        let tree_id = gix_object::compute_hash(gix_hash::Kind::Sha256, Kind::Tree, &tree).expect("tree hash");
+
+        let db = MemoryDb {
+            objects: HashMap::from([
+                (tree_id, (Kind::Tree, tree)),
+                (blob_id, (Kind::Blob, blob_data.clone())),
+            ]),
+        };
+        let mut stream = gix_worktree_stream::from_tree(
+            tree_id,
+            db,
+            gix_filter::Pipeline::new(Default::default(), Default::default()),
+            |_, _, _| Ok::<_, Infallible>(()),
+        );
+
+        let mut entry = stream
+            .next_entry()
+            .expect("entry retrieval does not fail")
+            .expect("entry");
+        assert_eq!(entry.relative_path(), "file");
+        assert_eq!(entry.id, blob_id);
+        assert_eq!(entry.id.kind(), gix_hash::Kind::Sha256);
+
+        let mut actual = Vec::new();
+        entry.read_to_end(&mut actual).expect("entry can always be read");
+        assert_eq!(actual, blob_data);
+        drop(entry);
+
+        assert!(stream.next_entry().expect("entry retrieval does not fail").is_none());
+    }
+
     #[test]
     fn includes_submodules_as_empty_entries() {
         let object_hash = gix_testtools::object_hash();
