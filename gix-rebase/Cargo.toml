@@ -14,12 +14,19 @@ include = ["/src/**/*", "/LICENSE-*"]
 [lib]
 doctest = false
 
+[features]
+default = ["sha1"]
+## Enable support for SHA-1 object ids in rebase state files.
+sha1 = ["gix-hash/sha1", "gix-object/sha1", "gix-sequencer/sha1"]
+## Enable support for SHA-256 object ids in rebase state files.
+sha256 = ["gix-hash/sha256", "gix-object/sha256", "gix-sequencer/sha256"]
+
 [dependencies]
-gix-hash = { version = "^0.22.0", path = "../gix-hash", features = ["sha1"] }
-gix-object = { version = "^0.57.0", path = "../gix-object" }
+gix-hash = { version = "^0.25.0", path = "../gix-hash" }
+gix-object = { version = "^0.60.0", path = "../gix-object" }
 gix-sequencer = { version = "0.0.0", path = "../gix-sequencer" }
 bstr = { version = "1.12.0", default-features = false, features = ["std"] }
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 
 [dev-dependencies]
 tempfile = "3"

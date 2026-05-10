@@ -95,7 +95,23 @@ progress-unit-bytes = ["gix-utils/progress-unit-bytes"]
 
 ## Enable support for the SHA-1 hash throughout the `gix` stack.
 sha1 = [
+    "gix-archive?/sha1",
+    "gix-blame?/sha1",
+    "gix-bundle?/sha1",
+    "gix-commitgraph/sha1",
+    "gix-config/sha1",
+    "gix-diff/sha1",
+    "gix-dir?/sha1",
+    "gix-discover/sha1",
+    "gix-filter?/sha1",
     "gix-hash/sha1",
+    "gix-hashtable/sha1",
+    "gix-index?/sha1",
+    "gix-merge?/sha1",
+    "gix-negotiate?/sha1",
+    "gix-note?/sha1",
+    "gix-object/sha1",
+    "gix-odb/sha1",
     "gix-pack/sha1",
     "gix-note?/sha1",
     "gix-worktree-stream?/sha1",
@@ -105,6 +121,7 @@ sha1 = [
 sha256 = [
     "gix-archive?/sha256",
     "gix-blame?/sha256",
+    "gix-bundle?/sha256",
     "gix-commitgraph/sha256",
     "gix-config/sha256",
     "gix-diff/sha256",

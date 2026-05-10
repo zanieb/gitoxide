@@ -832,7 +832,7 @@ mod tests {
             name: "refs/heads/main".into(),
             update_index: 1,
             value: RefRecordValue::Val1 {
-                target: ObjectId::null(gix_hash::Kind::Sha1),
+                target: ObjectId::null(gix_hash::Kind::shortest()),
             },
         };
         assert_eq!(rec.name(), b"refs/heads/main");
