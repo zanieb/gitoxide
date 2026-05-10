@@ -990,7 +990,7 @@ where
 }
 
 fn decode_object<'a>(object: Data<'a>, oid: &ObjectId) -> Result<ObjectRef<'a>, Error> {
-    object.decode().map_err(|source| {
+    object.decode_with_hash(oid.kind()).map_err(|source| {
         existing_object::Error::Decode {
             oid: oid.as_ref().to_owned(),
             source,

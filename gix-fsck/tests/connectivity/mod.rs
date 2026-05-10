@@ -41,15 +41,32 @@ fn hex_to_objects<'a>(hex_ids: impl IntoIterator<Item = &'a str>, kind: Kind) ->
     hex_to_ids(hex_ids).into_iter().map(|id| (id, kind)).collect()
 }
 
-#[derive(Default)]
 struct MemoryDb {
+    object_hash: gix_hash::Kind,
     objects: HashMap<ObjectId, (Kind, Vec<u8>)>,
 }
 
+impl Default for MemoryDb {
+    fn default() -> Self {
+        MemoryDb {
+            object_hash: gix_hash::Kind::Sha1,
+            objects: HashMap::default(),
+        }
+    }
+}
+
 impl MemoryDb {
+    #[cfg(feature = "sha256")]
+    fn new(object_hash: gix_hash::Kind) -> Self {
+        MemoryDb {
+            object_hash,
+            objects: HashMap::default(),
+        }
+    }
+
     fn insert(&mut self, kind: Kind, data: impl Into<Vec<u8>>) -> ObjectId {
         let data = data.into();
-        let id = gix_object::compute_hash(gix_hash::Kind::Sha1, kind, &data).expect("hashing works");
+        let id = gix_object::compute_hash(self.object_hash, kind, &data).expect("hashing works");
         self.objects.insert(id, (kind, data));
         id
     }
@@ -202,6 +219,22 @@ fn object_roots_are_detected_by_kind_and_traversed() {
 
     let mut check = Connectivity::new(&db, |_, _| unreachable!("all objects are present"));
     check.check_object(&tag_id).expect("tag root is present");
+
+    assert!(check.unreachable(db.objects.keys()).is_empty());
+}
+
+#[cfg(feature = "sha256")]
+#[test]
+fn sha256_tree_entries_are_decoded_with_object_id_kind() {
+    let mut db = MemoryDb::new(gix_hash::Kind::Sha256);
+    let blob_id = db.insert(Kind::Blob, b"reachable".to_vec());
+    let tree_id = db.insert(Kind::Tree, MemoryDb::tree_data("100644", "file", blob_id));
+    let commit_id = db.insert(Kind::Commit, MemoryDb::commit_data(tree_id, "commit-root"));
+
+    let mut check = Connectivity::new(&db, |oid: &ObjectId, kind: Kind| {
+        panic!("all SHA-256 objects are present, but {kind} {oid} was reported missing");
+    });
+    check.check_commit(&commit_id).expect("commit is connected");
 
     assert!(check.unreachable(db.objects.keys()).is_empty());
 }
