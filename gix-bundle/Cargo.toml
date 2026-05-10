@@ -23,6 +23,7 @@ sha256 = ["gix-hash/sha256"]
 
 [dependencies]
 gix-hash = { version = "^0.25.0", path = "../gix-hash" }
+gix-validate = { version = "^0.11.1", path = "../gix-validate" }
 
 bstr = { version = "1.12.0", default-features = false, features = ["std"] }
 thiserror = "2.0.18"
