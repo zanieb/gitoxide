@@ -371,13 +371,7 @@ fn blame_at_specific_revision() -> gix_testtools::Result {
 }
 
 /// Scenario 6: ignore-revs — when X modified lines originally from A and B,
-/// ignoring X should re-attribute to A and B (C Git behavior) or pin them to
-/// X (gix behavior without fuzzy heuristics).
-///
-/// C Git uses `guess_line_blames()` heuristics to map modified lines back to
-/// ancestors. gix does not implement these heuristics yet, so lines modified by
-/// the ignored commit stay "pinned" to it. This test verifies the gix behavior:
-/// all lines are still covered, and the total count matches.
+/// ignoring X should re-attribute to A and B.
 #[test]
 fn ignore_revs_changing_lines() -> gix_testtools::Result {
     let worktree_path = interop_repo_path()?;
@@ -391,7 +385,6 @@ fn ignore_revs_changing_lines() -> gix_testtools::Result {
     let total_normal: u32 = outcome_normal.entries.iter().map(|e| e.len.get()).sum();
     assert_eq!(total_normal, 2, "normal blame should cover 2 lines");
 
-    // Blame at X with X ignored: gix pins modified lines to X (no fuzzy heuristic).
     let outcome_ignored = fixture.blame_file_at(
         tag_x,
         source_file_name.into(),
@@ -401,15 +394,11 @@ fn ignore_revs_changing_lines() -> gix_testtools::Result {
         },
     )?;
 
-    let total_ignored: u32 = outcome_ignored.entries.iter().map(|e| e.len.get()).sum();
-    assert_eq!(total_ignored, 2, "ignored blame should still cover 2 lines");
-
-    // C Git would attribute line 1 to A and line 2 to B.
-    // gix pins both to X (the ignored commit itself, since it's a modification with no
-    // fuzzy match to parent). Verify at least that the entries are valid.
-    for entry in &outcome_ignored.entries {
-        assert!(entry.len.get() > 0, "all blame entries should have positive length");
-    }
+    let baseline = Baseline::collect(
+        fixture.git_dir().join("ignore-revs-file-ignore-X.baseline"),
+        source_file_name.into(),
+    )?;
+    pretty_assertions::assert_eq!(outcome_ignored.entries, baseline);
 
     Ok(())
 }
