@@ -24,6 +24,9 @@ impl Submodule<'_> {
     /// Following git's behavior, commands (`!cmd`) in the `update` field of `.gitmodules` cause
     /// `update = none` to be written to the local config (git prints a warning and falls back).
     pub fn init(&self, force: bool) -> Result<(), super::init::Error> {
+        self.validated_git_dir()
+            .map_err(|name| super::init::Error::InvalidName { name })?;
+
         // Validate submodule path for symlink attacks before any config writes.
         if let Some(worktree) = self.state.repo.workdir() {
             if let Ok(sm_path_bstr) = self.path() {
