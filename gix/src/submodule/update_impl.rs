@@ -173,6 +173,11 @@ impl Submodule<'_> {
                 Default::default(),
                 self.state.repo.options.clone(),
             )?;
+            if self.shallow()?.unwrap_or(false) {
+                prep = prep.with_shallow(crate::remote::fetch::Shallow::DepthAtRemote(
+                    1.try_into().expect("1 is non-zero"),
+                ));
+            }
 
             let (mut checkout_prep, _fetch_outcome) = prep.fetch_then_checkout(&mut progress, should_interrupt)?;
             let (_repo, _checkout_outcome) =

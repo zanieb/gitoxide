@@ -37,6 +37,7 @@ impl File {
     /// * `ignore`
     /// * `update`
     /// * `branch`
+    /// * `shallow`
     ///
     /// These values aren't validated yet, which will happen upon query. The caller must provide
     /// trusted configuration; each copied value retains its section's origin metadata.

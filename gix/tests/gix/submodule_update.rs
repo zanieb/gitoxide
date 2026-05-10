@@ -216,6 +216,42 @@ mod update {
         Ok(())
     }
 
+    #[test]
+    fn update_with_shallow_config_clones_shallow_submodule() -> crate::Result {
+        let (repo, _tmp) = repo_rw("after-clone")?;
+        let modules_path = repo.workdir().expect("worktree").join(".gitmodules");
+        let modules = std::fs::read_to_string(&modules_path)?;
+        let shallow_modules = modules.replace("\turl = ../submodule\n", "\turl = ../submodule\n\tshallow = true\n");
+        assert_ne!(
+            shallow_modules, modules,
+            "fixture should contain the expected submodule url"
+        );
+        std::fs::write(&modules_path, shallow_modules)?;
+
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+        assert_eq!(sm.shallow()?, Some(true));
+
+        sm.update_submodule(
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+            &gix::submodule::update::Options::new(true, false),
+        )?
+        .expect("update should clone the submodule");
+
+        let sm_repo = sm.open()?.expect("submodule should be openable after update");
+        assert!(sm_repo.is_shallow(), "submodule clone should be shallow");
+        assert_eq!(
+            sm_repo.shallow_commits()?.expect("shallow commits").len(),
+            1,
+            "depth-1 clone should record one shallow boundary commit"
+        );
+        Ok(())
+    }
+
     /// Ported from libgit2 test_submodule_update__update_already_checked_out_submodule:
     /// When the submodule is already checked out but at the wrong commit, update should
     /// advance it to the correct commit.
