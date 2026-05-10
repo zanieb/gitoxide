@@ -232,6 +232,8 @@ pub enum Error {
     InvalidObjectIdLength { len: usize },
     #[error("CRC32 checksum mismatch: expected {expected:#010x}, got {actual:#010x}")]
     Crc32Mismatch { expected: u32, actual: u32 },
+    #[error("reftable footer header copy does not match file header")]
+    HeaderFooterMismatch,
     #[error("zlib decompression error")]
     ZlibError,
     #[error("invalid reftable stack table name: {name}")]
