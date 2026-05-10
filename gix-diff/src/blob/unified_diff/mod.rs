@@ -5,11 +5,14 @@
 /// Defines the size of the context printed before and after each change.
 ///
 /// Similar to the `-U` option in git diff or gnu-diff. If the context overlaps
-/// with previous or next change, the context gets reduced accordingly.
+/// with previous or next change, the context gets reduced accordingly. Inter-hunk
+/// context can additionally merge hunks that are close but don't overlap.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub struct ContextSize {
     /// Defines the size of the context printed before and after each change.
-    symmetrical: u32,
+    pub(crate) symmetrical: u32,
+    /// Merge hunks separated by at most this many unchanged lines after applying context.
+    pub(crate) interhunk_lines: u32,
 }
 
 impl Default for ContextSize {
@@ -22,7 +25,18 @@ impl Default for ContextSize {
 impl ContextSize {
     /// Create a symmetrical context with `n` lines before and after a changed hunk.
     pub fn symmetrical(n: u32) -> Self {
-        ContextSize { symmetrical: n }
+        ContextSize {
+            symmetrical: n,
+            interhunk_lines: 0,
+        }
+    }
+
+    /// Merge hunks separated by at most `n` unchanged lines.
+    ///
+    /// This is similar to Git's `--inter-hunk-context=<n>`.
+    pub fn with_interhunk_lines(mut self, n: u32) -> Self {
+        self.interhunk_lines = n;
+        self
     }
 }
 

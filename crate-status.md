@@ -362,7 +362,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
         * [x] text
         * [ ] binary
         * [ ] `git-apply` compatibility
-        * [ ] merge hunks that are close enough based on line-setting (`interhunk-lines`)
+        * [x] merge hunks that are close enough based on line-setting (`interhunk-lines`)
         * [ ] white-space related settings
     * **lines**
         * [x] Simple line-by-line diffs powered by the `imara-diff` crate.
