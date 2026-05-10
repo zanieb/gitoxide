@@ -707,8 +707,7 @@ mod write {
     }
 
     #[test]
-    #[should_panic(expected = "AmendMessage::No is invalid for merge operations")]
-    fn write_merge_with_amend_no_panics() {
+    fn write_merge_with_amend_no_returns_invalid_input() {
         let list = TodoList {
             operations: vec![Operation::Merge {
                 commit: Some((
@@ -721,7 +720,13 @@ mod write {
             .into(),
         };
         let mut out = Vec::new();
-        list.write_to(&mut out).unwrap();
+        let err = list.write_to(&mut out).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(
+            err.to_string(),
+            "AmendMessage::No is invalid for merge operations; merge requires -C or -c when a commit is specified"
+        );
+        assert!(out.is_empty());
     }
 }
 

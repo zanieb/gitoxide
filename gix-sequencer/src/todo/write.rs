@@ -58,9 +58,7 @@ impl TodoList {
                         let flag = match amend {
                             AmendMessage::Replace => "-C",
                             AmendMessage::Edit => "-c",
-                            AmendMessage::No => {
-                                panic!("AmendMessage::No is invalid for merge operations; merge requires -C or -c when a commit is specified")
-                            }
+                            AmendMessage::No => return Err(invalid_merge_amend_message()),
                         };
                         if oneline.is_empty() {
                             writeln!(out, "merge {flag} {prefix} {label}")?;
@@ -86,6 +84,13 @@ impl TodoList {
         }
         Ok(())
     }
+}
+
+fn invalid_merge_amend_message() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "AmendMessage::No is invalid for merge operations; merge requires -C or -c when a commit is specified",
+    )
 }
 
 #[cfg(test)]
@@ -148,11 +153,10 @@ update-ref refs/heads/main
     }
 
     #[test]
-    #[should_panic(expected = "AmendMessage::No is invalid for merge operations")]
-    fn merge_with_amend_no_panics() {
+    fn merge_with_amend_no_returns_invalid_input() {
         // The parser never produces AmendMessage::No for merge operations.
-        // If someone constructs this manually, it should panic rather than
-        // silently writing `-C` which changes semantics.
+        // If someone constructs this manually, return an error rather than
+        // panicking or silently writing `-C` which changes semantics.
         use crate::todo::{AmendMessage, Operation};
         use gix_hash::Prefix;
 
@@ -168,6 +172,15 @@ update-ref refs/heads/main
             .into(),
         };
         let mut output = Vec::new();
-        list.write_to(&mut output).unwrap();
+        let err = list.write_to(&mut output).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(
+            err.to_string(),
+            "AmendMessage::No is invalid for merge operations; merge requires -C or -c when a commit is specified"
+        );
+        assert!(
+            output.is_empty(),
+            "invalid operation should not produce partial todo output"
+        );
     }
 }
