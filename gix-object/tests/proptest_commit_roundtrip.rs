@@ -57,7 +57,7 @@ proptest! {
     /// Parse a valid commit, write it back, and verify byte-for-byte equality.
     #[test]
     fn commit_parse_write_roundtrip(commit_bytes in arb_commit_bytes()) {
-        let parsed = CommitRef::from_bytes(&commit_bytes)
+        let parsed = CommitRef::from_bytes(&commit_bytes, gix_hash::Kind::Sha1)
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
                 format!("parse failed: {e}")
             ))?;
@@ -79,7 +79,7 @@ proptest! {
     /// Parsing and converting to owned, then writing the owned form, must also roundtrip.
     #[test]
     fn commit_owned_roundtrip(commit_bytes in arb_commit_bytes()) {
-        let parsed = CommitRef::from_bytes(&commit_bytes)
+        let parsed = CommitRef::from_bytes(&commit_bytes, gix_hash::Kind::Sha1)
             .map_err(|e| proptest::test_runner::TestCaseError::fail(
                 format!("parse failed: {e}")
             ))?;

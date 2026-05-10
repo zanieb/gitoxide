@@ -1,6 +1,6 @@
 use gix_object::bstr::BStr;
 
-pub use super::loose::reflog::{create_or_update, expire, Error};
+pub use super::loose::reflog::{Error, create_or_update, expire};
 
 ///
 pub mod iter;

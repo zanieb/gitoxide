@@ -78,7 +78,10 @@ trailing-cr
     .expect("valid pathspec file");
 
     let paths = patterns.iter().map(gix_pathspec::Pattern::path).collect::<Vec<_>>();
-    assert_eq!(paths, ["src/*.rs", "spaced path", "quoted", "raw[chars]", "trailing-cr"]);
+    assert_eq!(
+        paths,
+        ["src/*.rs", "spaced path", "quoted", "raw[chars]", "trailing-cr"]
+    );
     assert_eq!(patterns[3].search_mode, SearchMode::Literal);
 
     let patterns =

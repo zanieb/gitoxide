@@ -138,7 +138,7 @@ mod streaming {
     }
 
     mod proptests {
-        use gix_packetline::decode::{self, streaming, Stream};
+        use gix_packetline::decode::{self, Stream, streaming};
         use proptest::prelude::*;
 
         proptest! {

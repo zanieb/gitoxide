@@ -92,7 +92,7 @@ pub fn write_to(
 
 #[cfg(test)]
 mod tests {
-    use super::{write_to, ResolvePath, Stage};
+    use super::{ResolvePath, Stage, write_to};
 
     #[test]
     fn write_to_rejects_object_hash_mismatch() {

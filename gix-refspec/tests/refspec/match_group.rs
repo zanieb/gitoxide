@@ -204,9 +204,9 @@ mod push {
     use bstr::{BString, ByteSlice};
     use gix_hash::ObjectId;
     use gix_refspec::{
+        MatchGroup, RefSpec,
         match_group::{PushDeletion, PushUpdate, SourceRef},
         parse::Operation,
-        MatchGroup, RefSpec,
     };
 
     #[test]

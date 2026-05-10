@@ -1,6 +1,6 @@
 use bstr::BStr;
 
-use crate::{entry, util::write_var_int, Entry, State};
+use crate::{Entry, State, entry, util::write_var_int};
 
 impl Entry {
     /// Serialize ourselves to `out` with path access via `state`, without padding.
@@ -81,7 +81,7 @@ fn common_prefix_len(previous: &BStr, current: &BStr) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::{entry, Entry, State};
+    use crate::{Entry, State, entry};
 
     #[test]
     fn write_to_rejects_object_hash_mismatch() {

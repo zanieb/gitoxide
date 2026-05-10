@@ -283,14 +283,14 @@ mod ext {
                     oid: id.as_ref().to_owned(),
                 })
                 .and_then(|o| match o {
-                    crate::Data { kind: Kind::Tree, data, .. } => {
-                        TreeRef::from_bytes_with_hash(data, id.kind()).map_err(|err| {
-                            find::existing_object::Error::Decode {
-                                source: err,
-                                oid: id.as_ref().to_owned(),
-                            }
-                        })
-                    }
+                    crate::Data {
+                        kind: Kind::Tree, data, ..
+                    } => TreeRef::from_bytes_with_hash(data, id.kind()).map_err(|err| {
+                        find::existing_object::Error::Decode {
+                            source: err,
+                            oid: id.as_ref().to_owned(),
+                        }
+                    }),
                     o => Err(find::existing_object::Error::ObjectKind {
                         oid: id.as_ref().to_owned(),
                         actual: o.kind,

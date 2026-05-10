@@ -109,7 +109,9 @@ fn special_trees() -> crate::Result {
         let actual = TreeRef::from_bytes_with_hash(&fixture, hash_kind)?;
         assert_eq!(actual.entries.len(), expected_entry_count, "{name}");
         assert_eq!(
-            TreeRefIter::from_bytes_with_hash(&fixture, hash_kind).map(Result::unwrap).count(),
+            TreeRefIter::from_bytes_with_hash(&fixture, hash_kind)
+                .map(Result::unwrap)
+                .count(),
             expected_entry_count,
             "{name}"
         );

@@ -2,10 +2,10 @@
 use std::borrow::Cow;
 
 use crate::{
+    Remote,
     bstr::{BStr, BString, ByteSlice},
     config, remote,
     remote::find,
-    Remote,
 };
 
 impl crate::Repository {

@@ -47,8 +47,8 @@ pub mod match_rhs {
 ///
 pub mod match_push {
     use crate::{
-        match_group::{PushDeletion, PushUpdate},
         MatchGroup,
+        match_group::{PushDeletion, PushUpdate},
     };
 
     /// The outcome of matching push refspecs against local and remote references.

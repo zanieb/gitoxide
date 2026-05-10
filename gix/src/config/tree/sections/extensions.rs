@@ -19,7 +19,8 @@ mod object_format {
 
     use crate::{
         bstr::{BStr, ByteSlice},
-        config, config::tree::sections::extensions::ObjectFormat,
+        config,
+        config::tree::sections::extensions::ObjectFormat,
     };
 
     impl ObjectFormat {

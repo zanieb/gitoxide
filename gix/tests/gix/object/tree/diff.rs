@@ -254,9 +254,11 @@ mod track_rewrites {
             .filter(|c| !c.entry_mode().is_tree())
             .collect();
         if !uses_sha1_snapshots(&repo) {
-            assert!(actual
-                .iter()
-                .all(|change| change.entry_mode_and_id().1.kind() == repo.object_hash()));
+            assert!(
+                actual
+                    .iter()
+                    .all(|change| change.entry_mode_and_id().1.kind() == repo.object_hash())
+            );
             return Ok(());
         }
         insta::assert_debug_snapshot!(actual, @r#"
@@ -480,9 +482,11 @@ mod track_rewrites {
             .into_iter()
             .collect();
         if !uses_sha1_snapshots(&repo) {
-            assert!(actual
-                .iter()
-                .all(|change| change.entry_mode_and_id().1.kind() == repo.object_hash()));
+            assert!(
+                actual
+                    .iter()
+                    .all(|change| change.entry_mode_and_id().1.kind() == repo.object_hash())
+            );
             assert!(actual.iter().any(|change| {
                 let (source_entry_mode, source_id) = change.source_entry_mode_and_id();
                 let (entry_mode, id) = change.entry_mode_and_id();

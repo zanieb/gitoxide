@@ -1,4 +1,4 @@
-use gix_object::{bstr::ByteSlice, Kind, ObjectRef};
+use gix_object::{Kind, ObjectRef, bstr::ByteSlice};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1);

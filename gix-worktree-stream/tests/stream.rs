@@ -17,8 +17,8 @@ mod from_tree {
     };
 
     use gix_attributes::glob::pattern::Case;
-    use gix_hash::{oid, ObjectId};
-    use gix_object::{bstr::ByteSlice, tree::EntryKind, Data, Kind};
+    use gix_hash::{ObjectId, oid};
+    use gix_object::{Data, Kind, bstr::ByteSlice, tree::EntryKind};
     use gix_worktree::stack::state::attributes::Source;
     use std::sync::LazyLock;
 
@@ -140,12 +140,10 @@ mod from_tree {
         tree.extend_from_slice(submodule_id.as_bytes());
         let (root, db) = MemoryDb::with_tree(object_hash, tree);
 
-        let mut stream = gix_worktree_stream::from_tree(
-            root,
-            db,
-            mutating_pipeline(false),
-            |_, _, _| -> Result<_, Infallible> { Ok(()) },
-        );
+        let mut stream =
+            gix_worktree_stream::from_tree(root, db, mutating_pipeline(false), |_, _, _| -> Result<_, Infallible> {
+                Ok(())
+            });
 
         let mut entry = stream
             .next_entry()

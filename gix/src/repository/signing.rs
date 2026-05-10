@@ -304,8 +304,8 @@ impl crate::Repository {
         Name: TryInto<gix_ref::FullName, Error = E>,
         Error: From<E>,
     {
-        use gix_ref::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
         use gix_ref::Target;
+        use gix_ref::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
         use smallvec::SmallVec;
 
         let committer_ref = committer.into();

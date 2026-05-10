@@ -748,9 +748,10 @@ mod find {
                 .count(),
             0
         );
-        assert!(repo
-            .try_find_object_verified(hex_to_id("1111111111111111111111111111111111111111"))?
-            .is_none());
+        assert!(
+            repo.try_find_object_verified(hex_to_id("1111111111111111111111111111111111111111"))?
+                .is_none()
+        );
         Ok(())
     }
 
@@ -759,7 +760,7 @@ mod find {
         let (_tmp, repo) = empty_bare_repo()?;
         let actual_id = repo.write_blob(b"content")?;
         let expected_id = hex_to_id("1111111111111111111111111111111111111111");
-        let store = gix::odb::loose::Store::at(repo.git_dir().join("objects"), repo.object_hash());
+        let store = gix::odb::loose::Store::at(repo.git_dir().join("objects"), repo.object_hash(), None);
         let expected_path = store.object_path(&expected_id);
         std::fs::create_dir_all(expected_path.parent().expect("loose objects have a directory"))?;
         std::fs::copy(store.object_path(&actual_id), expected_path)?;

@@ -530,6 +530,11 @@ pub fn scripted_fixture_read_only(script_name: impl AsRef<Path>) -> Result<PathB
     scripted_fixture_read_only_with_args(script_name, None::<String>)
 }
 
+/// Compatibility alias for tests whose fixture base is already crate-local.
+pub fn scripted_fixture_read_only_standalone(script_name: impl AsRef<Path>) -> Result<PathBuf> {
+    scripted_fixture_read_only(script_name)
+}
+
 /// Run the executable at `script_name`, like `make_repo.sh` to produce a writable directory to which
 /// the tempdir is returned. It will be removed automatically, courtesy of [`tempfile::TempDir`].
 ///

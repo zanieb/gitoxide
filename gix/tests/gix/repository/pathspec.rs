@@ -65,10 +65,12 @@ fn can_be_constructed_from_patterns() -> crate::Result {
     )?;
 
     assert!(pathspec.is_included("HI", Some(false)));
-    assert!(pathspec
-        .pattern_matching_relative_path("HIP", Some(false))
-        .expect("match")
-        .is_excluded());
+    assert!(
+        pathspec
+            .pattern_matching_relative_path("HIP", Some(false))
+            .expect("match")
+            .is_excluded()
+    );
     Ok(())
 }
 

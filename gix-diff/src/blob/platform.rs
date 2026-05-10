@@ -541,7 +541,7 @@ impl Platform {
                 resource::Data::Buffer { buf, is_derived: _ } => Some(write_resource_to_tempfile(cmd, res, buf)?),
                 resource::Data::Binary { data: Some(buf), .. } => Some(write_resource_to_tempfile(cmd, res, buf)?),
                 resource::Data::Binary { data: None, .. } => {
-                    return Err(prepare_diff_command::Error::SourceOrDestinationBinary)
+                    return Err(prepare_diff_command::Error::SourceOrDestinationBinary);
                 }
             };
             Ok(tmpfile)

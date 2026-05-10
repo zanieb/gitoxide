@@ -1,6 +1,6 @@
 use gix_traverse::commit::{
-    simple::{CommitTimeOrder, Sorting},
     Parents, Simple,
+    simple::{CommitTimeOrder, Sorting},
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

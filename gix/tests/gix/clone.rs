@@ -6,7 +6,7 @@ mod blocking_io {
         borrow::Cow,
         path::{Path, PathBuf},
         process::Command,
-        sync::{atomic::AtomicBool, LazyLock},
+        sync::{LazyLock, atomic::AtomicBool},
     };
 
     use crate::{

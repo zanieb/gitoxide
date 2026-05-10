@@ -114,9 +114,10 @@ impl Store {
                 } else {
                     vec![objects_dir.clone()]
                 };
-                let num_slots = Store::collect_indices_and_mtime_sorted_by_size(db_paths, None, None, alloc_limit_bytes)
-                    .map_err(std::io::Error::other)?
-                    .len();
+                let num_slots =
+                    Store::collect_indices_and_mtime_sorted_by_size(db_paths, None, None, alloc_limit_bytes)
+                        .map_err(std::io::Error::other)?
+                        .len();
 
                 let candidate = ((num_slots as f32 * multiplier) as usize).max(minimum);
                 if candidate > crate::store::types::PackId::max_indices() {

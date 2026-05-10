@@ -13,7 +13,7 @@ fn encode_decode_roundtrip() -> crate::Result {
 }
 
 mod proptests {
-    use gix_pack::data::{header, Version};
+    use gix_pack::data::{Version, header};
     use proptest::prelude::*;
 
     fn arb_version() -> impl Strategy<Value = Version> {

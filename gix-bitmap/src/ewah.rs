@@ -81,39 +81,8 @@ fn validation_error(message: &'static str) -> decode::Error {
     gix_error::ValidationError::from(message).raise()
 }
 
-mod write {
-    use super::Vec;
-
-    impl Vec {
-        /// Write this EWAH bitmap in its on-disk representation.
-        pub fn write_to(&self, mut out: impl std::io::Write) -> std::io::Result<()> {
-            out.write_all(&self.num_bits.to_be_bytes())?;
-            out.write_all(
-                &u32::try_from(self.bits.len())
-                    .map_err(|_| {
-                        std::io::Error::new(std::io::ErrorKind::InvalidInput, "EWAH bitmap has more than 2^32 words")
-                    })?
-                    .to_be_bytes(),
-            )?;
-            for word in &self.bits {
-                out.write_all(&word.to_be_bytes())?;
-            }
-            out.write_all(
-                &u32::try_from(self.rlw)
-                    .map_err(|_| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "EWAH bitmap running length word offset exceeds 2^32",
-                        )
-                    })?
-                    .to_be_bytes(),
-            )
-        }
-    }
-}
-
 mod access {
-    use super::{rlw_literal_words, Vec, RLW_RUNNING_BITS};
+    use super::{RLW_RUNNING_BITS, Vec, rlw_literal_words};
 
     impl Vec {
         /// Create a bitmap from a sequence of bit values.
@@ -250,7 +219,7 @@ pub struct Vec {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, Vec};
+    use super::{Vec, decode};
     use std::vec::Vec as StdVec;
 
     #[test]

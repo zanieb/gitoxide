@@ -218,7 +218,7 @@ impl<'a> ObjectRef<'a> {
         object_hash: gix_hash::Kind,
     ) -> Result<ObjectRef<'a>, crate::decode::Error> {
         Ok(match kind {
-            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes(data, object_hash)?),
+            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes_with_hash(data, object_hash)?),
             Kind::Blob => ObjectRef::Blob(BlobRef { data }),
             Kind::Commit => ObjectRef::Commit(CommitRef::from_bytes(data, object_hash)?),
             Kind::Tag => ObjectRef::Tag(TagRef::from_bytes(data, object_hash)?),

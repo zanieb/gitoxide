@@ -9,21 +9,20 @@ mod fuzzed {
 
     #[test]
     fn runaway_run_length_is_rejected() {
-        let (bitmap, rest) = gix_bitmap::ewah::decode(include_bytes!(
+        let err = gix_bitmap::ewah::decode(include_bytes!(
             "../fuzz/artifacts/ewah/slow-unit-ac817962d1a6c123d4d1f73860f5b779423ed171"
         ))
-        .expect("fixture must decode");
+        .unwrap_err();
 
-        assert!(rest.is_empty(), "fixture should be fully consumed");
-        assert_eq!(
-            bitmap.for_each_set_bit(|_| Some(())),
-            None,
-            "impossible run lengths must be rejected instead of iterating unboundedly"
+        assert!(
+            err.to_string()
+                .contains("running length word offset outside word buffer"),
+            "{err}"
         );
     }
 
     #[test]
-    fn non_zero_padding_bits_in_last_literal_word_are_rejected() {
+    fn non_zero_padding_bits_in_last_literal_word_are_ignored() {
         let bitmap = gix_bitmap::ewah::Vec::from_bits(&[false]).expect("small test fixtures must fit into u32");
         let mut data = Vec::new();
         bitmap
@@ -42,13 +41,18 @@ mod fuzzed {
         data[literal_word_offset..literal_word_offset + 8].copy_from_slice(&literal_word.to_be_bytes());
 
         let (bitmap, rest) = gix_bitmap::ewah::decode(&data).expect("fixture must decode");
+        let mut actual = Vec::new();
 
         assert!(rest.is_empty(), "fixture should be fully consumed");
         assert_eq!(
-            bitmap.for_each_set_bit(|_| Some(())),
-            None,
-            "set bits outside the declared bit length must be rejected"
+            bitmap.for_each_set_bit(|idx| {
+                actual.push(idx);
+                Some(())
+            }),
+            Some(()),
+            "set bits outside the declared bit length must be ignored"
         );
+        assert!(actual.is_empty(), "padding bits must not be reported as set bits");
     }
 
     #[test]

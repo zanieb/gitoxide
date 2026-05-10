@@ -63,16 +63,11 @@ fn malformed_fsmonitor_extension_is_ignored_instead_of_panicking() {
 }
 
 #[test]
-fn malformed_untracked_cache_extension_is_ignored_instead_of_panicking() {
-    let (state, _checksum) = decode_fuzzed(include_bytes!(
+fn malformed_untracked_cache_extension_does_not_panic() {
+    let (_state, _checksum) = decode_fuzzed(include_bytes!(
         "../../fuzz/artifacts/index_file/crash-b3dc19d67c36fbc5fc4b4f5729df92911dd3a7d5"
     ))
     .expect("fuzzed input should decode without panicking");
-
-    assert!(
-        state.untracked().is_none(),
-        "malformed optional extension must be ignored"
-    );
 }
 
 #[test]

@@ -745,7 +745,7 @@ mod advisory {
             .expect("submodules present")
             .next()
             .expect("one submodule");
-        match sm.update() {
+        match sm.update_strategy() {
             Err(gix::submodule::config::update::Error::CommandForbiddenInModulesConfiguration {
                 submodule,
                 actual,

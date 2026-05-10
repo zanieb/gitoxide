@@ -2,10 +2,10 @@ use std::collections::{BTreeSet, HashSet};
 
 use bstr::BStr;
 
-use crate::{instruction::Push, parse::Operation, types::Mode, MatchGroup, RefSpecRef};
+use crate::{MatchGroup, RefSpecRef, instruction::Push, parse::Operation, types::Mode};
 
 pub(crate) mod types;
-pub use types::{match_lhs, match_push, match_rhs, Item, Mapping, PushDeletion, PushUpdate, Source, SourceRef};
+pub use types::{Item, Mapping, PushDeletion, PushUpdate, Source, SourceRef, match_lhs, match_push, match_rhs};
 
 ///
 pub mod validate;

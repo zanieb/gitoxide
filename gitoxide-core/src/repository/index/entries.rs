@@ -457,8 +457,8 @@ mod tests {
     use gix::bstr::ByteSlice;
 
     use crate::{
-        repository::index::entries::{function::entries, Options},
         OutputFormat,
+        repository::index::entries::{Options, function::entries},
     };
 
     fn repo_with_two_tracked_files() -> anyhow::Result<(gix::Repository, tempfile::TempDir)> {

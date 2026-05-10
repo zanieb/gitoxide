@@ -1,4 +1,4 @@
-use gix_packetline::{decode::Stream, PacketLineRef};
+use gix_packetline::{PacketLineRef, decode::Stream};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut wire = Vec::new();

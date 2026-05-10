@@ -4,9 +4,8 @@ use gix_transport::client::async_io::Transport;
 use gix_transport::client::blocking_io::Transport;
 
 use crate::{
-    remote,
-    remote::{fetch::RefMap, ref_map, Connection, Direction},
-    Progress,
+    Progress, remote,
+    remote::{Connection, Direction, fetch::RefMap, ref_map},
 };
 
 mod error;

@@ -163,7 +163,9 @@ mod ext {
                 .map_err(gix_object::find::existing_object::Error::Find)?
                 .ok_or_else(|| gix_object::find::existing_object::Error::NotFound { oid: id.to_owned() })
                 .and_then(|(o, l)| match o {
-                    gix_object::Data { kind: Kind::Tree, data, .. } => TreeRef::from_bytes_with_hash(data, id.kind())
+                    gix_object::Data {
+                        kind: Kind::Tree, data, ..
+                    } => TreeRef::from_bytes_with_hash(data, id.kind())
                         .map(|tree| (tree, l))
                         .map_err(|err| gix_object::find::existing_object::Error::Decode {
                             source: err,

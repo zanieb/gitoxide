@@ -80,7 +80,7 @@ mod existing {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::{init::Options, WriteReflog};
+    use crate::store::{WriteReflog, init::Options};
 
     type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 

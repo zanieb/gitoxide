@@ -418,7 +418,7 @@ fn write_bitmap(
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, write_bitmap, write_oid_stat, write_to, Directory, OidStat};
+    use super::{Directory, OidStat, decode, write_bitmap, write_oid_stat, write_to};
     use crate::entry;
     use crate::extension::UntrackedCache;
     use crate::util::write_var_int;
@@ -474,7 +474,7 @@ mod tests {
         write_bitmap(1, [], &mut data).unwrap();
         data.push(0);
 
-        assert!(decode(&data, object_hash).is_none());
+        assert!(decode(&data, object_hash, None).is_none());
     }
 
     #[test]

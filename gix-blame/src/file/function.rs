@@ -1078,10 +1078,6 @@ fn diff_worktree_against_head(
                 total_number_of_lines,
             }
         }
-    }
-
-    impl gix_diff::blob::Sink for ChangeRecorder {
-        type Out = Vec<Change>;
 
         fn process_change(&mut self, before: Range<u32>, after: Range<u32>) {
             if after.start > self.last_seen_after_end {
@@ -1104,7 +1100,7 @@ fn diff_worktree_against_head(
             self.last_seen_after_end = after.end;
         }
 
-        fn finish(mut self) -> Self::Out {
+        fn finish(mut self) -> Vec<Change> {
             if self.total_number_of_lines > self.last_seen_after_end {
                 self.hunks
                     .push(Change::Unchanged(self.last_seen_after_end..self.total_number_of_lines));
@@ -1113,14 +1109,15 @@ fn diff_worktree_against_head(
         }
     }
 
-    let input = gix_diff::blob::intern::InternedInput::new(
-        tokens_for_diffing(head_content),
-        tokens_for_diffing(worktree_content),
-    );
+    let input =
+        gix_diff::blob::InternedInput::new(tokens_for_diffing(head_content), tokens_for_diffing(worktree_content));
     let number_of_lines_in_destination = input.after.len();
-    let change_recorder = ChangeRecorder::new(number_of_lines_in_destination as u32);
+    let mut change_recorder = ChangeRecorder::new(number_of_lines_in_destination as u32);
 
-    gix_diff::blob::diff(diff_algorithm, &input, change_recorder)
+    for hunk in gix_diff::blob::Diff::compute(diff_algorithm, &input).hunks() {
+        change_recorder.process_change(hunk.before, hunk.after);
+    }
+    change_recorder.finish()
 }
 
 fn find_path_entry_in_commit(
