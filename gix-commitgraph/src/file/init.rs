@@ -166,9 +166,9 @@ impl File {
                     num_hashes: read_u32(&bloom_data[4..8]),
                     bits_per_entry: read_u32(&bloom_data[8..12]),
                 };
-                if settings.hash_version != 1 {
+                if !matches!(settings.hash_version, 1 | 2) {
                     return Err(message!(
-                        "Commit-graph chunk {BLOOM_FILTER_DATA_CHUNK_ID:?} uses unsupported Bloom filter hash version {}",
+                        "Commit-graph chunk {BLOOM_FILTER_DATA_CHUNK_ID:?} uses unsupported Bloom filter hash version {}; supported versions are 1 and 2",
                         settings.hash_version
                     )
                     .raise());
