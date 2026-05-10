@@ -194,11 +194,12 @@ impl crate::Repository {
         // 3. HEAD: symbolic ref or detached commit id
         match &head_target {
             HeadTarget::Symbolic { branch, .. } => {
-                std::fs::write(
-                    worktree_git_dir.join("HEAD"),
-                    format!("ref: {}\n", branch.to_str_lossy()),
-                )
-                .map_err(|source| Error::WriteFile { file: "HEAD", source })?;
+                let mut head_content = Vec::with_capacity("ref: \n".len() + branch.len());
+                head_content.extend_from_slice(b"ref: ");
+                head_content.extend_from_slice(branch);
+                head_content.push(b'\n');
+                std::fs::write(worktree_git_dir.join("HEAD"), head_content)
+                    .map_err(|source| Error::WriteFile { file: "HEAD", source })?;
             }
             HeadTarget::Detached(id) => {
                 std::fs::write(worktree_git_dir.join("HEAD"), format!("{id}\n"))
@@ -229,10 +230,7 @@ impl crate::Repository {
 
         // Lock if requested
         if options.lock || options.lock_reason.is_some() {
-            let lock_content = options
-                .lock_reason
-                .map(|r| r.to_str_lossy().into_owned())
-                .unwrap_or_default();
+            let lock_content = options.lock_reason.unwrap_or_default();
             std::fs::write(worktree_git_dir.join("locked"), lock_content)
                 .map_err(|source| Error::WriteFile { file: "locked", source })?;
         }
@@ -273,43 +271,54 @@ impl crate::Repository {
             Ok(HeadTarget::Detached(id))
         } else if let Some(branch) = options.branch {
             // Check out an existing branch
-            let branch_ref = format!("refs/heads/{}", branch.to_str_lossy());
+            let branch_ref = local_branch_ref(branch);
             // Verify the branch exists
-            if self.try_find_reference(&*branch_ref)?.is_none() {
+            if self.try_find_reference(branch_ref.as_bstr())?.is_none() {
                 return Err(Error::BranchNotFound {
                     name: branch.to_owned(),
                 });
             }
             Ok(HeadTarget::Symbolic {
-                branch: branch_ref.into(),
+                branch: branch_ref,
                 create: BranchCreation::None,
             })
         } else if let Some(new_branch) = options.new_branch {
-            let branch_ref = format!("refs/heads/{}", new_branch.to_str_lossy());
-            if self.try_find_reference(&*branch_ref)?.is_some() {
+            let branch_ref = local_branch_ref(new_branch);
+            if self.try_find_reference(branch_ref.as_bstr())?.is_some() {
                 return Err(Error::BranchAlreadyExists {
                     name: new_branch.to_owned(),
                 });
             }
             Ok(HeadTarget::Symbolic {
-                branch: branch_ref.into(),
+                branch: branch_ref,
                 create: start_point_id
                     .or_else(|| self.current_head_id())
                     .map_or(BranchCreation::Unborn, BranchCreation::At),
             })
         } else if let Some(id) = start_point_id {
-            Ok(HeadTarget::Detached(id))
+            let branch_ref = match options.start_point {
+                Some(spec) => self.existing_local_branch_for_start_point(spec)?,
+                None => None,
+            };
+            if let Some(branch_ref) = branch_ref {
+                Ok(HeadTarget::Symbolic {
+                    branch: branch_ref,
+                    create: BranchCreation::None,
+                })
+            } else {
+                Ok(HeadTarget::Detached(id))
+            }
         } else {
             // Default: check out an existing branch named after the worktree path, or create it.
-            let branch_ref = format!("refs/heads/{}", default_branch_name.to_str_lossy());
-            if self.try_find_reference(&*branch_ref)?.is_some() {
+            let branch_ref = local_branch_ref(default_branch_name);
+            if self.try_find_reference(branch_ref.as_bstr())?.is_some() {
                 Ok(HeadTarget::Symbolic {
-                    branch: branch_ref.into(),
+                    branch: branch_ref,
                     create: BranchCreation::None,
                 })
             } else {
                 Ok(HeadTarget::Symbolic {
-                    branch: branch_ref.into(),
+                    branch: branch_ref,
                     create: self
                         .current_head_id()
                         .map_or(BranchCreation::Unborn, BranchCreation::At),
@@ -354,6 +363,16 @@ impl crate::Repository {
 
         Ok(())
     }
+
+    fn existing_local_branch_for_start_point(&self, spec: &BStr) -> Result<Option<BString>, Error> {
+        let Some(branch_ref) = local_branch_ref_for_start_point(spec) else {
+            return Ok(None);
+        };
+        if gix_validate::reference::name(branch_ref.as_bstr()).is_err() {
+            return Ok(None);
+        }
+        Ok(self.try_find_reference(branch_ref.as_bstr())?.map(|_| branch_ref))
+    }
 }
 
 enum HeadTarget {
@@ -387,6 +406,26 @@ fn inferred_branch_name(path: &Path) -> BString {
     path.file_name()
         .and_then(|name| gix_path::os_str_into_bstr(name).ok())
         .map_or_else(|| "worktree".into(), ToOwned::to_owned)
+}
+
+fn local_branch_ref(name: &BStr) -> BString {
+    let mut branch_ref = BString::from("refs/heads/");
+    branch_ref.extend_from_slice(name);
+    branch_ref
+}
+
+fn local_branch_ref_for_start_point(spec: &BStr) -> Option<BString> {
+    if spec.starts_with_str("refs/heads/") {
+        Some(spec.to_owned())
+    } else if spec.starts_with_str("heads/") {
+        let mut branch_ref = BString::from("refs/");
+        branch_ref.extend_from_slice(spec);
+        Some(branch_ref)
+    } else if spec.starts_with_str("refs/") {
+        None
+    } else {
+        Some(local_branch_ref(spec))
+    }
 }
 
 fn find_unique_worktree_git_dir(worktrees_dir: &Path, base_id: &str) -> Result<PathBuf, Error> {

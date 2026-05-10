@@ -507,6 +507,85 @@ mod mutation {
         }
 
         #[test]
+        fn start_point_local_branch_checks_out_branch() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-start-branch");
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    start_point: Some(b"feature-1".as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+            let wt_repo = proxy.into_repo()?;
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/feature-1"
+            );
+            assert_eq!(
+                wt_repo.head_id()?.detach(),
+                repo.find_reference("refs/heads/feature-1")?.id().detach()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn start_point_prefers_local_branch_over_ambiguous_tag() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let tag_target = repo.head_commit()?.parent_ids().next().expect("parent");
+            repo.tag(
+                "feature-1",
+                tag_target,
+                gix_object::Kind::Commit,
+                Some(repo.committer().expect("present")?),
+                "ambiguous with branch",
+                gix_ref::transaction::PreviousValue::MustNotExist,
+            )?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-ambiguous-start");
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    start_point: Some(b"feature-1".as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+            let wt_repo = proxy.into_repo()?;
+            let branch_id = repo.find_reference("refs/heads/feature-1")?.id().detach();
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/feature-1"
+            );
+            assert_eq!(wt_repo.head_id()?.detach(), branch_id);
+            assert_ne!(branch_id, tag_target, "fixture keeps the tag target distinct");
+            Ok(())
+        }
+
+        #[test]
+        fn start_point_checked_out_branch_fails_before_creating_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-main-again");
+
+            let result = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    start_point: Some(b"main".as_bstr()),
+                    ..Default::default()
+                },
+            );
+
+            assert!(
+                matches!(result, Err(gix::worktree::add::Error::BranchCheckedOut { .. })),
+                "local branch start points must be subject to checked-out branch protection, got {result:?}"
+            );
+            assert!(!worktree_path.exists(), "failure should happen before creating files");
+            Ok(())
+        }
+
+        #[test]
         fn with_new_branch() -> crate::Result {
             let (repo, _keep) = repo_rw()?;
             let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-new-branch");
