@@ -28,18 +28,10 @@ pub fn decode(data: &[u8]) -> Option<FsMonitor> {
     };
 
     let (ewah_size, data) = read_u32(data)?;
-    let ((entry_dirty, extra), data) = data
-        .split_at_checked(ewah_size as usize)
-        .and_then(|(entry_dirty, data)| {
-            gix_bitmap::ewah::decode(entry_dirty)
-                .ok()
-                .map(|entry_dirty| (entry_dirty, data))
-        })?;
-    if !extra.is_empty() {
-        return None;
-    }
+    let (bitmap, data) = data.split_at_checked(usize::try_from(ewah_size).ok()?)?;
+    let (entry_dirty, bitmap_rest) = gix_bitmap::ewah::decode(bitmap).ok()?;
 
-    if !data.is_empty() {
+    if !bitmap_rest.is_empty() || !data.is_empty() {
         return None;
     }
 
@@ -71,4 +63,37 @@ pub fn write_to(fs_monitor: &FsMonitor, mut out: impl std::io::Write) -> Result<
     out.write_all(&SIGNATURE)?;
     out.write_all(&(u32::try_from(data.len()).expect("less than 4GB fsmonitor extension")).to_be_bytes())?;
     out.write_all(&data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode;
+
+    fn valid_v2_payload() -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&2_u32.to_be_bytes());
+        data.extend_from_slice(b"token\0");
+        data.extend_from_slice(&12_u32.to_be_bytes());
+        data.extend_from_slice(&0_u32.to_be_bytes());
+        data.extend_from_slice(&0_u32.to_be_bytes());
+        data.extend_from_slice(&0_u32.to_be_bytes());
+        data
+    }
+
+    #[test]
+    fn decode_rejects_bitmap_lengths_past_the_end() {
+        let mut data = valid_v2_payload();
+        let size_offset = 4 + b"token\0".len();
+        data[size_offset..size_offset + 4].copy_from_slice(&13_u32.to_be_bytes());
+
+        assert!(decode(&data).is_none());
+    }
+
+    #[test]
+    fn decode_rejects_trailing_data_after_the_declared_bitmap() {
+        let mut data = valid_v2_payload();
+        data.push(0);
+
+        assert!(decode(&data).is_none());
+    }
 }
