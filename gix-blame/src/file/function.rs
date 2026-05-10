@@ -192,8 +192,8 @@ pub fn file(
                         source_file_path: current_file_path.clone(),
                         previous_source_file_path: None,
                         commit_id: suspect,
-                        blob_id: entry.unwrap_or(ObjectId::null(suspect.kind())),
-                        previous_blob_id: ObjectId::null(suspect.kind()),
+                        blob_id: entry.unwrap_or(null_blob_id),
+                        previous_blob_id: null_blob_id,
                         parent_index: 0,
                     };
                     blame_path.push(blame_path_entry);
@@ -327,13 +327,12 @@ pub fn file(
                         // it was modified, not added.
                     } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
                         if let Some(ref mut blame_path) = blame_path {
-                            let null_id = ObjectId::null(id.kind());
                             let blame_path_entry = BlamePathEntry {
                                 source_file_path: current_file_path.clone(),
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: id,
-                                previous_blob_id: null_id,
+                                previous_blob_id: null_blob_id,
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
@@ -349,13 +348,12 @@ pub fn file(
                         // looking at other parents before attributing it to the merge commit.
                     } else if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, false) {
                         if let Some(ref mut blame_path) = blame_path {
-                            let null_id = ObjectId::null(entry_id.kind());
                             let blame_path_entry = BlamePathEntry {
                                 source_file_path: current_file_path.clone(),
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: entry_id,
-                                previous_blob_id: null_id,
+                                previous_blob_id: null_blob_id,
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
