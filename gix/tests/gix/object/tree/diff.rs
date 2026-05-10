@@ -160,7 +160,10 @@ mod track_rewrites {
     };
     use gix_ref::bstr::BStr;
 
-    use crate::{object::tree::diff::tree_named, util::named_subrepo_opts};
+    use crate::{
+        object::tree::diff::{tree_named, uses_sha1_snapshots},
+        util::named_subrepo_opts,
+    };
 
     #[test]
     #[cfg_attr(
@@ -228,7 +231,8 @@ mod track_rewrites {
         assert_eq!(expected, HashMap::new());
         let out = out.expect("tracking enabled");
         assert_eq!(
-            out.num_similarity_checks, 21,
+            out.num_similarity_checks,
+            if uses_sha1_snapshots(&repo) { 21 } else { 23 },
             "this probably increases once the algorithm improves"
         );
         assert_eq!(
@@ -249,6 +253,12 @@ mod track_rewrites {
             .into_iter()
             .filter(|c| !c.entry_mode().is_tree())
             .collect();
+        if !uses_sha1_snapshots(&repo) {
+            assert!(actual
+                .iter()
+                .all(|change| change.entry_mode_and_id().1.kind() == repo.object_hash()));
+            return Ok(());
+        }
         insta::assert_debug_snapshot!(actual, @r#"
         [
             Rewrite {
@@ -469,6 +479,22 @@ mod track_rewrites {
             )?
             .into_iter()
             .collect();
+        if !uses_sha1_snapshots(&repo) {
+            assert!(actual
+                .iter()
+                .all(|change| change.entry_mode_and_id().1.kind() == repo.object_hash()));
+            assert!(actual.iter().any(|change| {
+                let (source_entry_mode, source_id) = change.source_entry_mode_and_id();
+                let (entry_mode, id) = change.entry_mode_and_id();
+                change.source_location() == BStr::new(b"cli")
+                    && source_entry_mode.is_tree()
+                    && source_id.kind() == repo.object_hash()
+                    && entry_mode.is_tree()
+                    && id.kind() == repo.object_hash()
+                    && change.location() == BStr::new(b"c")
+            }));
+            return Ok(());
+        }
         insta::assert_debug_snapshot!(actual, @r#"
         [
             Rewrite {
@@ -925,4 +951,8 @@ fn tree_named(repo: &gix::Repository, rev_spec: impl AsRef<str>) -> gix::Tree<'_
         .peel_to_kind(gix::object::Kind::Tree)
         .unwrap()
         .into_tree()
+}
+
+fn uses_sha1_snapshots(repo: &gix::Repository) -> bool {
+    repo.object_hash().len_in_bytes() == gix_hash::Kind::Sha1.len_in_bytes()
 }
