@@ -231,13 +231,7 @@ fn parse_hex_prefix(hash_str: &str, line_number: usize, hash_kind: gix_hash::Kin
         });
     }
 
-    // Use Prefix::from_hex which properly handles both full and abbreviated hashes.
-    // For very short hashes (< 4 chars), use from_hex_nonempty.
-    if hash_str.len() < Prefix::MIN_HEX_LEN {
-        Prefix::from_hex_nonempty(hash_str)
-    } else {
-        Prefix::from_hex(hash_str)
-    }
+    Prefix::from_hex(hash_str)
     .map_err(|source| Error::InvalidCommit {
         hash: hash_str.to_owned(),
         line_number,
