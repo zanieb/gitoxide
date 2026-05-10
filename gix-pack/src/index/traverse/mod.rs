@@ -228,7 +228,7 @@ fn process_entry(
     processor: &mut impl FnMut(gix_object::Kind, &[u8], &index::Entry, &dyn Progress) -> Result,
 ) -> Result {
     if check.object_checksum() {
-        gix_object::Data::new(decompressed, object_kind, index_entry.oid.kind())
+        gix_object::Data::new_with_hash(object_kind, decompressed, index_entry.oid.kind())
             .verify_checksum(&index_entry.oid)
             .or_raise(|| {
                 corruption(format!(

@@ -32,10 +32,10 @@ fn parse_tag(c: &mut Criterion) {
 fn parse_tree(c: &mut Criterion) {
     let hash_kind = gix_testtools::object_hash();
     c.bench_function("TreeRef()", |b| {
-        b.iter(|| black_box(gix_object::TreeRef::from_bytes(TREE, hash_kind)).unwrap());
+        b.iter(|| black_box(gix_object::TreeRef::from_bytes_with_hash(TREE, hash_kind)).unwrap());
     });
     c.bench_function("TreeRefIter()", |b| {
-        b.iter(|| black_box(gix_object::TreeRefIter::from_bytes(TREE, hash_kind).count()));
+        b.iter(|| black_box(gix_object::TreeRefIter::from_bytes_with_hash(TREE, hash_kind).count()));
     });
 }
 
