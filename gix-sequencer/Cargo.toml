@@ -14,11 +14,18 @@ include = ["/src/**/*", "/LICENSE-*"]
 [lib]
 doctest = false
 
+[features]
+default = ["sha1"]
+## Enable support for SHA-1 object ids in todo files.
+sha1 = ["gix-hash/sha1"]
+## Enable support for SHA-256 object ids in todo files.
+sha256 = ["gix-hash/sha256"]
+
 [dependencies]
-gix-hash = { version = "^0.22.0", path = "../gix-hash", features = ["sha1"] }
+gix-hash = { version = "^0.25.0", path = "../gix-hash" }
 bstr = { version = "1.12.0", default-features = false, features = ["std"] }
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 
 [dev-dependencies]
 bstr = { version = "1.12.0", default-features = false, features = ["std"] }
-gix-hash = { version = "^0.22.0", path = "../gix-hash", features = ["sha1"] }
+gix-hash = { version = "^0.25.0", path = "../gix-hash", features = ["sha1"] }

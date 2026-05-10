@@ -11,6 +11,10 @@
 
 use gix_reftable::{read_varint, write_varint, Error, RefRecord};
 
+fn null_oid() -> gix_hash::ObjectId {
+    gix_hash::ObjectId::null(gix_hash::Kind::shortest())
+}
+
 // ---------------------------------------------------------------------------
 // Varint tests
 // ---------------------------------------------------------------------------
@@ -328,15 +332,12 @@ fn ref_record_roundtrip_all_types() {
 #[test]
 fn ref_record_comparison() {
     use bstr::BString;
-    use gix_hash::ObjectId;
 
     // Two records with same name but different value types
     let rec_val1 = RefRecord {
         name: BString::from("refs/heads/master"),
         update_index: 0,
-        value: gix_reftable::RefRecordValue::Val1 {
-            target: ObjectId::null(gix_hash::Kind::Sha1),
-        },
+        value: gix_reftable::RefRecordValue::Val1 { target: null_oid() },
     };
     let rec_deletion = RefRecord {
         name: BString::from("refs/heads/master"),
@@ -364,28 +365,21 @@ fn ref_record_comparison() {
 #[test]
 fn ref_record_compare_name() {
     use bstr::BString;
-    use gix_hash::ObjectId;
 
     let rec_a = RefRecord {
         name: BString::from("refs/heads/a"),
         update_index: 0,
-        value: gix_reftable::RefRecordValue::Val1 {
-            target: ObjectId::null(gix_hash::Kind::Sha1),
-        },
+        value: gix_reftable::RefRecordValue::Val1 { target: null_oid() },
     };
     let rec_b = RefRecord {
         name: BString::from("refs/heads/b"),
         update_index: 0,
-        value: gix_reftable::RefRecordValue::Val1 {
-            target: ObjectId::null(gix_hash::Kind::Sha1),
-        },
+        value: gix_reftable::RefRecordValue::Val1 { target: null_oid() },
     };
     let rec_a2 = RefRecord {
         name: BString::from("refs/heads/a"),
         update_index: 0,
-        value: gix_reftable::RefRecordValue::Val1 {
-            target: ObjectId::null(gix_hash::Kind::Sha1),
-        },
+        value: gix_reftable::RefRecordValue::Val1 { target: null_oid() },
     };
 
     assert!(rec_a.name() < rec_b.name());
@@ -411,8 +405,8 @@ fn log_record_comparison() {
     let log1 = LogRecord {
         ref_name: "refs/heads/master".into(),
         update_index: 42,
-        old_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
-        new_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+        old_id: null_oid(),
+        new_id: null_oid(),
         name: "".into(),
         email: "".into(),
         time: 0,
@@ -466,8 +460,8 @@ fn log_record_compare_key() {
     let base = LogRecord {
         ref_name: "".into(),
         update_index: 0,
-        old_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
-        new_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+        old_id: null_oid(),
+        new_id: null_oid(),
         name: "".into(),
         email: "".into(),
         time: 0,
@@ -562,8 +556,8 @@ fn log_record_roundtrip_construction() {
     let log_deletion = LogRecord {
         ref_name: "refs/heads/master".into(),
         update_index: 22,
-        old_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
-        new_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+        old_id: null_oid(),
+        new_id: null_oid(),
         name: "".into(),
         email: "".into(),
         time: 0,
@@ -733,9 +727,8 @@ fn varint_truncated_continuation() {
 #[test]
 fn ref_record_update_index_all_variants() {
     use bstr::BString;
-    use gix_hash::ObjectId;
 
-    let null = ObjectId::null(gix_hash::Kind::Sha1);
+    let null = null_oid();
 
     let deletion = RefRecord {
         name: BString::from("refs/heads/old"),
@@ -777,9 +770,8 @@ fn ref_record_update_index_all_variants() {
 #[test]
 fn ref_record_is_deletion_check() {
     use bstr::BString;
-    use gix_hash::ObjectId;
 
-    let null = ObjectId::null(gix_hash::Kind::Sha1);
+    let null = null_oid();
 
     let deletion = RefRecord {
         name: BString::from("refs/heads/old"),
@@ -1014,8 +1006,8 @@ fn log_record_equality() {
     let log1 = LogRecord {
         ref_name: "refs/heads/master".into(),
         update_index: 42,
-        old_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
-        new_id: gix_hash::ObjectId::null(gix_hash::Kind::Sha1),
+        old_id: null_oid(),
+        new_id: null_oid(),
         name: "author".into(),
         email: "author@example.com".into(),
         time: 1577123507,
