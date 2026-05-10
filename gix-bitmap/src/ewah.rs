@@ -36,6 +36,45 @@ pub fn decode(data: &[u8]) -> Result<(Vec, &[u8])> {
     ))
 }
 
+fn validate_words(words: &[u64], rlw: u32) -> Result<(), decode::Error> {
+    if words.is_empty() {
+        return if rlw == 0 {
+            Ok(())
+        } else {
+            Err(validation_error(
+                "EWAH bitmap running length word offset outside word buffer",
+            ))
+        };
+    }
+    let rlw = usize::try_from(rlw).expect("u32 fits usize");
+    if rlw >= words.len() {
+        return Err(validation_error(
+            "EWAH bitmap running length word offset outside word buffer",
+        ));
+    }
+
+    let mut pos = 0usize;
+    while pos < words.len() {
+        let literal_words = usize::try_from(rlw_literal_words(&words[pos]))
+            .map_err(|_| validation_error("EWAH bitmap literal word count does not fit usize"))?;
+        pos = pos
+            .checked_add(1)
+            .and_then(|pos| pos.checked_add(literal_words))
+            .ok_or_else(|| validation_error("EWAH bitmap literal word count overflows word buffer"))?;
+        if pos > words.len() {
+            return Err(validation_error("EWAH bitmap literal word count exceeds word buffer"));
+        }
+    }
+
+    Ok(())
+}
+
+fn validation_error(message: &'static str) -> decode::Error {
+    use gix_error::ErrorExt;
+
+    gix_error::ValidationError::from(message).raise()
+}
+
 mod write {
     use super::Vec;
 
@@ -178,17 +217,18 @@ mod access {
     }
 
     #[inline]
-    fn rlw_literal_words(w: &u64) -> u64 {
-        w >> (1 + RLW_RUNNING_BITS)
-    }
-
-    #[inline]
     fn rlw_runbit_is_set(w: &u64) -> bool {
         w & 1 == 1
     }
 
-    const RLW_RUNNING_BITS: u64 = 4 * 8;
     const RLW_LARGEST_RUNNING_COUNT: u64 = (1 << RLW_RUNNING_BITS) - 1;
+}
+
+const RLW_RUNNING_BITS: u64 = 4 * 8;
+
+#[inline]
+fn rlw_literal_words(w: &u64) -> u64 {
+    w >> (1 + RLW_RUNNING_BITS)
 }
 
 /// A growable collection of u64 that are seen as stream of individual bits.
@@ -255,6 +295,39 @@ mod tests {
         let mut out = StdVec::new();
         bitmap.write_to(&mut out).unwrap();
         assert_eq!(out, input[..input.len() - rest.len()]);
+    }
+
+    #[test]
+    fn decode_rejects_literal_count_past_word_buffer() {
+        let input = [
+            0x00, 0x00, 0x00, 0x80, // bit count
+            0x00, 0x00, 0x00, 0x01, // word count
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, // RLW declares one literal word
+            0x00, 0x00, 0x00, 0x00, // RLW offset
+        ];
+
+        let err = decode(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("literal word count exceeds word buffer"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn decode_rejects_rlw_offset_outside_word_buffer() {
+        let input = [
+            0x00, 0x00, 0x00, 0x00, // bit count
+            0x00, 0x00, 0x00, 0x01, // word count
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // RLW
+            0x00, 0x00, 0x00, 0x01, // invalid RLW offset
+        ];
+
+        let err = decode(&input).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("running length word offset outside word buffer"),
+            "{err}"
+        );
     }
 
     #[test]
