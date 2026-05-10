@@ -118,6 +118,8 @@ pub(crate) mod identity;
 mod impls;
 #[cfg(feature = "index")]
 mod index;
+#[cfg(feature = "dirwalk")]
+mod index_add;
 pub(crate) mod init;
 mod location;
 #[cfg(feature = "mailmap")]

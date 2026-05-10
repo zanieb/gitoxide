@@ -1302,6 +1302,15 @@ pub mod index {
 
     #[derive(Debug, clap::Subcommand)]
     pub enum Subcommands {
+        /// Add files from the worktree to the index.
+        Add {
+            /// Add ignored files as well.
+            #[clap(long, short = 'f')]
+            force_ignored: bool,
+            /// The git path specifications to add.
+            #[clap(value_parser = CheckPathSpec)]
+            pathspec: Vec<BString>,
+        },
         /// Print all entries to standard output.
         Entries {
             /// How to output index entries.
