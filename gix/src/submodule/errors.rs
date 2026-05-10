@@ -272,6 +272,13 @@ pub mod update {
             /// The failing process status.
             status: std::process::ExitStatus,
         },
+        #[error("Failed to update nested submodule '{name}'")]
+        RecursiveUpdate {
+            /// The nested submodule name.
+            name: crate::bstr::BString,
+            /// The nested update error.
+            source: Box<Error>,
+        },
         #[error(
             "The submodule update strategy '{strategy:?}' requires the 'revision' feature to compare commit ancestry"
         )]

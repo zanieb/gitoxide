@@ -291,10 +291,11 @@ impl Submodule<'_> {
                     // Without --init, only update active (initialized) ones.
                     let should_update = options.init || sm.is_active().unwrap_or(false);
                     if should_update {
-                        // Best-effort recursive update; continue on error for individual submodules.
-                        // This matches git which prints "Failed to recurse into submodule path"
-                        // but continues with siblings.
-                        let _ = sm.update_submodule(gix_features::progress::Discard, should_interrupt, &sub_opts);
+                        sm.update_submodule(gix_features::progress::Discard, should_interrupt, &sub_opts)
+                            .map_err(|source| super::update::Error::RecursiveUpdate {
+                                name: sm.name().to_owned(),
+                                source: Box::new(source),
+                            })?;
                     }
                 }
             }
