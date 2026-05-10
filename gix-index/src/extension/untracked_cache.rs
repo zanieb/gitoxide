@@ -220,6 +220,7 @@ pub fn write_to(
     )?;
 
     if let Some(_root) = untracked.directories.first() {
+        validate_directory_graph(&untracked.directories)?;
         write_directory_block(&untracked.directories, 0, &mut data)?;
 
         let num_directories = untracked.directories.len();
@@ -267,6 +268,49 @@ pub fn write_to(
     out.write_all(&SIGNATURE)?;
     out.write_all(&(u32::try_from(data.len()).expect("less than 4GB untracked-cache extension")).to_be_bytes())?;
     out.write_all(&data)
+}
+
+fn validate_directory_graph(directories: &[Directory]) -> Result<(), std::io::Error> {
+    fn invalid(message: &'static str) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, message)
+    }
+
+    fn visit(
+        index: usize,
+        directories: &[Directory],
+        active: &mut [bool],
+        visited: &mut [bool],
+    ) -> Result<(), std::io::Error> {
+        let Some(directory) = directories.get(index) else {
+            return Err(invalid("untracked-cache directory index is out of bounds"));
+        };
+        if active[index] {
+            return Err(invalid("untracked-cache directory graph contains a cycle"));
+        }
+        if visited[index] {
+            return Err(invalid(
+                "untracked-cache directory graph references a directory more than once",
+            ));
+        }
+
+        active[index] = true;
+        for &subdir_index in &directory.sub_directories {
+            visit(subdir_index, directories, active, visited)?;
+        }
+        active[index] = false;
+        visited[index] = true;
+        Ok(())
+    }
+
+    let mut active = vec![false; directories.len()];
+    let mut visited = vec![false; directories.len()];
+    visit(0, directories, &mut active, &mut visited)?;
+    if visited.iter().any(|seen| !seen) {
+        return Err(invalid(
+            "untracked-cache directory graph contains unreachable directories",
+        ));
+    }
+    Ok(())
 }
 
 fn write_oid_stat(
@@ -374,9 +418,11 @@ fn write_bitmap(
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, write_bitmap, write_oid_stat, OidStat};
+    use super::{decode, write_bitmap, write_oid_stat, write_to, Directory, OidStat};
     use crate::entry;
+    use crate::extension::UntrackedCache;
     use crate::util::write_var_int;
+    use bstr::BString;
     use gix_hash::ObjectId;
 
     #[test]
@@ -442,5 +488,44 @@ mod tests {
         let err = write_oid_stat(Some(&stat), gix_hash::Kind::Sha256, &mut out).unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn write_to_rejects_malformed_directory_graphs() {
+        for directories in [
+            vec![directory([1])],
+            vec![directory([0])],
+            vec![directory([]), directory([])],
+            vec![directory([1, 1]), directory([])],
+        ] {
+            let cache = cache(directories);
+            let mut out = Vec::new();
+
+            let err = write_to(&cache, gix_hash::Kind::Sha1, &mut out).unwrap_err();
+
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        }
+    }
+
+    fn cache(directories: Vec<Directory>) -> UntrackedCache {
+        UntrackedCache {
+            identifier: BString::from("test"),
+            info_exclude: None,
+            excludes_file: None,
+            exclude_filename_per_dir: BString::from(".gitignore"),
+            dir_flags: 0,
+            directories,
+        }
+    }
+
+    fn directory<const N: usize>(sub_directories: [usize; N]) -> Directory {
+        Directory {
+            name: BString::new(Vec::new()),
+            untracked_entries: Vec::new(),
+            sub_directories: sub_directories.into(),
+            stat: None,
+            exclude_file_oid: None,
+            check_only: false,
+        }
     }
 }
