@@ -52,7 +52,7 @@ pub(super) mod function {
     use std::borrow::Cow;
 
     use crate::{
-        bstr::{ByteSlice, ByteVec},
+        bstr::{BString, ByteSlice, ByteVec},
         config::{
             cache::util::ApplyLeniency,
             credential_helpers::Error,
@@ -124,7 +124,7 @@ pub(super) mod function {
                         };
                         let path = (!(is_http && pattern.path_is_root())).then_some(&pattern.path);
 
-                        if path.is_some_and(|path| path != &url.path) {
+                        if path.is_some_and(|path| !path_matches(path, &url.path)) {
                             return None;
                         }
                         if pattern.user().is_some() && pattern.user() != url.user() {
@@ -236,6 +236,12 @@ pub(super) mod function {
             (None, None) => true,
             (Some(_), None) | (None, Some(_)) => false,
         }
+    }
+
+    fn path_matches(pattern: &BString, path: &BString) -> bool {
+        let pattern = pattern.as_slice();
+        let path = path.as_slice();
+        path == pattern || path.starts_with(pattern) && path.get(pattern.len()) == Some(&b'/')
     }
 
     fn normalize(url: &mut gix_url::Url) {

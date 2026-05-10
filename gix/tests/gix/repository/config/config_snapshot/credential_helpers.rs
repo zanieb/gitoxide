@@ -1,3 +1,4 @@
+use gix_object::bstr::BString;
 use gix_testtools::Env;
 
 use crate::remote;
@@ -109,6 +110,23 @@ mod baseline {
         }
     }
 
+    pub fn helpers_for(url: &str) -> Vec<BString> {
+        let repo = remote::repo("credential-helpers");
+        let (cascade, _action, _prompt_options) = repo
+            .config_snapshot()
+            .credential_helpers(gix::url::parse(url.into()).expect("valid input URL"))
+            .unwrap();
+
+        cascade
+            .programs
+            .iter()
+            .map(|p| match &p.kind {
+                gix_credentials::program::Kind::ExternalName { name_and_args } => name_and_args.to_owned(),
+                _ => panic!("need name helper"),
+            })
+            .collect()
+    }
+
     pub fn agrees_with(url: &str) {
         agrees_with_inner(url, false, false);
     }
@@ -140,6 +158,22 @@ fn https_urls_match_the_host_without_path_as_well() {
     baseline::agrees_with("https://example.com:8080/path");
     baseline::agrees_with("https://example.com:8080/PATH");
     baseline::agrees_with("https://example.com:8080/path/");
+}
+
+#[test]
+fn credential_paths_match_prefixes_on_component_boundaries() {
+    assert_eq!(
+        baseline::helpers_for("https://example.com:8080/path/sub"),
+        [
+            BString::from("global"),
+            BString::from("https://example.com:8080"),
+            BString::from("https://example.com:8080/path"),
+        ]
+    );
+    assert_eq!(
+        baseline::helpers_for("https://example.com:8080/pathology"),
+        [BString::from("global"), BString::from("https://example.com:8080"),]
+    );
 }
 
 #[test]
