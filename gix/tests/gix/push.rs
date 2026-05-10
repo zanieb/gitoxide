@@ -299,6 +299,33 @@ mod blocking_io {
     }
 
     #[test]
+    fn push_delete_missing_remote_ref_is_successful() -> gix_testtools::Result {
+        let dir = gix_testtools::scripted_fixture_writable("make_push_repos.sh")?;
+        let working_path = dir.path().join("working");
+        let repo = gix::open_opts(&working_path, crate::restricted())?;
+
+        let empty_bare = dir.path().join("empty.git");
+        let status = Command::new("git")
+            .args(["init", "--bare", empty_bare.to_str().unwrap()])
+            .output()
+            .expect("git init --bare");
+        assert!(status.status.success());
+
+        let bare_url = format!("file://{}", empty_bare.display());
+        let outcome = do_push(&repo, &bare_url, &[":refs/heads/missing"])?;
+
+        assert!(outcome.unpack_ok, "client-side no-op deletion should succeed");
+        assert_eq!(outcome.updates.len(), 1);
+        assert!(matches!(
+            &outcome.updates[0],
+            gix::remote::push::RefUpdateStatus::Ok { ref_name }
+                if ref_name.as_ref() as &[u8] == b"refs/heads/missing"
+        ));
+        verify_ref_absent(&empty_bare, "refs/heads/missing");
+        Ok(())
+    }
+
+    #[test]
     fn push_force_non_fast_forward() -> gix_testtools::Result {
         // Mirrors: 'push --force with matching heads'
         // Push main, then create a divergent commit and force-push it.
