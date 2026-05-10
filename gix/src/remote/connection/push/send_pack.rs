@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicBool;
 
-use crate::bstr::{BString, ByteSlice};
+use crate::bstr::{BString, ByteSlice, ByteVec};
 use gix_object::Exists as _;
 use gix_object::Write as _;
 use gix_refspec::match_group::SourceRef;
@@ -208,6 +208,11 @@ impl LocalRef {
     }
 }
 
+struct SupplementalUpdate {
+    dst: BString,
+    new_id: gix_hash::ObjectId,
+}
+
 fn build_push_commands(
     ref_map: &gix_protocol::fetch::RefMap,
     repo: &crate::Repository,
@@ -256,8 +261,10 @@ fn build_push_commands(
         ref_map.remote_refs.iter().map(|r| remote_ref_to_item(r, &null)),
     );
 
+    let mut supplemental_updates = Vec::new();
     for (spec_index, spec) in specs.iter().enumerate() {
-        if let gix_refspec::Instruction::Push(gix_refspec::instruction::Push::Matching { src, .. }) = spec.instruction()
+        if let gix_refspec::Instruction::Push(gix_refspec::instruction::Push::Matching { src, dst, .. }) =
+            spec.instruction()
         {
             if matched.updates.iter().any(|update| update.spec_index == spec_index) {
                 continue;
@@ -265,22 +272,18 @@ fn build_push_commands(
             if gix_hash::ObjectId::from_hex(src.as_bytes()).is_ok() {
                 continue;
             }
-            if repo
-                .try_find_reference(src)
-                .map_err(|e| Error::FindLocalRef {
-                    name: src.to_owned(),
-                    source: Box::new(e),
-                })?
-                .is_none()
-            {
-                return Err(Error::FindLocalRef {
-                    name: src.to_owned(),
-                    source: Box::new(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("reference {src} not found in local repository"),
-                    )),
-                });
+            if matches!(repo.try_find_reference(src), Ok(Some(_))) {
+                continue;
             }
+
+            let new_id = repo.rev_parse_single(src).map_err(|e| Error::FindLocalRef {
+                name: src.to_owned(),
+                source: Box::new(e),
+            })?;
+            supplemental_updates.push(SupplementalUpdate {
+                dst: expand_push_destination(dst),
+                new_id: new_id.detach(),
+            });
         }
     }
 
@@ -336,6 +339,35 @@ fn build_push_commands(
             ref_name: update.dst,
             old_id: remote_old_id,
             new_id,
+        });
+    }
+
+    for update in supplemental_updates {
+        let remote_old_id = remote_ref_by_name
+            .get(update.dst.as_bytes())
+            .and_then(|oid| *oid)
+            .unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
+
+        if remote_old_id == update.new_id {
+            continue;
+        }
+
+        if let Some(expected_ids) = expected_old_ids {
+            if let Some(expected_oid) = expected_ids.get(&update.dst) {
+                if remote_old_id != *expected_oid {
+                    lease_rejected.push(gix_protocol::push::response::StatusV1::Ng {
+                        ref_name: update.dst,
+                        reason: "stale info".into(),
+                    });
+                    continue;
+                }
+            }
+        }
+
+        commands.push(PushCommand {
+            ref_name: update.dst,
+            old_id: remote_old_id,
+            new_id: update.new_id,
         });
     }
 
@@ -399,6 +431,19 @@ fn local_refs_for_push(repo: &crate::Repository) -> Result<Vec<LocalRef>, Error>
         });
     }
     Ok(out)
+}
+
+fn expand_push_destination(dst: &crate::bstr::BStr) -> BString {
+    if dst.starts_with(b"refs/") || dst.as_bytes() == b"HEAD" {
+        return dst.to_owned();
+    }
+
+    let mut out = BString::from("refs/");
+    if !(dst.starts_with(b"tags/") || dst.starts_with(b"remotes/")) {
+        out.push_str("heads/");
+    }
+    out.push_str(dst);
+    out
 }
 
 fn remote_ref_to_item<'a>(
