@@ -150,6 +150,74 @@ mod cherry_pick {
     }
 
     #[test]
+    fn redundant_cherry_pick_errors_and_leaves_state() -> crate::Result {
+        let (repo, _tmp) = repo_cherry_pick()?;
+        let git_dir = repo.git_dir().to_owned();
+        let feature_tip = branch_tip(&repo, "feature");
+
+        repo.cherry_pick(feature_tip, Options::default())?;
+        let head_after_first_pick = repo.head_id()?.detach();
+
+        let err = repo
+            .cherry_pick(feature_tip, Options::default())
+            .expect_err("redundant cherry-pick should not create an empty commit");
+        match err {
+            gix::repository::cherry_pick::Error::Empty { id } => {
+                assert_eq!(id, feature_tip);
+            }
+            other => panic!("expected Empty error, got {other:?}"),
+        }
+        assert_eq!(
+            repo.head_id()?.detach(),
+            head_after_first_pick,
+            "empty cherry-pick should leave HEAD unchanged"
+        );
+        assert!(
+            git_dir.join("CHERRY_PICK_HEAD").exists(),
+            "empty cherry-pick should leave state for skip/continue handling"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn redundant_cherry_pick_no_commit_is_noop_without_state() -> crate::Result {
+        let (repo, _tmp) = repo_cherry_pick()?;
+        let git_dir = repo.git_dir().to_owned();
+        let feature_tip = branch_tip(&repo, "feature");
+
+        repo.cherry_pick(feature_tip, Options::default())?;
+        let head_after_first_pick = repo.head_id()?.detach();
+
+        let outcome = repo.cherry_pick(
+            feature_tip,
+            Options {
+                no_commit: true,
+                ..Default::default()
+            },
+        )?;
+        assert!(
+            outcome.commit_id.is_none(),
+            "empty no-commit cherry-pick should not create a commit"
+        );
+        assert_eq!(
+            repo.head_id()?.detach(),
+            head_after_first_pick,
+            "empty no-commit cherry-pick should leave HEAD unchanged"
+        );
+        assert!(
+            !git_dir.join("CHERRY_PICK_HEAD").exists(),
+            "empty no-commit cherry-pick should not leave operation state"
+        );
+        assert!(
+            !git_dir.join("MERGE_MSG").exists(),
+            "empty no-commit cherry-pick should clean its temporary message"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn cherry_pick_preserves_original_author() -> crate::Result {
         let (repo, _tmp) = repo_cherry_pick()?;
 
@@ -241,6 +309,40 @@ mod cherry_pick {
         assert!(
             !workdir.join("new_file.txt").exists(),
             "new_file.txt should be removed even with no_commit"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn redundant_revert_errors_and_leaves_state() -> crate::Result {
+        let (repo, _tmp) = repo_cherry_pick()?;
+        let git_dir = repo.git_dir().to_owned();
+
+        let feature_tip = branch_tip(&repo, "feature");
+        let pick_outcome = repo.cherry_pick(feature_tip, Options::default())?;
+        let picked_commit_id = pick_outcome.commit_id.unwrap();
+
+        repo.revert(picked_commit_id, Options::default())?;
+        let head_after_first_revert = repo.head_id()?.detach();
+
+        let err = repo
+            .revert(picked_commit_id, Options::default())
+            .expect_err("redundant revert should not create an empty commit");
+        match err {
+            gix::repository::cherry_pick::Error::Empty { id } => {
+                assert_eq!(id, picked_commit_id);
+            }
+            other => panic!("expected Empty error, got {other:?}"),
+        }
+        assert_eq!(
+            repo.head_id()?.detach(),
+            head_after_first_revert,
+            "empty revert should leave HEAD unchanged"
+        );
+        assert!(
+            git_dir.join("REVERT_HEAD").exists(),
+            "empty revert should leave state for skip/continue handling"
         );
 
         Ok(())
