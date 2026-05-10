@@ -97,32 +97,8 @@ impl crate::Repository {
         let (header, mut pack_reader) = header::from_path(path, self.object_hash())?;
         header.verify_prerequisites(|id| self.has_object(id))?;
 
-        let mut write_pack = gix_pack::Bundle::write_to_directory(
-            &mut pack_reader,
-            Some(&self.objects.store_ref().path().join("pack")),
-            progress,
-            should_interrupt,
-            Some(Box::new({
-                let repo = self.clone();
-                repo.objects
-            })),
-            gix_pack::bundle::write::Options {
-                object_hash: self.object_hash(),
-                ..Default::default()
-            },
-        )?;
-
         let mut skipped_refs = Vec::new();
-        let mut ref_edits = Vec::new();
-        for bundle_ref in &header.refs {
-            if !self.has_object(bundle_ref.id) {
-                return Err(Error::MissingRefObject {
-                    name: bundle_ref.name.clone(),
-                    id: bundle_ref.id,
-                });
-            }
-        }
-
+        let mut ref_targets = Vec::new();
         for bundle_ref in &header.refs {
             let name =
                 gix_ref::FullName::try_from(bundle_ref.name.clone()).map_err(|source| Error::InvalidRefName {
@@ -138,9 +114,37 @@ impl crate::Repository {
                 )
             ) {
                 skipped_refs.push(bundle_ref.clone());
-                continue;
+            } else {
+                ref_targets.push((name, bundle_ref.id));
             }
+        }
 
+        let mut write_pack = gix_pack::Bundle::write_to_directory(
+            &mut pack_reader,
+            Some(&self.objects.store_ref().path().join("pack")),
+            progress,
+            should_interrupt,
+            Some(Box::new({
+                let repo = self.clone();
+                repo.objects
+            })),
+            gix_pack::bundle::write::Options {
+                object_hash: self.object_hash(),
+                ..Default::default()
+            },
+        )?;
+
+        for bundle_ref in &header.refs {
+            if !self.has_object(bundle_ref.id) {
+                return Err(Error::MissingRefObject {
+                    name: bundle_ref.name.clone(),
+                    id: bundle_ref.id,
+                });
+            }
+        }
+
+        let mut ref_edits = Vec::new();
+        for (name, id) in ref_targets {
             ref_edits.push(RefEdit {
                 change: Change::Update {
                     log: LogChange {
@@ -149,7 +153,7 @@ impl crate::Repository {
                         message: "bundle: unbundle".into(),
                     },
                     expected: PreviousValue::Any,
-                    new: gix_ref::Target::Object(bundle_ref.id),
+                    new: gix_ref::Target::Object(id),
                 },
                 name,
                 deref: false,

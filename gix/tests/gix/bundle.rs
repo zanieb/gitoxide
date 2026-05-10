@@ -171,3 +171,56 @@ fn unbundle_rejects_ref_targets_missing_from_pack() -> crate::Result {
 
     Ok(())
 }
+
+#[test]
+fn unbundle_rejects_invalid_ref_names_before_importing_pack() -> crate::Result {
+    let tmp = gix_testtools::tempfile::tempdir()?;
+    let source = tmp.path().join("source");
+    std::fs::create_dir(&source)?;
+
+    git_output(&source, &["init", "-q", "-b", "main"]);
+    git_output(&source, &["config", "user.name", "Bundle Test"]);
+    git_output(&source, &["config", "user.email", "bundle@example.com"]);
+    std::fs::write(source.join("file"), "content\n")?;
+    git_output(&source, &["add", "file"]);
+    git_output(&source, &["commit", "-q", "-m", "initial"]);
+
+    let bundle_path = tmp.path().join("invalid-ref.bundle");
+    git_bundle_create_main(&source, &bundle_path);
+
+    let mut bundle = std::fs::read(&bundle_path)?;
+    let header_end = bundle
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .expect("bundle has a header terminator");
+    let valid_ref = b"refs/heads/main";
+    let invalid_ref = b"refs/heads/.bad";
+    assert_eq!(valid_ref.len(), invalid_ref.len());
+    let ref_pos = bundle[..header_end]
+        .windows(valid_ref.len())
+        .position(|window| window == valid_ref)
+        .expect("bundle header contains main ref");
+    bundle[ref_pos..ref_pos + valid_ref.len()].copy_from_slice(invalid_ref);
+    std::fs::write(&bundle_path, bundle)?;
+
+    let target_path = tmp.path().join("target.git");
+    let target = gix::init_bare(&target_path)?;
+    let err = target
+        .bundle_unbundle(&bundle_path)
+        .expect_err("invalid bundle refs must be rejected");
+
+    match err {
+        gix::bundle::Error::InvalidRefName { name, .. } => {
+            assert_eq!(name.as_bstr(), "refs/heads/.bad");
+        }
+        other => panic!("expected InvalidRefName, got {other:?}"),
+    }
+    assert!(
+        std::fs::read_dir(target.git_dir().join("objects/pack"))?
+            .next()
+            .is_none(),
+        "invalid ref names must be rejected before importing the pack"
+    );
+
+    Ok(())
+}
