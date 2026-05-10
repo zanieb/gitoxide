@@ -122,9 +122,9 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
              - [x] rename tracking
              - [x] submodule status (recursive)
         * [x] diffs between modified blobs with various algorithms
-        * [ ] tree with index (via index-from-tree and index)
-            - [ ] rename tracking
-            - [ ] submodule status (recursive)
+        * [x] tree with index (via index-from-tree and index)
+            - [x] rename tracking
+            - [x] submodule status (recursive)
     * [x] initialize
         * [x] Proper configuration depending on platform (e.g. ignorecase, filemode, …)
     * **Id**
