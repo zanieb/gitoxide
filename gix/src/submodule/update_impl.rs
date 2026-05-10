@@ -1,7 +1,6 @@
 //! Implementation of `Submodule::update_submodule()`, modelled after git's `update_submodule()` and
 //! `run_update_procedure()` in `builtin/submodule--helper.c`.
 
-use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 
 use crate::{bstr::ByteSlice, Repository, Submodule};
@@ -656,22 +655,13 @@ fn checkout_commit_tree(
 
     // Read the old index from disk (if it exists) so we can detect removed files.
     // For freshly cloned repos the index won't exist yet, which is fine — we'll get an empty set.
-    let old_entry_paths: HashSet<crate::bstr::BString> = gix_index::File::at(
+    let old_index = gix_index::File::at(
         repo.index_path(),
         repo.object_hash(),
         true, // skip_hash for performance
         Default::default(),
     )
-    .ok()
-    .map(|old_idx| {
-        let backing = old_idx.path_backing();
-        old_idx
-            .entries()
-            .iter()
-            .map(|e| e.path_in(backing).to_owned())
-            .collect()
-    })
-    .unwrap_or_default();
+    .ok();
 
     // Build index from the target tree
     let tree_id = repo.find_object(commit_id)?.peel_to_tree()?.id;
@@ -703,27 +693,8 @@ fn checkout_commit_tree(
         opts,
     )?;
 
-    // Delete files that existed in the old index but are absent from the new tree.
-    if !old_entry_paths.is_empty() {
-        let new_entry_paths: HashSet<crate::bstr::BString> = {
-            let backing = index.path_backing();
-            index.entries().iter().map(|e| e.path_in(backing).to_owned()).collect()
-        };
-        for removed_path in old_entry_paths.difference(&new_entry_paths) {
-            let full_path = workdir.join(gix_path::from_bstr(removed_path));
-            let _ = std::fs::remove_file(&full_path);
-            // Try to remove empty parent directories up to the workdir root.
-            let mut parent = full_path.parent();
-            while let Some(dir) = parent {
-                if dir == workdir {
-                    break;
-                }
-                if std::fs::remove_dir(dir).is_err() {
-                    break;
-                }
-                parent = dir.parent();
-            }
-        }
+    if let Some(old_index) = &old_index {
+        Repository::remove_worktree_files_not_in_index(old_index, &index, workdir, true);
     }
 
     index.write(Default::default())?;
