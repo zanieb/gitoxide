@@ -44,6 +44,24 @@ fn remote_name() -> crate::Result {
     Ok(())
 }
 
+#[test]
+fn remote_for_remote_tracking_branch() -> crate::Result {
+    let repo = crate::named_subrepo_opts(
+        "make_remote_config_repos.sh",
+        "multiple-remotes",
+        gix::open::Options::isolated(),
+    )?;
+
+    let remote_tracking = repo.find_reference("refs/remotes/origin/main")?;
+    let remote = remote_tracking
+        .remote(Direction::Fetch)
+        .transpose()?
+        .expect("remote tracking branches know their remote");
+
+    assert_eq!(remote.name().expect("named remote").as_bstr(), "origin");
+    Ok(())
+}
+
 mod find {
     use gix_ref::{FullName, FullNameRef, Target, TargetRef};
 

@@ -49,7 +49,21 @@ impl<'repo> Reference<'repo> {
         &self,
         direction: remote::Direction,
     ) -> Option<Result<crate::Remote<'repo>, remote::find::existing::Error>> {
-        self.repo.branch_remote(self.name().shorten(), direction)
+        let name = self.remote_name(direction)?;
+        self.repo
+            .try_find_remote(name.as_bstr())
+            .map(|res| res.map_err(Into::into))
+            .or_else(|| match name {
+                remote::Name::Url(url) => gix_url::parse(url.as_ref())
+                    .map_err(Into::into)
+                    .and_then(|url| {
+                        self.repo
+                            .remote_at(url)
+                            .map_err(|err| remote::find::existing::Error::Find(remote::find::Error::Init(err)))
+                    })
+                    .into(),
+                remote::Name::Symbol(_) => None,
+            })
     }
 
     /// Return the name of this reference on the remote side.
