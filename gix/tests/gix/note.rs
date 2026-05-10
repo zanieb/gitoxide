@@ -348,6 +348,81 @@ mod note {
         Ok(())
     }
 
+    // Matching git notes add -f -F /dev/null: removing a note that isn't there is a no-op.
+    #[test]
+    fn note_add_empty_message_missing_note_is_noop() -> crate::Result {
+        let (repo, _tmp) = repo_rw_notes()?;
+        let [_a, _b, commit_c] = commit_ids(&repo)?;
+
+        assert!(repo.note_read(&commit_c, None)?.is_none());
+        let before_ref = repo.find_reference("refs/notes/commits")?.id().detach();
+        let before_entries = repo.notes_list(None)?;
+
+        let result = repo.note_add(commit_c, b"", None, true)?;
+
+        assert!(result.is_none(), "no notes commit should be created");
+        assert_eq!(
+            repo.find_reference("refs/notes/commits")?.id().detach(),
+            before_ref,
+            "notes ref should not move"
+        );
+        assert_eq!(repo.notes_list(None)?, before_entries, "notes tree should be unchanged");
+        assert!(repo.note_read(&commit_c, None)?.is_none());
+
+        Ok(())
+    }
+
+    // The no-op removal case should not create a brand-new notes ref.
+    #[test]
+    fn note_add_empty_message_missing_note_in_new_ref_does_not_create_ref() -> crate::Result {
+        let (repo, _tmp) = repo_rw_notes()?;
+        let [commit_a, _b, _c] = commit_ids(&repo)?;
+        let new_ref = "refs/notes/no-note-to-remove";
+
+        assert!(repo.notes_list(Some(new_ref)).is_err(), "new ref should not exist");
+
+        let result = repo.note_add(commit_a, b"", Some(new_ref), true)?;
+
+        assert!(result.is_none(), "no notes commit should be created");
+        assert!(
+            repo.notes_list(Some(new_ref)).is_err(),
+            "no-op removal should leave the new ref absent"
+        );
+
+        Ok(())
+    }
+
+    // Existing but malformed notes refs should be reported, not treated like empty notes refs.
+    #[test]
+    fn note_add_and_remove_propagate_invalid_notes_ref() -> crate::Result {
+        let (repo, _tmp) = repo_rw_notes()?;
+        let [commit_a, _b, _c] = commit_ids(&repo)?;
+        let broken_ref = "refs/notes/broken";
+        let blob_id = repo.write_blob(b"not a notes commit")?.detach();
+
+        repo.reference(
+            broken_ref,
+            blob_id,
+            gix_ref::transaction::PreviousValue::MustNotExist,
+            "create broken notes ref",
+        )?;
+
+        let add_error = repo
+            .note_add(commit_a, b"new note\n", Some(broken_ref), true)
+            .unwrap_err();
+        assert!(matches!(add_error, gix::repository::note::Error::PeelToCommit(_)));
+
+        let remove_error = repo.note_remove(&commit_a, Some(broken_ref)).unwrap_err();
+        assert!(matches!(remove_error, gix::repository::note::Error::PeelToCommit(_)));
+        assert_eq!(
+            repo.find_reference(broken_ref)?.id().detach(),
+            blob_id,
+            "broken notes ref should not be replaced"
+        );
+
+        Ok(())
+    }
+
     // t3301: notes tree is stored under refs/notes/commits
     #[test]
     fn note_add_creates_proper_ref_structure() -> crate::Result {
