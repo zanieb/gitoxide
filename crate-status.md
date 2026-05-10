@@ -82,7 +82,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] option to not cross file systems (default)
         * [x] handle git-common-dir
         * [x] support for `GIT_CEILING_DIRECTORIES` environment variable
-        * [ ] handle other non-discovery modes and provide control over environment variable usage required in applications
+        * [x] handle other non-discovery modes and provide control over environment variable usage required in applications
     * [x] rev-parse
        - [x] handle relative paths as relative to working directory
        - [x] handle `upstream` and `push` resolution.
