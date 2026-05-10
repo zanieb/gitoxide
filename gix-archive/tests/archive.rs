@@ -130,7 +130,7 @@ mod from_tree {
                         0,
                         if cfg!(windows) { 420 } else { 493 }
                     ),
-                    ("prefix/extra-dir-empty", EntryType::Directory, 0, 420),
+                    ("prefix/extra-dir-empty", EntryType::Directory, 0, 493),
                     ("prefix/extra-dir/symlink-to-extra", EntryType::Symlink, 0, 420)
                 ]
                 .into_iter()

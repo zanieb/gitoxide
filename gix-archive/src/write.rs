@@ -201,7 +201,7 @@ fn append_zip_entry<W: std::io::Write + std::io::Seek>(
 ) -> Result<(), Error> {
     use bstr::ByteSlice;
     let path = add_prefix(entry.relative_path(), tree_prefix).into_owned();
-    let unix_permissions = if entry.mode.is_executable() { 0o755 } else { 0o644 };
+    let unix_permissions = archive_mode(entry.mode);
     let path = path
         .to_str()
         .or_raise(|| message!("Invalid UTF-8 in entry path: {path:?}"))?;
@@ -297,7 +297,7 @@ fn append_tar_entry<W: std::io::Write>(
     let mut header = tar::Header::new_gnu();
     header.set_mtime(mtime_seconds_since_epoch as u64);
     header.set_entry_type(tar_entry_type(entry.mode));
-    header.set_mode(if entry.mode.is_executable() { 0o755 } else { 0o644 });
+    header.set_mode(archive_mode(entry.mode));
     buf.clear();
     std::io::copy(&mut entry, buf).or_raise(|| message("Could not read entry data"))?;
 
@@ -316,6 +316,16 @@ fn append_tar_entry<W: std::io::Write>(
             .or_raise(|| message("Could not append data to tar archive"))?;
     }
     Ok(())
+}
+
+#[cfg(any(feature = "tar", feature = "tar_gz", feature = "zip"))]
+fn archive_mode(mode: gix_object::tree::EntryMode) -> u32 {
+    use gix_object::tree::EntryKind;
+    match mode.kind() {
+        EntryKind::Tree | EntryKind::Commit => 0o755,
+        EntryKind::BlobExecutable => 0o755,
+        EntryKind::Blob | EntryKind::Link => 0o644,
+    }
 }
 
 #[cfg(any(feature = "tar", feature = "tar_gz"))]
