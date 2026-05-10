@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::{check_common, graph_and_expected, graph_and_expected_named};
 
 #[test]
@@ -84,6 +86,38 @@ fn changed_path_filters_are_available() {
     );
     assert!(!base_filter.bytes().is_empty());
     assert!(!child_filter.bytes().is_empty());
+}
+
+#[test]
+fn changed_path_filter_hash_version_two_is_available() {
+    let (_tmp, path) = changed_path_filter_graph_with_bloom_hash_version(2);
+    let file = gix_commitgraph::File::at(path).expect("version 2 Bloom filters are supported");
+
+    assert_eq!(
+        file.bloom_filter_settings()
+            .expect("Bloom settings present")
+            .hash_version,
+        2
+    );
+    assert_eq!(
+        file.commit_at(gix_commitgraph::file::Position(0))
+            .changed_path_filter()
+            .expect("Bloom filter present")
+            .settings
+            .hash_version,
+        2
+    );
+}
+
+#[test]
+fn changed_path_filter_unknown_hash_version_is_rejected() {
+    let (_tmp, path) = changed_path_filter_graph_with_bloom_hash_version(3);
+    let err = gix_commitgraph::File::at(path).expect_err("unknown Bloom hash versions are rejected");
+
+    assert!(
+        err.to_string().contains("supported versions are 1 and 2"),
+        "error should mention supported Bloom hash versions: {err}"
+    );
 }
 
 #[test]
@@ -187,4 +221,35 @@ fn two_parents() {
     assert_eq!(cg.commit_at(refs["parent1"].pos()).generation(), 1);
     assert_eq!(cg.commit_at(refs["parent2"].pos()).generation(), 1);
     assert_eq!(cg.commit_at(refs["child"].pos()).generation(), 2);
+}
+
+fn changed_path_filter_graph_with_bloom_hash_version(hash_version: u32) -> (gix_testtools::tempfile::TempDir, PathBuf) {
+    let repo_dir = gix_testtools::scripted_fixture_read_only("changed_path_filters.sh")
+        .expect("changed-path fixture can be created");
+    let graph_path = repo_dir.join(".git").join("objects").join("info").join("commit-graph");
+    let mut data = std::fs::read(&graph_path).expect("commit-graph can be read");
+    let bloom_data_offset = chunk_offset(&data, b"BDAT");
+    data[bloom_data_offset..][..4].copy_from_slice(&hash_version.to_be_bytes());
+
+    let tmp = gix_testtools::tempfile::TempDir::new().expect("temporary directory can be created");
+    let path = tmp.path().join("commit-graph");
+    std::fs::write(&path, data).expect("mutated commit-graph can be written");
+    (tmp, path)
+}
+
+fn chunk_offset(data: &[u8], wanted_id: &[u8; 4]) -> usize {
+    let chunk_count = usize::from(data[6]);
+    let table_start = 8;
+    for idx in 0..chunk_count {
+        let entry_start = table_start + idx * 12;
+        let chunk_id = &data[entry_start..][..4];
+        if chunk_id == wanted_id {
+            let offset = u64::from_be_bytes(data[entry_start + 4..][..8].try_into().unwrap());
+            return usize::try_from(offset).expect("chunk offset fits usize");
+        }
+    }
+    panic!(
+        "chunk {} not found",
+        std::str::from_utf8(wanted_id).expect("ASCII chunk id")
+    );
 }
