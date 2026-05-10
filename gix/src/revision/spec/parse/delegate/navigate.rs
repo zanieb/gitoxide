@@ -1,3 +1,5 @@
+use std::{borrow::Cow, path::Component};
+
 use gix_error::{ErrorExt, Exn, OptionExt, ResultExt, bail, message};
 use gix_hash::ObjectId;
 use gix_index::entry::Stage;
@@ -120,6 +122,7 @@ impl delegate::Navigate for Delegate<'_> {
                 }
             }
             PeelTo::Path(path) => {
+                let path = path_relative_to_worktree(path, repo)?;
                 let lookup_path = |obj: &ObjectId| {
                     let tree_id = peel(repo, obj, gix_object::Kind::Tree)?;
                     if path.is_empty() {
@@ -127,12 +130,12 @@ impl delegate::Navigate for Delegate<'_> {
                     }
                     let mut tree = repo.find_object(tree_id).or_erased()?.into_tree();
                     let entry = tree
-                        .peel_to_entry_by_path(gix_path::from_bstr(path))
+                        .peel_to_entry_by_path(gix_path::from_bstr(path.as_ref()))
                         .or_erased()?
                         .ok_or_raise_erased(|| {
                             message!(
                                 "Could not find path {path:?} in tree {tree} of parent object {object}",
-                                path = path,
+                                path = path.as_ref(),
                                 object = obj.attach(repo).shorten_or_id(),
                                 tree = tree_id.attach(repo).shorten_or_id(),
                             )
@@ -144,7 +147,7 @@ impl delegate::Navigate for Delegate<'_> {
                         Ok((replace, mode)) => {
                             if !path.is_empty() {
                                 // Technically this is letting the last one win, but so be it.
-                                self.paths[self.idx] = Some((path.to_owned(), mode));
+                                self.paths[self.idx] = Some((path.as_ref().to_owned(), mode));
                             }
                             replacements.push((*obj, replace));
                         }
@@ -321,8 +324,9 @@ impl delegate::Navigate for Delegate<'_> {
             ),
         };
         self.unset_disambiguate_call();
+        let path = path_relative_to_worktree(path, self.repo)?;
         let index = self.repo.index().or_erased()?;
-        match index.entry_by_path_and_stage(path, stage) {
+        match index.entry_by_path_and_stage(path.as_ref(), stage) {
             Some(entry) => {
                 let objs = self.objs[self.idx].get_or_insert_with(Vec::new);
                 if !objs.contains(&entry.id) {
@@ -330,7 +334,7 @@ impl delegate::Navigate for Delegate<'_> {
                 }
 
                 self.paths[self.idx] = Some((
-                    path.to_owned(),
+                    path.as_ref().to_owned(),
                     entry
                         .mode
                         .to_tree_entry_mode()
@@ -342,13 +346,18 @@ impl delegate::Navigate for Delegate<'_> {
                 let stage_hint = [Stage::Unconflicted, Stage::Base, Stage::Ours]
                     .iter()
                     .filter(|our_stage| **our_stage != stage)
-                    .find_map(|stage| index.entry_index_by_path_and_stage(path, *stage).map(|_| *stage));
+                    .find_map(|stage| {
+                        index
+                            .entry_index_by_path_and_stage(path.as_ref(), *stage)
+                            .map(|_| *stage)
+                    });
                 let exists = self
                     .repo
                     .workdir()
-                    .is_some_and(|root| root.join(gix_path::from_bstr(path)).exists());
+                    .is_some_and(|root| root.join(gix_path::from_bstr(path.as_ref())).exists());
                 Err(message!(
                     "Path {path:?} did not exist in index at stage {desired_stage}{stage_hint}{exists}",
+                    path = path.as_ref(),
                     exists = if exists {
                         ". It exists on disk"
                     } else {
@@ -363,6 +372,44 @@ impl delegate::Navigate for Delegate<'_> {
             }
         }
     }
+}
+
+fn path_relative_to_worktree<'a>(path: &'a BStr, repo: &crate::Repository) -> Result<Cow<'a, BStr>, Exn> {
+    if !is_cwd_relative(path) {
+        return Ok(Cow::Borrowed(path));
+    }
+
+    let Some(workdir) = repo.workdir() else {
+        return Ok(Cow::Borrowed(path));
+    };
+    let Ok(prefix) = repo.current_dir().strip_prefix(workdir) else {
+        return Ok(Cow::Borrowed(path));
+    };
+
+    let path = gix_path::try_from_bstr(path)
+        .map_err(|err| message!("Could not convert path to platform path: {err}").raise_erased())?;
+    let mut buf = prefix.to_owned();
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => {
+                return Err(message!("Path {path:?} must be relative", path = path.as_os_str()).raise_erased());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !buf.pop() {
+                    return Err(message!("Path {path:?} escapes the worktree", path = path.as_os_str()).raise_erased());
+                }
+            }
+            Component::Normal(component) => buf.push(component),
+        }
+    }
+
+    let path = gix_path::to_unix_separators_on_windows(gix_path::into_bstr(buf).into_owned()).into_owned();
+    Ok(Cow::Owned(path))
+}
+
+fn is_cwd_relative(path: &BStr) -> bool {
+    path == b".".as_bstr() || path == b"..".as_bstr() || path.starts_with(b"./") || path.starts_with(b"../")
 }
 
 fn handle_errors_and_replacements(
@@ -391,6 +438,54 @@ fn handle_errors_and_replacements(
                 objs.push(*replace);
             }
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bstr::ByteSlice;
+    use crate::prelude::ObjectIdExt;
+    use crate::revision::Spec;
+
+    #[test]
+    fn cwd_relative_paths_are_looked_up_from_the_worktree_root() -> gix_testtools::Result {
+        let fixture = gix_testtools::scripted_fixture_writable("make_rev_spec_parse_repos.sh")?;
+        let repo_path = fixture.path().join("complex_graph");
+        let cwd = repo_path.join("subdir");
+        std::fs::create_dir(&cwd)?;
+
+        let mut repo = crate::ThreadSafeRepository::open(&repo_path)?.to_thread_local();
+
+        repo.options.current_dir = Some(repo_path.clone());
+        assert_eq!(repo.rev_parse("HEAD:./file")?, repo.rev_parse("HEAD:file")?);
+        assert_eq!(repo.rev_parse(":./file")?, repo.rev_parse(":file")?);
+
+        repo.options.current_dir = Some(cwd);
+
+        let tree_path = repo.rev_parse("HEAD:../file")?;
+        assert_eq!(tree_path, repo.rev_parse("HEAD:file")?);
+        assert_eq!(
+            tree_path.path_and_mode().expect("tree path is stored"),
+            ("file".as_bytes().as_bstr(), gix_object::tree::EntryKind::Blob.into())
+        );
+
+        let index_path = repo.rev_parse(":../file")?;
+        assert_eq!(index_path, repo.rev_parse(":file")?);
+        assert_eq!(
+            index_path,
+            Spec::from_id(
+                repo.index()?
+                    .entry_by_path("file".into())
+                    .expect("file in index")
+                    .id
+                    .attach(&repo)
+            )
+        );
+        assert_eq!(
+            index_path.path_and_mode().expect("index path is stored"),
+            ("file".as_bytes().as_bstr(), gix_object::tree::EntryKind::Blob.into())
+        );
         Ok(())
     }
 }
