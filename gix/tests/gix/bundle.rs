@@ -168,6 +168,12 @@ fn unbundle_rejects_ref_targets_missing_from_pack() -> crate::Result {
         target.try_find_reference("refs/heads/main")?.is_none(),
         "unbundle failure must not leave a ref pointing at the missing object"
     );
+    assert!(
+        std::fs::read_dir(target.git_dir().join("objects/pack"))?
+            .next()
+            .is_none(),
+        "unbundle failure must remove the imported pack when advertised refs are missing"
+    );
 
     Ok(())
 }
