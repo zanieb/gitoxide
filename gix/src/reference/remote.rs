@@ -50,7 +50,8 @@ impl<'repo> Reference<'repo> {
         direction: remote::Direction,
     ) -> Option<Result<crate::Remote<'repo>, remote::find::existing::Error>> {
         let name = self.remote_name(direction)?;
-        self.repo
+        let found = self
+            .repo
             .try_find_remote(name.as_bstr())
             .map(|res| res.map_err(Into::into))
             .or_else(|| match name {
@@ -63,7 +64,17 @@ impl<'repo> Reference<'repo> {
                     })
                     .into(),
                 remote::Name::Symbol(_) => None,
-            })
+            });
+        Some(found?.map(|mut remote| {
+            if direction == remote::Direction::Fetch && remote.refspecs(direction).is_empty() {
+                if let Some(Ok(remote_ref)) = self.remote_ref_name(direction) {
+                    remote
+                        .replace_refspecs([remote_ref.as_bstr()], direction)
+                        .expect("full ref names are valid fetch refspec sources");
+                }
+            }
+            remote
+        }))
     }
 
     /// Return the name of this reference on the remote side.

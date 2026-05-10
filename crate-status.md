@@ -144,7 +144,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] ref-log access
         * [x] remote name
         * [x] find remote itself
-            - [ ] respect `branch.<name>.merge` in the returned remote.
+            - [x] respect `branch.<name>.merge` in the returned remote.
     * **remotes**
         * [x] clone
             * [x] shallow
