@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{check_common, graph_and_expected, graph_and_expected_named};
 
@@ -181,6 +181,31 @@ fn generation_numbers_overflow_is_handled_in_chained_graph() {
 }
 
 #[test]
+fn verify_integrity_rejects_duplicate_ids_across_split_graphs() {
+    let repo_dir =
+        gix_testtools::scripted_fixture_read_only("split_chain.sh").expect("split-chain fixture can be created");
+    let graph_dir = repo_dir.join(".git").join("objects").join("info").join("commit-graphs");
+    let graph_paths = split_graph_paths(&graph_dir);
+    let tmp = gix_testtools::tempfile::TempDir::new().expect("temporary directory can be created");
+    let duplicate_path = graph_with_duplicated_first_oid(&graph_paths[0], &graph_paths[1], tmp.path());
+
+    let graph = gix_commitgraph::Graph::new(vec![
+        gix_commitgraph::File::at(&graph_paths[0]).expect("base graph opens"),
+        gix_commitgraph::File::at(&duplicate_path).expect("mutated graph opens"),
+    ])
+    .expect("graph chain can be constructed");
+
+    let err = graph
+        .verify_integrity(|_| Ok::<_, gix_error::Message>(()))
+        .expect_err("duplicate commit IDs should be rejected");
+    let error = format!("{err:#?}");
+    assert!(
+        error.contains("appears more than once"),
+        "error should mention the duplicate commit ID: {error}"
+    );
+}
+
+#[test]
 fn octopus_merges() {
     let (cg, refs) = graph_and_expected(
         "octopus_merges.sh",
@@ -252,4 +277,32 @@ fn chunk_offset(data: &[u8], wanted_id: &[u8; 4]) -> usize {
         "chunk {} not found",
         std::str::from_utf8(wanted_id).expect("ASCII chunk id")
     );
+}
+
+fn split_graph_paths(graph_dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_to_string(graph_dir.join("commit-graph-chain"))
+        .expect("commit-graph-chain can be read")
+        .lines()
+        .map(|hash| graph_dir.join(format!("graph-{hash}.graph")))
+        .collect()
+}
+
+fn graph_with_duplicated_first_oid(base_path: &Path, graph_path: &Path, output_dir: &Path) -> PathBuf {
+    let base = std::fs::read(base_path).expect("base graph can be read");
+    let mut data = std::fs::read(graph_path).expect("graph can be read");
+    let hash_len = gix_hash::Kind::Sha1.len_in_bytes();
+    let base_oid_lookup = chunk_offset(&base, b"OIDL");
+    let graph_oid_lookup = chunk_offset(&data, b"OIDL");
+
+    data[graph_oid_lookup..][..hash_len].copy_from_slice(&base[base_oid_lookup..][..hash_len]);
+
+    let checksum_offset = data.len() - hash_len;
+    let mut hasher = gix_hash::hasher(gix_hash::Kind::Sha1);
+    hasher.update(&data[..checksum_offset]);
+    let checksum = hasher.try_finalize().expect("sha1 can finalize");
+    data[checksum_offset..].copy_from_slice(checksum.as_bytes());
+
+    let path = output_dir.join(format!("graph-{}.graph", checksum.to_hex()));
+    std::fs::write(&path, data).expect("mutated graph can be written");
+    path
 }

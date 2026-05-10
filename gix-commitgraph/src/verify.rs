@@ -1,7 +1,7 @@
 //! Auxiliary types used by graph verification methods.
 use std::{
     cmp::{max, min},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
 };
 
 use gix_error::{ErrorExt, Exn, Message, ResultExt, message};
@@ -53,9 +53,7 @@ impl Graph {
             parent_counts: BTreeMap::new(),
         };
         let mut max_generation = 0u32;
-
-        // TODO: Detect duplicate commit IDs across different files. Not sure how to do this without
-        //   a separate loop, e.g. self.iter_sorted_ids().
+        let mut seen_ids = HashSet::new();
 
         let mut file_start_pos = Position(0);
         for (file_index, file) in self.files.iter().enumerate() {
@@ -91,6 +89,14 @@ impl Graph {
 
             let next_file_start_pos = Position(file_start_pos.0 + file.num_commits());
             let file_stats = file.traverse(|commit| {
+                if !seen_ids.insert(commit.id().to_owned()) {
+                    return Err(message!(
+                        "Commit {} appears more than once in the commit-graph chain",
+                        commit.id()
+                    )
+                    .raise_erased());
+                }
+
                 let mut max_parent_generation = 0u32;
                 for parent_pos in commit.iter_parents() {
                     let parent_pos = parent_pos.map_err(|err| err.raise_erased())?;
