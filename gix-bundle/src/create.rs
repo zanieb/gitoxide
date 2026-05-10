@@ -49,6 +49,16 @@ pub enum Error {
         /// The object format value from the `object-format` capability.
         format: BString,
     },
+    #[error("unsupported bundle capability: {capability:?}")]
+    UnsupportedCapability {
+        /// The unsupported capability.
+        capability: BString,
+    },
+    #[error("invalid bundle filter capability: {spec:?}")]
+    InvalidFilter {
+        /// The invalid filter specification.
+        spec: BString,
+    },
     #[error("bundle object format capability is {actual}, but builder object format is {expected}")]
     ObjectFormatMismatch {
         /// The hash kind configured for the builder.
@@ -162,7 +172,7 @@ impl Builder {
         }
         self.validate_ref_names()?;
         self.validate_object_ids()?;
-        self.validate_object_format_capabilities()?;
+        self.validate_capabilities()?;
 
         self.header.write_to(&mut writer).map_err(Error::Header)?;
 
@@ -197,25 +207,27 @@ impl Builder {
         Ok(())
     }
 
-    fn validate_object_format_capabilities(&self) -> Result<(), Error> {
+    fn validate_capabilities(&self) -> Result<(), Error> {
         for capability in &self.header.capabilities {
-            let capability: &[u8] = capability.as_ref();
-            let Some(format) = capability.strip_prefix(b"object-format=") else {
-                continue;
-            };
-            let actual = std::str::from_utf8(format)
-                .ok()
-                .and_then(|format| format.parse().ok())
-                .ok_or_else(|| Error::UnsupportedObjectFormat {
-                    format: BString::from(format),
-                })?;
-            if actual != self.object_hash {
-                return Err(Error::ObjectFormatMismatch {
-                    expected: self.object_hash,
-                    actual,
-                });
-            }
+            crate::header::validate_capability(capability.as_ref(), self.object_hash).map_err(Error::from)?;
         }
         Ok(())
+    }
+}
+
+impl From<crate::header::CapabilityError> for Error {
+    fn from(err: crate::header::CapabilityError) -> Self {
+        match err {
+            crate::header::CapabilityError::UnsupportedObjectFormat { format } => {
+                Error::UnsupportedObjectFormat { format }
+            }
+            crate::header::CapabilityError::ObjectFormatMismatch { expected, actual } => {
+                Error::ObjectFormatMismatch { expected, actual }
+            }
+            crate::header::CapabilityError::UnsupportedCapability { capability } => {
+                Error::UnsupportedCapability { capability }
+            }
+            crate::header::CapabilityError::InvalidFilter { spec } => Error::InvalidFilter { spec },
+        }
     }
 }

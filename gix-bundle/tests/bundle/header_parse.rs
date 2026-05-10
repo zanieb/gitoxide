@@ -304,8 +304,8 @@ fn error_on_ref_line_empty_refname() {
 }
 
 /// V3 bundle with multiple capabilities.
-/// Ported from C Git's bundle.c which supports multiple capabilities
-/// (e.g. @object-format=sha1 and @filter=blob:none).
+/// Ported from C Git's bundle.c which supports known capabilities
+/// like @object-format=sha1 and @filter=blob:none.
 #[test]
 fn parse_v3_multiple_capabilities() {
     let ref_oid = "abcdef0123456789abcdef0123456789abcdef01";
@@ -323,6 +323,73 @@ fn parse_v3_multiple_capabilities() {
     assert_eq!(header.capabilities.len(), 2);
     assert_eq!(header.capabilities[0], BString::from("object-format=sha1"));
     assert_eq!(header.capabilities[1], BString::from("filter=blob:none"));
+}
+
+#[test]
+fn parse_v3_filter_capability_variants() {
+    let ref_oid = "abcdef0123456789abcdef0123456789abcdef01";
+    for filter in [
+        "blob:none",
+        "blob:limit=1k",
+        "blob:limit=1M",
+        "object:type=blob",
+        "tree:0",
+        "sparse:oid=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        "combine:tree:3+blob:none",
+        "combine:tree%3A3+blob%3Anone",
+    ] {
+        let data = format!(
+            "# v3 git bundle\n\
+             @object-format=sha1\n\
+             @filter={filter}\n\
+             {ref_oid} refs/heads/main\n\
+             \n"
+        );
+        let (header, _) = header::decode(data.as_bytes(), gix_hash::Kind::Sha1).unwrap();
+        assert_eq!(header.capabilities[1], BString::from(format!("filter={filter}")));
+    }
+}
+
+#[test]
+fn v3_unknown_capability_is_rejected() {
+    let data = b"# v3 git bundle\n\
+                 @object-format=sha1\n\
+                 @weird=yes\n\
+                 abcdef0123456789abcdef0123456789abcdef01 refs/heads/main\n\
+                 \n";
+    let err = header::decode(data.as_slice(), gix_hash::Kind::Sha1).unwrap_err();
+    assert!(matches!(
+        err,
+        header::Error::UnsupportedCapability { capability } if capability.as_slice() == b"weird=yes"
+    ));
+}
+
+#[test]
+fn v3_capabilities_must_start_with_at() {
+    let data = b"# v3 git bundle\n\
+                 object-format=sha1\n\
+                 abcdef0123456789abcdef0123456789abcdef01 refs/heads/main\n\
+                 \n";
+    let result = header::decode(data.as_slice(), gix_hash::Kind::Sha1);
+    assert!(result.is_err(), "v3 capabilities without '@' should not parse");
+}
+
+#[test]
+fn v3_filter_capability_must_be_valid() {
+    for filter in ["", "bogus", "blob:limit=", "tree:", "combine:", "combine:blob:none+"] {
+        let data = format!(
+            "# v3 git bundle\n\
+             @object-format=sha1\n\
+             @filter={filter}\n\
+             abcdef0123456789abcdef0123456789abcdef01 refs/heads/main\n\
+             \n"
+        );
+        let err = header::decode(data.as_bytes(), gix_hash::Kind::Sha1).unwrap_err();
+        assert!(
+            matches!(err, header::Error::InvalidFilter { spec } if spec == filter),
+            "filter {filter:?} should be rejected"
+        );
+    }
 }
 
 /// V3 bundle with single capability parses correctly.
