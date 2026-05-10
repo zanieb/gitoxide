@@ -306,6 +306,10 @@ impl FromStr for Name {
             return Ok(Self::Default);
         }
 
+        if bright {
+            return Err(color_err(s));
+        }
+
         if let Ok(v) = u8::from_str(s) {
             return Ok(Self::Ansi(v));
         }
