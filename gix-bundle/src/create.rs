@@ -4,7 +4,7 @@
 //! prerequisite commits, and writing the header followed by a packfile containing
 //! all necessary objects.
 
-use bstr::BString;
+use bstr::{BString, ByteSlice};
 use gix_hash::ObjectId;
 
 use crate::{Header, Prerequisite, Ref, Version};
@@ -55,6 +55,13 @@ pub enum Error {
         expected: gix_hash::Kind,
         /// The hash kind advertised by the capability.
         actual: gix_hash::Kind,
+    },
+    #[error("invalid bundled reference name {name:?}")]
+    InvalidRefName {
+        /// The invalid reference name.
+        name: BString,
+        /// The validation failure.
+        source: gix_validate::reference::name::Error,
     },
     #[error(transparent)]
     Header(#[from] std::io::Error),
@@ -153,6 +160,7 @@ impl Builder {
         if self.header.refs.is_empty() {
             return Err(Error::NoRefs);
         }
+        self.validate_ref_names()?;
         self.validate_object_ids()?;
         self.validate_object_format_capabilities()?;
 
@@ -175,6 +183,16 @@ impl Builder {
                     actual,
                 });
             }
+        }
+        Ok(())
+    }
+
+    fn validate_ref_names(&self) -> Result<(), Error> {
+        for r in &self.header.refs {
+            gix_validate::reference::name(r.name.as_bstr()).map_err(|source| Error::InvalidRefName {
+                name: r.name.clone(),
+                source,
+            })?;
         }
         Ok(())
     }

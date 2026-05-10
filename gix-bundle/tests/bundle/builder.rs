@@ -208,6 +208,30 @@ fn builder_write_rejects_unsupported_object_format_capability() {
     assert!(buf.is_empty(), "validation should run before writing the header");
 }
 
+/// Builder should reject invalid refnames before writing output.
+#[test]
+fn builder_write_rejects_invalid_refname() {
+    let mut builder = Builder::new(Version::V2, gix_hash::Kind::Sha1);
+    builder.add_ref("refs/heads/bad..name", oid("abcdef0123456789abcdef0123456789abcdef01"));
+
+    let pack_writer_called = std::cell::Cell::new(false);
+    let mut buf = Vec::new();
+    let result = builder.write_to(&mut buf, |_writer, _tips, _exclude| -> Result<bool, std::io::Error> {
+        pack_writer_called.set(true);
+        Ok(true)
+    });
+
+    assert!(
+        matches!(result, Err(Error::InvalidRefName { name, .. }) if name == "refs/heads/bad..name"),
+        "builder should reject invalid refnames"
+    );
+    assert!(
+        !pack_writer_called.get(),
+        "validation should run before pack generation"
+    );
+    assert!(buf.is_empty(), "validation should run before writing the header");
+}
+
 /// Builder should reject conflicting object-format capabilities before writing output.
 #[test]
 #[cfg(all(feature = "sha1", feature = "sha256"))]
