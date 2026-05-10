@@ -1651,9 +1651,19 @@ mod driver {
 
         let result = state.step(&driver, &rebase_dir);
         assert!(result.is_err());
+        assert_eq!(
+            state.stopped_sha,
+            Some(make_oid(hex_a)),
+            "conflict should leave in-memory state stopped at the failed commit"
+        );
 
         // The failed operation should be in `done` (not lost).
         let on_disk = MergeState::read_from(&rebase_dir, Kind::Sha1).unwrap();
+        assert_eq!(
+            on_disk.stopped_sha,
+            Some(make_oid(hex_a)),
+            "conflict should persist stopped-sha for continue/abort handling"
+        );
         assert_eq!(
             on_disk.done.operations.len(),
             1,
@@ -1667,8 +1677,7 @@ mod driver {
     }
 
     #[test]
-    fn continue_after_conflict_simulation() {
-        // Simulate: step fails with conflict, caller resolves, continue_rebase proceeds.
+    fn continue_after_conflict_processes_remaining_todo() {
         let dir = tempfile::tempdir().unwrap();
         let rebase_dir = dir.path().join("rebase-merge");
         let hex_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1677,14 +1686,12 @@ mod driver {
         let mut driver = MockDriver::new();
         driver.register_commit(hex_a, hex_a, b"Conflict commit\n");
         driver.register_commit(hex_b, hex_b, b"Next commit\n");
+        driver.conflict_on.borrow_mut().insert(make_oid(hex_a));
 
-        // First, create state with edit (which pauses) to simulate a stopped state,
-        // then continue. This tests the conflict->continue flow using edit as proxy
-        // since the conflict path errors out before setting stopped_sha.
         let mut state = make_state_with_ops(vec![
-            Operation::Edit {
+            Operation::Pick {
                 commit: make_oid(hex_a).into(),
-                summary: "Edit (simulates conflict pause)".into(),
+                summary: "Conflict".into(),
             },
             Operation::Pick {
                 commit: make_oid(hex_b).into(),
@@ -1692,12 +1699,11 @@ mod driver {
             },
         ]);
 
-        // Step pauses at edit (simulating a conflict pause).
-        let outcome = state.step(&driver, &rebase_dir).unwrap();
-        assert!(matches!(outcome, StepOutcome::Paused { .. }));
-        assert!(state.stopped_sha.is_some());
+        assert!(state.step(&driver, &rebase_dir).is_err());
+        assert_eq!(state.stopped_sha, Some(make_oid(hex_a)));
 
         // User resolves the conflict, then calls continue.
+        driver.conflict_on.borrow_mut().clear();
         let outcome = state.continue_rebase(&driver, &rebase_dir).unwrap();
         assert!(
             matches!(outcome, StepOutcome::Applied { .. }),

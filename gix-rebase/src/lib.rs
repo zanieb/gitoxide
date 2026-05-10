@@ -441,7 +441,10 @@ impl MergeState {
             Ok(outcome) => outcome,
             Err(e) => {
                 // Write state so the failed operation is persisted in `done`.
-                self.stopped_sha = None;
+                self.stopped_sha = match &e {
+                    StepError::CherryPick(CherryPickError::Conflict { commit_id }) => Some(*commit_id),
+                    _ => None,
+                };
                 let _ = self.write_to(rebase_merge_dir);
                 return Err(e);
             }
