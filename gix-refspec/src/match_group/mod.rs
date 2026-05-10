@@ -226,7 +226,7 @@ impl<'spec> MatchGroup<'spec> {
                 }) => {
                     let matcher = Matcher::from(spec);
                     if let (Some(Needle::Object(id)), Some(dst)) = (matcher.lhs, matcher.rhs) {
-                        push_unique(
+                        push_unique_update(
                             PushUpdate {
                                 local_item_index: None,
                                 remote_item_index: remote_index(dst.to_bstr().as_ref()),
@@ -245,7 +245,7 @@ impl<'spec> MatchGroup<'spec> {
                         let (matched, dst) = matcher.matches_lhs(item);
                         if matched {
                             let dst = dst.map_or_else(|| item.full_ref_name.to_owned(), std::borrow::Cow::into_owned);
-                            push_unique(
+                            push_unique_update(
                                 PushUpdate {
                                     local_item_index: Some(local_item_index),
                                     remote_item_index: remote_index(dst.as_ref()),
@@ -266,7 +266,7 @@ impl<'spec> MatchGroup<'spec> {
                             continue;
                         }
                         if let Some(remote_item_index) = remote_index(local.full_ref_name) {
-                            push_unique(
+                            push_unique_update(
                                 PushUpdate {
                                     local_item_index: Some(local_item_index),
                                     remote_item_index: Some(remote_item_index),
@@ -297,7 +297,7 @@ impl<'spec> MatchGroup<'spec> {
 
                     if matched_remote_indices.is_empty() {
                         let dst = Needle::from(ref_or_pattern).to_bstr().into_owned();
-                        push_unique(
+                        push_unique_deletion(
                             PushDeletion {
                                 remote_item_index: remote_index(dst.as_ref()),
                                 dst,
@@ -308,7 +308,7 @@ impl<'spec> MatchGroup<'spec> {
                         );
                     } else {
                         for (remote_item_index, dst) in matched_remote_indices {
-                            push_unique(
+                            push_unique_deletion(
                                 PushDeletion {
                                     remote_item_index: Some(remote_item_index),
                                     dst,
@@ -349,11 +349,14 @@ impl<'spec> MatchGroup<'spec> {
     }
 }
 
-fn push_unique<T>(item: T, seen: &mut HashSet<T>, out: &mut Vec<T>)
-where
-    T: Eq + std::hash::Hash + Clone,
-{
-    if seen.insert(item.clone()) {
+fn push_unique_update(item: PushUpdate, seen: &mut HashSet<(Source, bstr::BString)>, out: &mut Vec<PushUpdate>) {
+    if seen.insert((item.src.clone(), item.dst.clone())) {
+        out.push(item);
+    }
+}
+
+fn push_unique_deletion(item: PushDeletion, seen: &mut HashSet<bstr::BString>, out: &mut Vec<PushDeletion>) {
+    if seen.insert(item.dst.clone()) {
         out.push(item);
     }
 }
