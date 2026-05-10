@@ -191,14 +191,14 @@ impl crate::Repository {
             return Err(Error::NoteAlreadyExists { target });
         }
 
-        let fanout = self.detect_fanout_depth(&existing_tree);
+        let detected_fanout = self.detect_fanout_depth(&existing_tree);
 
         // Handle empty message = removal
         if message.is_empty() {
             if !has_existing {
                 return Ok(None);
             }
-            let new_tree = self.remove_note_from_tree(&existing_tree, &target, fanout)?;
+            let new_tree = self.remove_note_from_tree(&existing_tree, &target, detected_fanout)?;
             let tree_id = self.write_object(&new_tree)?;
             return self
                 .commit_notes_tree(
@@ -212,6 +212,14 @@ impl crate::Repository {
 
         // Write the note blob
         let blob_id = self.write_blob(message)?;
+
+        let fanout =
+            self.fanout_depth_after_insert(&existing_tree, (!has_existing).then_some(&target), detected_fanout)?;
+        let existing_tree = if fanout > detected_fanout {
+            self.rewrite_notes_tree_to_fanout(&existing_tree, fanout)?
+        } else {
+            existing_tree
+        };
 
         // Insert the note at the correct fanout level
         let new_tree = self.insert_note_into_tree(&existing_tree, &target, blob_id.detach(), fanout)?;
@@ -406,6 +414,57 @@ impl crate::Repository {
         }
 
         depth
+    }
+
+    fn fanout_depth_after_insert(
+        &self,
+        tree: &gix_object::Tree,
+        inserted_target: Option<&ObjectId>,
+        current_fanout: u8,
+    ) -> Result<u8, Error> {
+        if current_fanout != 0 {
+            return Ok(current_fanout);
+        }
+
+        let mut first_nibble_counts = [0u8; 16];
+        for entry in self.list_note_entries(tree)? {
+            count_first_nibble(&mut first_nibble_counts, &entry.target);
+        }
+        if let Some(target) = inserted_target {
+            count_first_nibble(&mut first_nibble_counts, target);
+        }
+
+        Ok(if first_nibble_counts.iter().all(|count| *count >= 2) {
+            1
+        } else {
+            0
+        })
+    }
+
+    fn list_note_entries(&self, tree: &gix_object::Tree) -> Result<Vec<gix_note::Entry>, Error> {
+        let hash_kind = self.object_hash();
+        let mut find_tree =
+            |oid: &ObjectId| -> Result<gix_object::Tree, TreeLookupError> { self.lookup_notes_subtree(oid) };
+        Ok(gix_note::list_notes(tree, hash_kind, "", &mut find_tree)?)
+    }
+
+    fn rewrite_notes_tree_to_fanout(&self, tree: &gix_object::Tree, fanout: u8) -> Result<gix_object::Tree, Error> {
+        let hash_kind = self.object_hash();
+        let note_entries = self.list_note_entries(tree)?;
+        let mut rewritten = gix_object::Tree {
+            entries: tree
+                .entries
+                .iter()
+                .filter(|entry| !is_flat_note_entry(entry, hash_kind))
+                .cloned()
+                .collect(),
+        };
+
+        for entry in note_entries {
+            rewritten = self.insert_note_into_tree(&rewritten, &entry.target, entry.note_id, fanout)?;
+        }
+
+        Ok(rewritten)
     }
 
     /// Insert a note blob into the notes tree at the correct fanout level.
@@ -673,4 +732,13 @@ impl crate::Repository {
 
         Ok(gix_object::Tree { entries })
     }
+}
+
+fn count_first_nibble(counts: &mut [u8; 16], target: &ObjectId) {
+    let bucket = usize::from(target.as_bytes()[0] >> 4);
+    counts[bucket] = counts[bucket].saturating_add(1).min(2);
+}
+
+fn is_flat_note_entry(entry: &gix_object::tree::Entry, hash_kind: gix_hash::Kind) -> bool {
+    entry.mode.is_blob() && gix_note::target_from_path(entry.filename.as_ref(), hash_kind).is_ok()
 }

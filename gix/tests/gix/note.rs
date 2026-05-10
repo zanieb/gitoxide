@@ -17,6 +17,39 @@ mod note {
         Ok([a, b, c])
     }
 
+    fn targets_with_first_nibble_collisions(repo: &gix::Repository) -> crate::Result<Vec<gix_hash::ObjectId>> {
+        let mut counts = [0usize; 16];
+        let mut targets = Vec::new();
+        let mut attempt = 0usize;
+
+        while counts.iter().any(|count| *count < 2) {
+            let id = repo
+                .write_blob(format!("fanout-target-{attempt}\n").as_bytes())?
+                .detach();
+            let bucket = usize::from(id.as_bytes()[0] >> 4);
+            if counts[bucket] < 2 {
+                counts[bucket] += 1;
+                targets.push(id);
+            }
+            attempt += 1;
+            assert!(attempt < 4096, "object ids should cover all first-nibble buckets");
+        }
+
+        Ok(targets)
+    }
+
+    fn notes_root_tree(repo: &gix::Repository, reference: &str) -> crate::Result<gix_object::Tree> {
+        let notes_commit = repo
+            .find_reference(reference)?
+            .id()
+            .object()?
+            .peel_to_kind(gix_object::Kind::Commit)?
+            .try_into_commit()?;
+        let tree_id = notes_commit.tree_id()?;
+        let tree = repo.find_object(tree_id)?.try_into_tree()?;
+        Ok(tree.decode()?.into())
+    }
+
     #[test]
     fn notes_list_returns_default_notes() -> crate::Result {
         let repo = repo_with_notes()?;
@@ -515,6 +548,40 @@ mod note {
 
         let note = repo.note_read(&commit_a, Some(new_ref))?.expect("note should exist");
         assert_eq!(note.message, b"new ref note\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn note_add_expands_flat_tree_to_git_fanout() -> crate::Result {
+        let (repo, _tmp) = repo_rw_notes()?;
+        let notes_ref = "refs/notes/fanout";
+        let targets = targets_with_first_nibble_collisions(&repo)?;
+
+        for (idx, target) in targets.iter().enumerate() {
+            repo.note_add(
+                *target,
+                format!("fanout note {idx}\n").as_bytes(),
+                Some(notes_ref),
+                false,
+            )?;
+        }
+
+        assert_eq!(repo.notes_list(Some(notes_ref))?.len(), targets.len());
+        let root_tree = notes_root_tree(&repo, notes_ref)?;
+        assert!(
+            root_tree.entries.iter().all(|entry| entry.mode.is_tree()),
+            "fanout should move flat note blobs below two-character directories"
+        );
+        assert!(
+            root_tree.entries.iter().all(|entry| entry.filename.len() == 2),
+            "fanout directories should use the first byte of the annotated object id"
+        );
+
+        let first_note = repo
+            .note_read(&targets[0], Some(notes_ref))?
+            .expect("fanout note should still be readable");
+        assert_eq!(first_note.message, b"fanout note 0\n");
 
         Ok(())
     }
