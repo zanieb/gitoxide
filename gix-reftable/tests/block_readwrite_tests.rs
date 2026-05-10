@@ -267,6 +267,7 @@ fn block_ref_restart_points() {
 /// - Bytes 5-7: BE24 block_size
 /// - Bytes 8-15: BE64 min_update_index
 /// - Bytes 16-23: BE64 max_update_index
+/// - Bytes 24-27: hash ID for version 2
 #[test]
 fn header_roundtrip_v1() {
     let header = Header {
@@ -274,6 +275,7 @@ fn header_roundtrip_v1() {
         block_size: 4096,
         min_update_index: 1,
         max_update_index: 10,
+        object_hash: gix_hash::Kind::Sha1,
     };
     let bytes = serialize_header(&header);
     assert_eq!(bytes.len(), gix_reftable::HEADER_SIZE_V1);
@@ -291,11 +293,46 @@ fn header_roundtrip_v2() {
         block_size: 65536,
         min_update_index: 100,
         max_update_index: 200,
+        object_hash: gix_hash::Kind::Sha1,
     };
     let bytes = serialize_header(&header);
     assert_eq!(bytes.len(), gix_reftable::HEADER_SIZE_V2);
     let parsed = parse_header(&bytes).expect("should parse header");
     assert_eq!(parsed, header);
+}
+
+#[cfg(feature = "sha256")]
+#[test]
+fn header_roundtrip_v2_sha256_hash_id() {
+    let header = Header {
+        version: Version::V2,
+        block_size: 4096,
+        min_update_index: 1,
+        max_update_index: 1,
+        object_hash: gix_hash::Kind::Sha256,
+    };
+
+    let bytes = serialize_header(&header);
+    assert_eq!(&bytes[24..28], b"s256", "v2 SHA-256 tables use Git's s256 hash id");
+    let parsed = parse_header(&bytes).expect("should parse SHA-256 v2 header");
+    assert_eq!(parsed.object_hash, gix_hash::Kind::Sha256);
+    assert_eq!(parsed, header);
+}
+
+#[test]
+fn header_v2_rejects_unknown_hash_id() {
+    let mut data = vec![0u8; gix_reftable::HEADER_SIZE_V2];
+    data[0..4].copy_from_slice(b"REFT");
+    data[4] = Version::V2.as_u8();
+    gix_reftable::put_be24((&mut data[5..8]).try_into().expect("3 bytes"), 4096);
+    data[8..16].copy_from_slice(&1u64.to_be_bytes());
+    data[16..24].copy_from_slice(&1u64.to_be_bytes());
+    data[24..28].copy_from_slice(b"nope");
+
+    assert!(matches!(
+        parse_header(&data),
+        Err(Error::UnsupportedObjectHash { hash_id }) if hash_id == *b"nope"
+    ));
 }
 
 #[test]
@@ -305,6 +342,7 @@ fn header_block_size_zero_means_unaligned() {
         block_size: 0,
         min_update_index: 0,
         max_update_index: 0,
+        object_hash: gix_hash::Kind::Sha1,
     };
     let bytes = serialize_header(&header);
     let parsed = parse_header(&bytes).expect("should parse");
@@ -367,6 +405,7 @@ fn footer_roundtrip_v1() {
             block_size: 4096,
             min_update_index: 1,
             max_update_index: 10,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 1024,
@@ -391,6 +430,7 @@ fn footer_empty_table() {
             block_size: 4096,
             min_update_index: 1,
             max_update_index: 1,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 0,
@@ -413,6 +453,7 @@ fn footer_crc32_corruption() {
             block_size: 4096,
             min_update_index: 1,
             max_update_index: 10,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 100,
         obj_offset: 200,
@@ -443,6 +484,7 @@ fn footer_obj_packed_field() {
             block_size: 256,
             min_update_index: 0,
             max_update_index: 0,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 12345,
@@ -471,6 +513,7 @@ fn full_file_small_table() {
         block_size: 4096,
         min_update_index: 5,
         max_update_index: 5,
+        object_hash: gix_hash::Kind::Sha1,
     };
 
     let records = vec![make_val1("refs/heads/branch00", 0, 5)];
@@ -691,6 +734,7 @@ fn full_file_multiple_ref_blocks() {
         min_update_index: 1,
         max_update_index: 1,
         version: Version::V1,
+        object_hash: gix_hash::Kind::Sha1,
     };
     let hash_size = 20;
     let records: Vec<RefRecord> = (0..100)
@@ -717,6 +761,7 @@ fn full_file_multiple_ref_blocks() {
             block_size: opts.block_size,
             min_update_index: opts.min_update_index,
             max_update_index: opts.max_update_index,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 0,
@@ -755,6 +800,7 @@ fn write_header_compat_with_parse_header() {
         min_update_index: 1,
         max_update_index: 10,
         version: Version::V1,
+        object_hash: gix_hash::Kind::Sha1,
     };
 
     let header_bytes = write::write_header(&opts);
@@ -779,6 +825,25 @@ fn write_header_compat_with_parse_header() {
     }
 }
 
+#[cfg(feature = "sha256")]
+#[test]
+fn write_header_honors_v2_object_hash() {
+    let opts = Options {
+        block_size: 4096,
+        min_update_index: 1,
+        max_update_index: 1,
+        version: Version::V2,
+        object_hash: gix_hash::Kind::Sha256,
+    };
+
+    let header = gix_reftable::write::write_header(&opts);
+    assert_eq!(&header[24..28], b"s256");
+    assert_eq!(
+        parse_header(&header).expect("header should parse").object_hash,
+        gix_hash::Kind::Sha256
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Full reftable file structure validation
 // ---------------------------------------------------------------------------
@@ -799,6 +864,7 @@ fn full_file_structure_validation() {
         block_size,
         min_update_index,
         max_update_index,
+        object_hash: gix_hash::Kind::Sha1,
     };
 
     // Create records
@@ -867,6 +933,7 @@ fn footer_object_id_length_field() {
             block_size: 256,
             min_update_index: 1,
             max_update_index: 1,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 0,
@@ -892,6 +959,7 @@ fn footer_object_id_length_16() {
             block_size: 256,
             min_update_index: 1,
             max_update_index: 1,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 0,
@@ -916,6 +984,7 @@ fn footer_roundtrip_v2() {
             block_size: 8192,
             min_update_index: 50,
             max_update_index: 100,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 4096,
         obj_offset: 8192,
@@ -940,6 +1009,7 @@ fn footer_obj_id_len_max() {
             block_size: 256,
             min_update_index: 0,
             max_update_index: 0,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 0,
@@ -962,6 +1032,7 @@ fn footer_too_short() {
             block_size: 256,
             min_update_index: 0,
             max_update_index: 0,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 0,
@@ -987,6 +1058,7 @@ fn footer_multiple_index_offsets() {
             block_size: 256,
             min_update_index: 1,
             max_update_index: 1,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 1000,
         obj_offset: 2000,
@@ -1276,6 +1348,7 @@ fn header_max_block_size() {
         block_size: 0xFF_FFFF,
         min_update_index: 0,
         max_update_index: 0,
+        object_hash: gix_hash::Kind::Sha1,
     };
     let bytes = serialize_header(&header);
     let parsed = parse_header(&bytes).expect("should parse");
@@ -1290,6 +1363,7 @@ fn header_max_update_indices() {
         block_size: 4096,
         min_update_index: u64::MAX,
         max_update_index: u64::MAX,
+        object_hash: gix_hash::Kind::Sha1,
     };
     let bytes = serialize_header(&header);
     let parsed = parse_header(&bytes).expect("should parse");
@@ -1336,6 +1410,7 @@ fn full_file_empty_table_size() {
         block_size: 4096,
         min_update_index: 1,
         max_update_index: 1,
+        object_hash: gix_hash::Kind::Sha1,
     };
     let footer = Footer {
         header: header.clone(),
@@ -1370,6 +1445,7 @@ fn full_file_small_table_v2() {
         block_size: 4096,
         min_update_index: 5,
         max_update_index: 5,
+        object_hash: gix_hash::Kind::Sha1,
     };
 
     let records = vec![make_val1("refs/heads/branch00", 0, 5)];
@@ -1406,6 +1482,7 @@ fn full_file_structure_v2() {
         block_size: 0,
         min_update_index,
         max_update_index,
+        object_hash: gix_hash::Kind::Sha1,
     };
 
     let records: Vec<RefRecord> = (0..5)

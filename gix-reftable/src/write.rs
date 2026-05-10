@@ -16,6 +16,8 @@ pub struct Options {
     pub max_update_index: u64,
     /// Reftable version.
     pub version: Version,
+    /// Object hash kind for object ids in the output table.
+    pub object_hash: gix_hash::Kind,
 }
 
 impl Default for Options {
@@ -25,6 +27,7 @@ impl Default for Options {
             min_update_index: 1,
             max_update_index: 1,
             version: Version::V1,
+            object_hash: gix_hash::Kind::shortest(),
         }
     }
 }
@@ -95,6 +98,7 @@ pub fn write_header(opts: &Options) -> Vec<u8> {
         block_size: opts.block_size,
         min_update_index: opts.min_update_index,
         max_update_index: opts.max_update_index,
+        object_hash: opts.object_hash,
     };
     crate::serialize_header(&header)
 }
@@ -304,6 +308,7 @@ mod tests {
             min_update_index: 1,
             max_update_index: 10,
             version: crate::Version::V1,
+            object_hash: gix_hash::Kind::Sha1,
         };
         let header = write_header(&opts);
         assert_eq!(header.len(), crate::HEADER_SIZE_V1);

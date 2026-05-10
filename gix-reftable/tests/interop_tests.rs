@@ -180,6 +180,7 @@ fn c_git_reads_gitoxide_produced_reftable() {
         min_update_index: 2,
         max_update_index: 2,
         version: gix_reftable::Version::V1,
+        object_hash: gix_hash::Kind::Sha1,
     };
 
     // Build the complete reftable file: header + ref block + footer
@@ -200,6 +201,7 @@ fn c_git_reads_gitoxide_produced_reftable() {
             block_size: opts.block_size,
             min_update_index: opts.min_update_index,
             max_update_index: opts.max_update_index,
+            object_hash: gix_hash::Kind::Sha1,
         },
         ref_index_offset: 0,
         obj_offset: 0,
