@@ -252,6 +252,9 @@ pub fn read_table_ref_records(data: &[u8]) -> Result<Vec<RefRecord>, Error> {
 
     let footer_start = data.len() - footer_size;
     let footer = crate::parse_footer(&data[footer_start..])?;
+    if footer.header != header {
+        return Err(Error::HeaderFooterMismatch);
+    }
     let hash_size = header.object_hash.len_in_bytes();
 
     let mut records = Vec::new();
@@ -585,6 +588,52 @@ mod tests {
 
         let actual = read_table_ref_records(&table).expect("table should read");
         assert_eq!(actual, records);
+    }
+
+    #[test]
+    fn read_table_ref_records_rejects_footer_header_mismatch() {
+        let records = vec![val1("refs/heads/main", 0xaa, 1)];
+        let opts = crate::write::Options {
+            block_size: crate::DEFAULT_BLOCK_SIZE,
+            min_update_index: 1,
+            max_update_index: 1,
+            version: crate::Version::V1,
+            object_hash: gix_hash::Kind::Sha1,
+        };
+        let header = crate::write::write_header(&opts);
+        let block = crate::write::write_ref_block_at(
+            records.as_slice(),
+            opts.min_update_index,
+            20,
+            opts.block_size,
+            header.len(),
+        )
+        .expect("block should write");
+        let footer = crate::Footer {
+            header: crate::Header {
+                version: opts.version,
+                block_size: opts.block_size,
+                min_update_index: 2,
+                max_update_index: opts.max_update_index,
+                object_hash: gix_hash::Kind::Sha1,
+            },
+            ref_index_offset: 0,
+            obj_offset: 0,
+            obj_id_len: 0,
+            obj_index_offset: 0,
+            log_offset: 0,
+            log_index_offset: 0,
+        };
+
+        let mut table = Vec::new();
+        table.extend_from_slice(&header);
+        table.extend_from_slice(&block);
+        table.extend_from_slice(&crate::serialize_footer(&footer));
+
+        assert!(matches!(
+            read_table_ref_records(&table),
+            Err(Error::HeaderFooterMismatch)
+        ));
     }
 
     #[test]
