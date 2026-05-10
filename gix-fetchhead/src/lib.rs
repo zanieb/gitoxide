@@ -8,6 +8,8 @@
 
 use std::{error, fmt, io};
 
+use bstr::BString;
+
 /// A single `FETCH_HEAD` line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Line {
@@ -20,11 +22,11 @@ pub struct Line {
     /// The raw source description after the merge marker.
     ///
     /// Typical descriptions are phrases like `branch 'main' of <url>`, but this
-    /// field is intentionally preserved as raw text.
-    pub description: String,
+    /// field is intentionally preserved as bytes.
+    pub description: BString,
 }
 
-/// The error returned by [`parse()`] or [`Line::from_str()`][std::str::FromStr::from_str].
+/// The error returned by [`parse()`], [`Line::from_bytes()`] or [`Line::from_str()`][std::str::FromStr::from_str].
 #[derive(Debug)]
 pub enum Error {
     /// The line is empty.
@@ -79,7 +81,7 @@ impl fmt::Display for Error {
 
 impl Line {
     /// Create a new line from its components.
-    pub fn new(id: gix_hash::ObjectId, for_merge: bool, description: impl Into<String>) -> Self {
+    pub fn new(id: gix_hash::ObjectId, for_merge: bool, description: impl Into<BString>) -> Self {
         Line {
             id,
             for_merge,
@@ -95,31 +97,39 @@ impl Line {
             out.write_all(b"not-for-merge")?;
         }
         out.write_all(b"\t")?;
-        out.write_all(self.description.as_bytes())?;
+        out.write_all(&self.description)?;
         out.write_all(b"\n")
     }
 
-    fn from_line(line: &str, line_number: usize) -> Result<Self, Error> {
+    /// Parse a single `FETCH_HEAD` line from bytes.
+    pub fn from_bytes(line: &[u8]) -> Result<Self, Error> {
+        Self::from_line(line, 1)
+    }
+
+    fn from_line(line: &[u8], line_number: usize) -> Result<Self, Error> {
         if line.is_empty() {
             return Err(Error::EmptyLine { line: line_number });
         }
 
-        let (id_hex, metadata) = line
-            .split_once('\t')
+        let separator = line
+            .iter()
+            .position(|byte| *byte == b'\t')
             .ok_or(Error::MissingDescription { line: line_number })?;
-        let id = gix_hash::ObjectId::from_hex(id_hex.as_bytes()).map_err(|source| Error::InvalidObjectId {
+        let (id_hex, metadata) = line.split_at(separator);
+        let metadata = &metadata[1..];
+        let id = gix_hash::ObjectId::from_hex(id_hex).map_err(|source| Error::InvalidObjectId {
             line: line_number,
             source,
         })?;
-        let (for_merge, description) = match metadata.strip_prefix("not-for-merge\t") {
+        let (for_merge, description) = match metadata.strip_prefix(b"not-for-merge\t") {
             Some(description) => (false, description),
-            None => match metadata.strip_prefix('\t') {
+            None => match metadata.strip_prefix(b"\t") {
                 Some(description) => (true, description),
                 None => return Err(Error::InvalidMergeMarker { line: line_number }),
             },
         };
 
-        Ok(Line::new(id, for_merge, description))
+        Ok(Line::new(id, for_merge, description.to_vec()))
     }
 }
 
@@ -127,17 +137,28 @@ impl std::str::FromStr for Line {
     type Err = Error;
 
     fn from_str(line: &str) -> Result<Self, Self::Err> {
-        Line::from_line(line, 1)
+        Line::from_bytes(line.as_bytes())
     }
 }
 
 /// Parse the entire contents of a `FETCH_HEAD` file.
-pub fn parse(input: &str) -> Result<Vec<Line>, Error> {
-    input
-        .lines()
-        .enumerate()
-        .map(|(index, line)| Line::from_line(line, index + 1))
-        .collect()
+pub fn parse(input: impl AsRef<[u8]>) -> Result<Vec<Line>, Error> {
+    let mut input = input.as_ref();
+    let mut line_number = 1;
+    let mut lines = Vec::new();
+
+    while !input.is_empty() {
+        let (line, rest) = match input.iter().position(|byte| *byte == b'\n') {
+            Some(newline) => (&input[..newline], &input[newline + 1..]),
+            None => (input, &[][..]),
+        };
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        lines.push(Line::from_line(line, line_number)?);
+        line_number += 1;
+        input = rest;
+    }
+
+    Ok(lines)
 }
 
 /// Write all `lines` in `FETCH_HEAD` format.
