@@ -350,6 +350,32 @@ mod write_object {
     }
 
     #[test]
+    fn checked_commit_rejects_tree_reference_to_blob() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let blob = repo.write_blob(b"not a tree")?.detach();
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: blob,
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "wrong tree kind".into(),
+            extra_headers: vec![],
+        };
+
+        assert_eq!(
+            repo.write_object_checked(commit).unwrap_err().to_string(),
+            format!("Cannot write commit object because it references tree object {blob}, which is actually blob")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn checked_tree_rejects_missing_blob_but_allows_submodule_gitlinks() -> crate::Result {
         let repo = empty_bare_in_memory_repo()?;
         let missing_blob = hex_to_id("2222222222222222222222222222222222222222");
@@ -373,6 +399,44 @@ mod write_object {
         });
         let id = repo.write_object_checked(&tree)?;
         assert!(repo.has_object(id));
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tree_rejects_entry_reference_to_wrong_kind() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let tree_id = repo.write_object(gix::objs::Tree::empty())?.detach();
+        let mut tree = gix::objs::Tree::empty();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Blob.into(),
+            filename: "tree-as-blob".into(),
+            oid: tree_id,
+        });
+
+        assert_eq!(
+            repo.write_object_checked(&tree).unwrap_err().to_string(),
+            format!("Cannot write tree object because it references blob object {tree_id}, which is actually tree")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tag_rejects_target_reference_to_wrong_kind() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let blob = repo.write_blob(b"not a commit")?.detach();
+        let tag = gix::objs::Tag {
+            target: blob,
+            target_kind: gix::objs::Kind::Commit,
+            name: "v1.0".into(),
+            tagger: None,
+            message: "wrong target kind".into(),
+            pgp_signature: None,
+        };
+
+        assert_eq!(
+            repo.write_object_checked(tag).unwrap_err().to_string(),
+            format!("Cannot write tag object because it references commit object {blob}, which is actually blob")
+        );
         Ok(())
     }
 

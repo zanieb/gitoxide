@@ -354,14 +354,26 @@ impl crate::Repository {
             gix_object::Kind::Tree => ObjectId::empty_tree(id.kind()) == id,
             gix_object::Kind::Commit | gix_object::Kind::Tag => false,
         };
-        if known_empty || self.objects.exists(&id) {
-            Ok(())
-        } else {
-            Err(object::write::Error(Box::new(MissingObjectReference {
+        if known_empty {
+            return Ok(());
+        }
+
+        match self
+            .try_find_header(id)
+            .map_err(|err| object::write::Error(Box::new(err)))?
+        {
+            Some(header) if header.kind() == referenced_kind => Ok(()),
+            Some(header) => Err(object::write::Error(Box::new(WrongObjectReferenceKind {
+                object_kind,
+                referenced_kind,
+                actual_kind: header.kind(),
+                id,
+            }))),
+            None => Err(object::write::Error(Box::new(MissingObjectReference {
                 object_kind,
                 referenced_kind,
                 id,
-            })))
+            }))),
         }
     }
 
@@ -428,6 +440,17 @@ impl crate::Repository {
 struct MissingObjectReference {
     object_kind: gix_object::Kind,
     referenced_kind: gix_object::Kind,
+    id: ObjectId,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Cannot write {object_kind} object because it references {referenced_kind} object {id}, which is actually {actual_kind}"
+)]
+struct WrongObjectReferenceKind {
+    object_kind: gix_object::Kind,
+    referenced_kind: gix_object::Kind,
+    actual_kind: gix_object::Kind,
     id: ObjectId,
 }
 
