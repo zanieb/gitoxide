@@ -234,6 +234,10 @@ pub enum Error {
     InvalidTableName { name: String },
     #[error("record update index {update_index} is below table minimum {min_update_index}")]
     UpdateIndexBelowMinimum { update_index: u64, min_update_index: u64 },
+    #[error("ref record name must not be empty")]
+    EmptyRefName,
+    #[error("ref records must be sorted by name")]
+    RefRecordsOutOfOrder,
 }
 
 /// Read a varint from a byte slice using the reftable MSB-first encoding with +1 adjustment.
