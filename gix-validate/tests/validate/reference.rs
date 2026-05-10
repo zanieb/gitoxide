@@ -125,6 +125,8 @@ mod name_partial {
         );
         mktest!(any_path_starts_with_slash, b"/etc/foo", RefError::StartsWithSlash);
         mktests!(any_path_starts_with_slash_san, b"/etc/foo", "etc/foo");
+        mktests!(slash_only_san, b"/", "-");
+        mktests!(slashes_only_san, b"////", "-");
         mktest!(empty_path, b"", RefError::Empty);
         mktests!(empty_path_san, b"", "-");
         mktest!(refs_starts_with_slash, b"/refs/heads/main", RefError::StartsWithSlash);
@@ -295,6 +297,8 @@ mod name {
         mktests!(lowercase_name_without_path_san, b"main", "main");
         mktest!(any_path_starts_with_slash, b"/etc/foo", RefError::StartsWithSlash);
         mktests!(any_path_starts_with_slash_san, b"/etc/foo", "etc/foo");
+        mktests!(slash_only_san, b"/", "-");
+        mktests!(slashes_only_san, b"////", "-");
         mktest!(empty_path, b"", RefError::Empty);
         mktests!(empty_path_san, b"", "-");
         mktest!(refs_starts_with_slash, b"/refs/heads/main", RefError::StartsWithSlash);

@@ -174,6 +174,9 @@ pub(crate) fn name_inner(input: &BStr, mode: Mode) -> Result<Option<BString>, na
         while out.first() == Some(&b'/') {
             out.remove(0);
         }
+        if out.is_empty() {
+            out.push(b'-');
+        }
     }
     if out.as_ref().map_or(input, |b| b.as_bstr())[0] == b'.' {
         if let Some(out) = out.as_mut() {
