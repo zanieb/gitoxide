@@ -141,6 +141,52 @@ mod stash {
     }
 
     #[test]
+    fn stash_save_rejects_parent_paths_from_index() -> crate::Result {
+        use gix::bstr::ByteSlice;
+
+        let (repo, tmp) = repo_rw("make_reset_repo.sh")?;
+        let workdir = tmp.path().to_owned();
+        let outside_name = format!(
+            "{}-outside-victim",
+            workdir.file_name().expect("fixture path has a name").to_string_lossy()
+        );
+        let outside_file = workdir.parent().expect("fixture has a parent").join(&outside_name);
+        std::fs::write(&outside_file, "keep\n")?;
+
+        let malicious_index_path = format!("../{outside_name}");
+        let blob_id = repo.write_blob("malicious\n")?;
+        let mut index = repo.open_index()?;
+        index.add_entry(
+            gix_index::entry::Stat::default(),
+            blob_id.detach(),
+            gix_index::entry::Flags::empty(),
+            gix_index::entry::Mode::FILE,
+            malicious_index_path.as_bytes().as_bstr(),
+        );
+        index.write(Default::default())?;
+
+        let err = repo
+            .stash_save(None)
+            .expect_err("stash save should reject index paths escaping the worktree");
+        assert!(
+            err.to_string().contains("Path traversal rejected"),
+            "error should report the rejected path: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&outside_file)?,
+            "keep\n",
+            "stash save must not read or remove paths outside the worktree through the index"
+        );
+        assert!(
+            repo.stash_list()?.is_empty(),
+            "rejected stash save should not create refs/stash"
+        );
+        std::fs::remove_file(outside_file)?;
+
+        Ok(())
+    }
+
+    #[test]
     fn stash_drop_last_entry_removes_ref() -> crate::Result {
         let (repo, _tmp) = repo_rw_stash()?;
 
