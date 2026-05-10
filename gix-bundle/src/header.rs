@@ -1,7 +1,7 @@
 //! Parse and write git bundle headers.
 
 use bstr::BString;
-use gix_hash::ObjectId;
+use gix_hash::{Kind, ObjectId};
 
 use crate::{Header, Prerequisite, Ref, Version};
 
@@ -28,6 +28,18 @@ pub enum Error {
     ObjectId {
         #[source]
         source: gix_hash::decode::Error,
+    },
+    #[error("unsupported bundle object format capability: {format:?}")]
+    UnsupportedObjectFormat {
+        /// The object format value from the `object-format` capability.
+        format: BString,
+    },
+    #[error("bundle object format is {actual}, but {expected} was requested")]
+    ObjectFormatMismatch {
+        /// The object format requested by the caller.
+        expected: Kind,
+        /// The object format advertised by the bundle.
+        actual: Kind,
     },
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -133,6 +145,7 @@ impl Header {
                 // V3 capability line (before any refs or prerequisites).
                 // Multiple capabilities are allowed, e.g. @object-format=sha1 and @filter=blob:none.
                 let cap = line.strip_prefix(b"@").unwrap_or(line);
+                validate_object_format_capability(cap, object_hash)?;
                 capabilities.push(BString::from(cap));
             } else {
                 // Reference line: <hex-oid> <refname>
@@ -210,6 +223,25 @@ impl Header {
         writer.write_all(b"\n")?;
         Ok(())
     }
+}
+
+fn validate_object_format_capability(capability: &[u8], object_hash: Kind) -> Result<(), Error> {
+    let Some(format) = capability.strip_prefix(b"object-format=") else {
+        return Ok(());
+    };
+    let actual = std::str::from_utf8(format)
+        .ok()
+        .and_then(|format| format.parse().ok())
+        .ok_or_else(|| Error::UnsupportedObjectFormat {
+            format: BString::from(format),
+        })?;
+    if actual != object_hash {
+        return Err(Error::ObjectFormatMismatch {
+            expected: object_hash,
+            actual,
+        });
+    }
+    Ok(())
 }
 
 fn trim_line_ending(mut line: &[u8]) -> &[u8] {
