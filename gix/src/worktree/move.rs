@@ -30,6 +30,13 @@ pub enum Error {
     DestinationExists { path: PathBuf },
     #[error("Failed to read worktree base path")]
     ReadBase(#[source] std::io::Error),
+    #[error("Worktree '{id}' has invalid gitdir linkage at '{path}'")]
+    InvalidWorktreeLink {
+        id: BString,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("Failed to move worktree directory from '{from}' to '{to}'")]
     MoveWorktreeDir {
         from: PathBuf,
@@ -104,6 +111,13 @@ impl crate::Repository {
 
         // Get the current worktree base path
         let current_path = proxy.base().map_err(Error::ReadBase)?;
+        proxy
+            .validate_gitfile_backlink(&current_path)
+            .map_err(|source| Error::InvalidWorktreeLink {
+                id: id.to_owned(),
+                path: current_path.clone(),
+                source,
+            })?;
 
         // Normalize the new path
         let new_path = if new_path.is_absolute() {
