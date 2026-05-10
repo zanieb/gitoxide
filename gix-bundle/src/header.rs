@@ -44,14 +44,14 @@ impl Header {
         let hex_len = object_hash.len_in_hex();
 
         // Read signature line.
-        let mut line_buf = String::new();
-        if reader.read_line(&mut line_buf)? == 0 {
+        let mut line_buf = Vec::new();
+        if reader.read_until(b'\n', &mut line_buf)? == 0 {
             return Err(Error::UnexpectedEof);
         }
-        let signature = line_buf.trim_end_matches('\n').trim_end_matches('\r');
+        let signature = trim_line_ending(&line_buf);
         let version = match signature {
-            "# v2 git bundle" => Version::V2,
-            "# v3 git bundle" => Version::V3,
+            b"# v2 git bundle" => Version::V2,
+            b"# v3 git bundle" => Version::V3,
             _ => return Err(Error::InvalidSignature),
         };
 
@@ -87,10 +87,10 @@ impl Header {
 
         loop {
             line_buf.clear();
-            if reader.read_line(&mut line_buf)? == 0 {
+            if reader.read_until(b'\n', &mut line_buf)? == 0 {
                 return Err(Error::UnexpectedEof);
             }
-            let line = line_buf.trim_end_matches('\n').trim_end_matches('\r');
+            let line = trim_line_ending(&line_buf);
 
             // Empty line marks end of header.
             if line.is_empty() {
@@ -106,17 +106,21 @@ impl Header {
                 return Err(Error::TooManyEntries { limit: MAX_ENTRIES });
             }
 
-            if let Some(rest) = line.strip_prefix('-') {
+            if let Some(rest) = line.strip_prefix(b"-") {
                 // Prerequisite line: -<hex-oid> [<comment>]
                 if rest.len() < hex_len {
                     return Err(Error::InvalidPrerequisite {
-                        line: BString::from(line.as_bytes()),
+                        line: BString::from(line),
                     });
                 }
                 let hex = &rest[..hex_len];
-                let id = ObjectId::from_hex(hex.as_bytes()).map_err(|source| Error::ObjectId { source })?;
-                let comment = if rest.len() > hex_len && rest.as_bytes()[hex_len] == b' ' {
-                    Some(BString::from(&rest.as_bytes()[hex_len + 1..]))
+                let id = ObjectId::from_hex(hex).map_err(|source| Error::ObjectId { source })?;
+                let comment = if rest.len() > hex_len && rest[hex_len] == b' ' {
+                    Some(BString::from(&rest[hex_len + 1..]))
+                } else if rest.len() > hex_len {
+                    return Err(Error::InvalidPrerequisite {
+                        line: BString::from(line),
+                    });
                 } else {
                     None
                 };
@@ -124,35 +128,35 @@ impl Header {
             } else if version == Version::V3
                 && refs.is_empty()
                 && prerequisites.is_empty()
-                && !line.as_bytes()[0].is_ascii_hexdigit()
+                && !line[0].is_ascii_hexdigit()
             {
                 // V3 capability line (before any refs or prerequisites).
                 // Multiple capabilities are allowed, e.g. @object-format=sha1 and @filter=blob:none.
-                let cap = line.strip_prefix('@').unwrap_or(line);
-                capabilities.push(BString::from(cap.as_bytes()));
+                let cap = line.strip_prefix(b"@").unwrap_or(line);
+                capabilities.push(BString::from(cap));
             } else {
                 // Reference line: <hex-oid> <refname>
                 if line.len() < hex_len + 1 {
                     return Err(Error::InvalidRef {
-                        line: BString::from(line.as_bytes()),
+                        line: BString::from(line),
                     });
                 }
                 let hex = &line[..hex_len];
-                let id = ObjectId::from_hex(hex.as_bytes()).map_err(|source| Error::ObjectId { source })?;
-                if line.as_bytes()[hex_len] != b' ' {
+                let id = ObjectId::from_hex(hex).map_err(|source| Error::ObjectId { source })?;
+                if line[hex_len] != b' ' {
                     return Err(Error::InvalidRef {
-                        line: BString::from(line.as_bytes()),
+                        line: BString::from(line),
                     });
                 }
                 let refname = &line[hex_len + 1..];
                 if refname.is_empty() {
                     return Err(Error::InvalidRef {
-                        line: BString::from(line.as_bytes()),
+                        line: BString::from(line),
                     });
                 }
                 refs.push(Ref {
                     id,
-                    name: BString::from(refname.as_bytes()),
+                    name: BString::from(refname),
                 });
             }
         }
@@ -206,6 +210,16 @@ impl Header {
         writer.write_all(b"\n")?;
         Ok(())
     }
+}
+
+fn trim_line_ending(mut line: &[u8]) -> &[u8] {
+    if line.ends_with(b"\n") {
+        line = &line[..line.len() - 1];
+    }
+    if line.ends_with(b"\r") {
+        line = &line[..line.len() - 1];
+    }
+    line
 }
 
 /// Parse a bundle header from a byte slice.

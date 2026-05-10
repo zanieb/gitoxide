@@ -191,6 +191,22 @@ fn parse_multiple_prerequisites() {
     );
 }
 
+/// Prerequisite comments are byte strings and do not need to be valid UTF-8.
+#[test]
+fn parse_prerequisite_with_non_utf8_comment() {
+    let prereq = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    let ref_oid = "abcdef0123456789abcdef0123456789abcdef01";
+    let mut data = format!("# v2 git bundle\n-{prereq} boundary ").into_bytes();
+    data.push(0xff);
+    data.extend_from_slice(format!("\n{ref_oid} refs/heads/main\n\n").as_bytes());
+
+    let (header, _) = header::decode(data.as_slice(), gix_hash::Kind::Sha1).unwrap();
+    assert_eq!(
+        header.prerequisites[0].comment.as_ref().unwrap().as_slice(),
+        b"boundary \xff"
+    );
+}
+
 /// Ported from t5510: 'bundle should be able to create a full history'
 /// A bundle with no prerequisites at all (complete history).
 #[test]
@@ -249,6 +265,22 @@ fn error_on_invalid_prerequisite_oid() {
     );
     let result = header::decode(data.as_bytes(), gix_hash::Kind::Sha1);
     assert!(result.is_err(), "invalid hex in prerequisite OID should fail");
+}
+
+/// A prerequisite line with trailing data must separate it from the OID with a space.
+#[test]
+fn error_on_prerequisite_trailing_data_without_space() {
+    let prereq = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    let ref_oid = "abcdef0123456789abcdef0123456789abcdef01";
+    let data = format!(
+        "# v2 git bundle\n\
+         -{prereq}boundary\n\
+         {ref_oid} refs/heads/main\n\
+         \n"
+    );
+
+    let result = header::decode(data.as_bytes(), gix_hash::Kind::Sha1);
+    assert!(matches!(result, Err(header::Error::InvalidPrerequisite { .. })));
 }
 
 /// Error when a ref line has the OID but no space+refname.
@@ -355,6 +387,18 @@ fn parse_refs_with_tag_names() {
     assert_eq!(header.refs.len(), 2);
     assert_eq!(header.refs[0].name, BString::from("refs/heads/main"));
     assert_eq!(header.refs[1].name, BString::from("refs/tags/v1.0"));
+}
+
+/// Ref names are byte strings and do not need to be valid UTF-8.
+#[test]
+fn parse_ref_with_non_utf8_name() {
+    let ref_oid = "abcdef0123456789abcdef0123456789abcdef01";
+    let mut data = format!("# v2 git bundle\n{ref_oid} refs/heads/").into_bytes();
+    data.push(0xff);
+    data.extend_from_slice(b"\n\n");
+
+    let (header, _) = header::decode(data.as_slice(), gix_hash::Kind::Sha1).unwrap();
+    assert_eq!(header.refs[0].name.as_slice(), b"refs/heads/\xff");
 }
 
 /// The consumed byte count from decode() should indicate where pack data starts.
