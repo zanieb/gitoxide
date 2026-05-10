@@ -270,6 +270,7 @@ macro_rules! mktest {
                     ignore_revs: Vec::new(),
                     worktree_blob: None,
                     oldest_commit: None,
+                    shallow_commits: Vec::new(),
                 },
                 &std::sync::atomic::AtomicBool::new(false),
             )?
@@ -363,6 +364,7 @@ fn diff_algorithm_parity() {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )
@@ -437,6 +439,7 @@ fn since() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?
@@ -481,6 +484,7 @@ mod blame_ranges {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -528,6 +532,7 @@ mod blame_ranges {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -573,6 +578,7 @@ mod blame_ranges {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -623,6 +629,7 @@ mod rename_tracking {
                 ignore_revs: Vec::new(),
                 worktree_blob: None,
                 oldest_commit: None,
+                shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -657,6 +664,7 @@ mod rename_tracking {
                     ignore_revs: Vec::new(),
                     worktree_blob: None,
                     oldest_commit: None,
+                    shallow_commits: Vec::new(),
                 },
             )?
             .entries;
@@ -698,6 +706,7 @@ fn ignore_revs() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -726,6 +735,7 @@ fn ignore_revs() -> gix_testtools::Result {
             ignore_revs: vec![commit_for_line3],
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -796,6 +806,7 @@ fn progress_reporting() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
         Some(&counter),
@@ -843,6 +854,7 @@ fn worktree_changes_attributes_modified_lines_to_null_commit() -> gix_testtools:
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -887,6 +899,7 @@ fn worktree_changes_attributes_modified_lines_to_null_commit() -> gix_testtools:
             ignore_revs: Vec::new(),
             worktree_blob: Some(worktree_blob),
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -942,6 +955,7 @@ fn worktree_blob_identical_to_head_is_no_op() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -962,6 +976,7 @@ fn worktree_blob_identical_to_head_is_no_op() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: Some(normal_outcome.blob.clone()),
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -1035,6 +1050,7 @@ fn boundary_marks_root_commit_entries() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -1091,6 +1107,7 @@ fn oldest_commit_stops_traversal() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: None,
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;
@@ -1117,6 +1134,7 @@ fn oldest_commit_stops_traversal() -> gix_testtools::Result {
             ignore_revs: Vec::new(),
             worktree_blob: None,
             oldest_commit: Some(commit_for_line2),
+            shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
     )?;

@@ -183,6 +183,12 @@ pub struct Options {
     ///
     /// This is equivalent to libgit2's `oldest_commit` option in `git_blame_options`.
     pub oldest_commit: Option<ObjectId>,
+    /// Commits that should be treated as shallow boundaries.
+    ///
+    /// When a suspect commit is listed here, its parents are ignored and any remaining unblamed
+    /// lines are attributed to that commit as boundary entries, just as C Git treats commits listed
+    /// in `.git/shallow`.
+    pub shallow_commits: Vec<ObjectId>,
     /// If set, include uncommitted worktree changes in the blame output.
     ///
     /// The provided bytes should be the raw content of the file as it exists in the worktree.

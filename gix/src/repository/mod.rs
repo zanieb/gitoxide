@@ -150,6 +150,8 @@ pub mod blame_file {
         #[error(transparent)]
         DiffResourceCache(#[from] super::diff_resource_cache::Error),
         #[error(transparent)]
+        ShallowCommits(#[from] crate::shallow::read::Error),
+        #[error(transparent)]
         Blame(#[from] gix_blame::Error),
     }
 }

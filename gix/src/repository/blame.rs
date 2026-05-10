@@ -32,6 +32,10 @@ impl Repository {
             Some(diff_algorithm) => diff_algorithm,
             None => self.diff_algorithm()?,
         };
+        let shallow_commits = self
+            .shallow_commits()?
+            .map(|commits| commits.iter().copied().collect())
+            .unwrap_or_default();
 
         let options = gix_blame::Options {
             diff_algorithm,
@@ -42,6 +46,7 @@ impl Repository {
             ignore_revs,
             worktree_blob,
             oldest_commit,
+            shallow_commits,
         };
 
         let default_interrupt = std::sync::atomic::AtomicBool::new(false);

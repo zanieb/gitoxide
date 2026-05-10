@@ -1,5 +1,5 @@
 use gix::bstr::BString;
-use std::num::NonZero;
+use std::{num::NonZero, path::Path, process::Command};
 
 #[test]
 fn simple() -> crate::Result {
@@ -85,4 +85,86 @@ fn shallow_boundary_is_reported_without_missing_parent_error() -> crate::Result 
     );
 
     Ok(())
+}
+
+#[test]
+fn shallow_file_boundary_is_honored_even_if_parent_object_exists() -> crate::Result {
+    let dir = gix_testtools::tempfile::tempdir()?;
+    let worktree = dir.path();
+    run_git(worktree, &["init", "-q"])?;
+
+    std::fs::write(worktree.join("a"), "one\n")?;
+    run_git(worktree, &["add", "a"])?;
+    run_git(
+        worktree,
+        &[
+            "-c",
+            "user.name=A",
+            "-c",
+            "user.email=a@example.com",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    )?;
+
+    std::fs::write(worktree.join("a"), "one\ntwo\n")?;
+    run_git(
+        worktree,
+        &[
+            "-c",
+            "user.name=A",
+            "-c",
+            "user.email=a@example.com",
+            "commit",
+            "-am",
+            "second",
+            "-q",
+        ],
+    )?;
+
+    let head = run_git(worktree, &["rev-parse", "HEAD"])?;
+    let parent = run_git(worktree, &["rev-parse", "HEAD^"])?;
+    std::fs::write(worktree.join(".git").join("shallow"), &head)?;
+
+    let c_git_blame = run_git(worktree, &["blame", "--line-porcelain", "a"])?;
+    assert_eq!(
+        c_git_blame.matches("boundary\n").count(),
+        2,
+        "C Git treats HEAD as a shallow boundary even though parent {} exists",
+        parent.trim()
+    );
+
+    let repo = gix::open_opts(worktree, crate::restricted())?;
+    assert!(repo.is_shallow(), "fixture should be explicitly shallow");
+
+    let suspect = repo.head_id()?;
+    let outcome = repo.blame_file("a".into(), suspect, Default::default())?;
+
+    assert_eq!(
+        outcome.entries.iter().map(|entry| entry.len.get()).sum::<u32>(),
+        2,
+        "the entire file should be covered"
+    );
+    assert!(
+        outcome
+            .entries
+            .iter()
+            .all(|entry| entry.commit_id == suspect.detach() && entry.boundary),
+        "explicit shallow boundaries should prevent traversal to locally present parent objects"
+    );
+
+    Ok(())
+}
+
+fn run_git(dir: &Path, args: &[&str]) -> crate::Result<String> {
+    let output = Command::new("git").args(args).current_dir(dir).output()?;
+    assert!(
+        output.status.success(),
+        "git {} failed\nstdout: {}\nstderr: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8(output.stdout)?)
 }

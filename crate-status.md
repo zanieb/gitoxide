@@ -423,7 +423,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
     - [x] interruptibility
     - [ ] streaming
 - [x] support for worktree changes (`worktree_blob` option, attributes to null ObjectId)
-- [ ] shallow-history support
+- [x] shallow-history support
 - [ ] rename tracking (track different paths through history)
 - [x] commits to ignore
 - [ ] pass all blame-cornercases (from Git)

@@ -100,6 +100,7 @@ pub fn file_with_progress(
 
     // Convert ignore_revs to a HashSet for O(1) lookups during traversal.
     let ignore_revs: std::collections::HashSet<ObjectId> = options.ignore_revs.iter().copied().collect();
+    let shallow_commits: std::collections::HashSet<ObjectId> = options.shallow_commits.iter().copied().collect();
 
     let mut stats = Statistics::default();
     let (mut buf, mut buf2, mut buf3) = (Vec::new(), Vec::new(), Vec::new());
@@ -229,7 +230,11 @@ pub fn file_with_progress(
             }
         }
 
-        let parent_ids: ParentIds = collect_parents(commit, &odb, cache.as_ref(), &mut buf2)?;
+        let parent_ids: ParentIds = if shallow_commits.contains(&suspect) {
+            ParentIds::default()
+        } else {
+            collect_parents(commit, &odb, cache.as_ref(), &mut buf2)?
+        };
 
         // --ignore-rev support: when a commit is in the ignore set, lines that it
         // *changed* are still "pinned" to it (matching C Git's fallback behavior when no

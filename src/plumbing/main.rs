@@ -1817,6 +1817,10 @@ pub fn main() -> Result<()> {
             move |_progress, out, err| {
                 let repo = repository(Mode::Lenient)?;
                 let diff_algorithm = repo.diff_algorithm()?;
+                let shallow_commits = repo
+                    .shallow_commits()?
+                    .map(|commits| commits.iter().copied().collect())
+                    .unwrap_or_default();
 
                 core::repository::blame::blame_file(
                     repo,
@@ -1829,6 +1833,7 @@ pub fn main() -> Result<()> {
                         debug_track_path: false,
                         ignore_revs: Vec::new(),
                         oldest_commit: None,
+                        shallow_commits,
                         worktree_blob: None,
                     },
                     out,

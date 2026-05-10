@@ -43,6 +43,7 @@ pub(super) mod function {
             debug_track_path: true,
             ignore_revs: Vec::new(),
             oldest_commit: None,
+            shallow_commits: Vec::new(),
             worktree_blob: None,
         };
 

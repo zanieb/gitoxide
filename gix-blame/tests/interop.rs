@@ -271,6 +271,7 @@ fn default_options() -> gix_blame::Options {
         ignore_revs: Vec::new(),
         worktree_blob: None,
         oldest_commit: None,
+        shallow_commits: Vec::new(),
     }
 }
 
