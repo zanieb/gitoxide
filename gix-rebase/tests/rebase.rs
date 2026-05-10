@@ -755,6 +755,8 @@ mod driver {
         labels: RefCell<HashMap<Vec<u8>, ObjectId>>,
         /// Simulated current HEAD for label/reset operations.
         current_head: RefCell<ObjectId>,
+        /// Simulated current HEAD message, including user-amended pause messages.
+        current_head_message: RefCell<Option<Vec<u8>>>,
         /// Simulated refs for update-ref operations.
         refs: RefCell<HashMap<Vec<u8>, ObjectId>>,
         /// Ref updates pending until finish.
@@ -786,6 +788,7 @@ mod driver {
                 execute_calls: RefCell::new(Vec::new()),
                 labels: RefCell::new(HashMap::new()),
                 current_head: RefCell::new(make_oid("0000000000000000000000000000000000000000")),
+                current_head_message: RefCell::new(None),
                 refs: RefCell::new(HashMap::new()),
                 pending_update_refs: RefCell::new(HashMap::new()),
                 finish_calls: RefCell::new(0),
@@ -848,7 +851,11 @@ mod driver {
                 });
             }
             let new_id = self.next_fake_commit_id();
+            let new_message = message
+                .map(<[u8]>::to_vec)
+                .or_else(|| self.messages.get(&commit_id).cloned());
             *self.current_head.borrow_mut() = new_id;
+            *self.current_head_message.borrow_mut() = new_message;
             Ok(CherryPickOutcome { new_commit_id: new_id })
         }
 
@@ -869,6 +876,7 @@ mod driver {
             }
             let new_id = self.next_fake_commit_id();
             *self.current_head.borrow_mut() = new_id;
+            *self.current_head_message.borrow_mut() = None;
             Ok(CherryPickOutcome { new_commit_id: new_id })
         }
 
@@ -885,6 +893,7 @@ mod driver {
             }
             let new_id = self.next_fake_commit_id();
             *self.current_head.borrow_mut() = new_id;
+            *self.current_head_message.borrow_mut() = self.messages.get(&commit_id).cloned();
             Ok(CherryPickOutcome { new_commit_id: new_id })
         }
 
@@ -898,9 +907,14 @@ mod driver {
                 .ok_or_else(|| format!("message not found for {commit_id}").into())
         }
 
+        fn read_head_message(&self) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.current_head_message.borrow().clone())
+        }
+
         fn update_head(&self, commit_id: ObjectId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.update_head_calls.borrow_mut().push(commit_id);
             *self.current_head.borrow_mut() = commit_id;
+            *self.current_head_message.borrow_mut() = self.messages.get(&commit_id).cloned();
             Ok(())
         }
 
@@ -1807,6 +1821,118 @@ mod driver {
         assert_eq!(
             state.accumulated_squash_message.as_deref(),
             Some(b"Edit message\n".as_slice())
+        );
+    }
+
+    #[test]
+    fn fixup_after_reword_preserves_amended_head_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let hex_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let hex_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(hex_a, hex_a, b"Original message\n");
+        driver.register_commit(hex_b, hex_b, b"Fixup message\n");
+
+        let mut state = make_state_with_ops(vec![
+            Operation::Reword {
+                commit: make_oid(hex_a).into(),
+                summary: "Original".into(),
+            },
+            Operation::Fixup {
+                commit: make_oid(hex_b).into(),
+                summary: "Fixup".into(),
+                amend_message: gix_sequencer::todo::AmendMessage::No,
+            },
+        ]);
+
+        assert!(matches!(
+            state.step(&driver, &rebase_dir).unwrap(),
+            StepOutcome::Paused { .. }
+        ));
+        *driver.current_head_message.borrow_mut() = Some(b"Edited message\n".to_vec());
+
+        state.continue_rebase(&driver, &rebase_dir).unwrap();
+
+        let calls = driver.cherry_pick_calls.borrow();
+        assert_eq!(
+            calls[1].1.as_deref(),
+            Some(b"Edited message\n".as_slice()),
+            "plain fixup after reword should keep the user-amended HEAD message"
+        );
+    }
+
+    #[test]
+    fn fixup_without_previous_commit_does_not_use_head_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(hex, hex, b"Fixup message\n");
+        *driver.current_head_message.borrow_mut() = Some(b"Onto message\n".to_vec());
+
+        let mut state = make_state_with_ops(vec![Operation::Fixup {
+            commit: make_oid(hex).into(),
+            summary: "Fixup".into(),
+            amend_message: gix_sequencer::todo::AmendMessage::No,
+        }]);
+
+        state.step(&driver, &rebase_dir).unwrap();
+
+        let calls = driver.cherry_pick_calls.borrow();
+        assert_eq!(calls[0].1, None, "there is no previous todo commit to preserve");
+    }
+
+    #[test]
+    fn fixup_after_fixup_edit_preserves_amended_head_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_dir = dir.path().join("rebase-merge");
+        let hex_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let hex_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let hex_c = "cccccccccccccccccccccccccccccccccccccccc";
+
+        let mut driver = MockDriver::new();
+        driver.register_commit(hex_a, hex_a, b"Original message\n");
+        driver.register_commit(hex_b, hex_b, b"Fixup edit message\n");
+        driver.register_commit(hex_c, hex_c, b"Follow-up fixup\n");
+
+        let mut state = make_state_with_ops(vec![
+            Operation::Pick {
+                commit: make_oid(hex_a).into(),
+                summary: "Original".into(),
+            },
+            Operation::Fixup {
+                commit: make_oid(hex_b).into(),
+                summary: "Fixup -c".into(),
+                amend_message: gix_sequencer::todo::AmendMessage::Edit,
+            },
+            Operation::Fixup {
+                commit: make_oid(hex_c).into(),
+                summary: "Follow-up fixup".into(),
+                amend_message: gix_sequencer::todo::AmendMessage::No,
+            },
+        ]);
+
+        state.step(&driver, &rebase_dir).unwrap();
+        assert!(matches!(
+            state.step(&driver, &rebase_dir).unwrap(),
+            StepOutcome::Paused { .. }
+        ));
+        *driver.current_head_message.borrow_mut() = Some(b"Edited fixup message\n".to_vec());
+
+        state.continue_rebase(&driver, &rebase_dir).unwrap();
+
+        let calls = driver.cherry_pick_calls.borrow();
+        assert_eq!(
+            calls[2].1.as_deref(),
+            Some(b"Edited fixup message\n".as_slice()),
+            "follow-up fixup should use the message edited at the fixup -c pause"
+        );
+        assert_eq!(
+            state.accumulated_squash_message.as_deref(),
+            Some(b"Edited fixup message\n".as_slice())
         );
     }
 
