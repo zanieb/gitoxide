@@ -63,6 +63,22 @@ impl Repository {
                 gix_dir::entry::Status::Pruned => {}
             }
         }
+        if paths.is_empty() && !pathspecs.is_empty() {
+            let ignored_pathspecs: Vec<_> = outcome
+                .ignored_entries
+                .iter()
+                .filter(|ignored| pathspecs.iter().any(|spec| spec.as_bstr() == ignored.as_bstr()))
+                .cloned()
+                .collect();
+            if !options.force_ignored && !ignored_pathspecs.is_empty() {
+                return Err(Error::Ignored {
+                    paths: ignored_pathspecs,
+                });
+            }
+            if outcome.ignored_entries.is_empty() {
+                return Err(Error::PathspecsDidNotMatch { pathspecs });
+            }
+        }
 
         for path in paths {
             let path = path.as_bstr();
