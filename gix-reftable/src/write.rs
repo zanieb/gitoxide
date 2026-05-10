@@ -51,14 +51,14 @@ pub fn serialize_ref_record(
     let (value_type, extra_data) = match &record.value {
         crate::RefRecordValue::Deletion => (0u8, Vec::new()),
         crate::RefRecordValue::Val1 { target } => {
-            let mut data = Vec::with_capacity(hash_size);
-            data.extend_from_slice(target.as_bytes());
+            let mut data = Vec::new();
+            append_object_id(&mut data, target, hash_size)?;
             (1, data)
         }
         crate::RefRecordValue::Val2 { target, target_value } => {
-            let mut data = Vec::with_capacity(2 * hash_size);
-            data.extend_from_slice(target.as_bytes());
-            data.extend_from_slice(target_value.as_bytes());
+            let mut data = Vec::new();
+            append_object_id(&mut data, target, hash_size)?;
+            append_object_id(&mut data, target_value, hash_size)?;
             (2, data)
         }
         crate::RefRecordValue::Symref { target } => {
@@ -87,6 +87,18 @@ pub fn serialize_ref_record(
     out.extend_from_slice(&extra_data);
 
     Ok(out)
+}
+
+fn append_object_id(out: &mut Vec<u8>, id: &gix_hash::ObjectId, hash_size: usize) -> Result<(), Error> {
+    let bytes = id.as_bytes();
+    if bytes.len() != hash_size {
+        return Err(Error::ObjectIdLengthMismatch {
+            actual: bytes.len(),
+            expected: hash_size,
+        });
+    }
+    out.extend_from_slice(bytes);
+    Ok(())
 }
 
 /// Write a complete reftable file header.
@@ -392,6 +404,19 @@ mod tests {
             Err(Error::UpdateIndexBelowMinimum {
                 update_index: 4,
                 min_update_index: 5
+            })
+        ));
+    }
+
+    #[test]
+    fn serialize_ref_record_rejects_hash_size_mismatch() {
+        let record = make_val1("refs/heads/main", 0xAA, 1);
+
+        assert!(matches!(
+            serialize_ref_record(&record, &[], 1, 32),
+            Err(Error::ObjectIdLengthMismatch {
+                actual: 20,
+                expected: 32
             })
         ));
     }
