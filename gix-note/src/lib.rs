@@ -99,23 +99,32 @@ pub fn list_notes<E>(
 where
     E: std::error::Error + Send + Sync + 'static,
 {
+    list_notes_inner(tree, hash_kind, hex_prefix.as_bytes(), find_tree)
+}
+
+fn list_notes_inner<E>(
+    tree: &gix_object::Tree,
+    hash_kind: gix_hash::Kind,
+    hex_prefix: &[u8],
+    find_tree: &mut impl FnMut(&ObjectId) -> Result<gix_object::Tree, E>,
+) -> Result<Vec<Entry>, ListError<E>>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
     let mut entries = Vec::new();
 
     for entry in &tree.entries {
         if entry.mode.is_tree() {
-            // This is a fanout directory. The directory name is part of the hex hash.
-            // Fanout directory names are always valid ASCII hex, so lossy conversion is safe,
-            // but we use the raw bytes directly to avoid any potential data loss.
-            let component = std::str::from_utf8(&entry.filename).unwrap_or("");
-            let sub_prefix = format!("{hex_prefix}{component}");
+            let mut sub_prefix = Vec::with_capacity(hex_prefix.len() + entry.filename.len());
+            sub_prefix.extend_from_slice(hex_prefix);
+            sub_prefix.extend_from_slice(&entry.filename);
             let sub_tree = find_tree(&entry.oid).map_err(ListError::FindTree)?;
-            let sub_entries = list_notes(&sub_tree, hash_kind, &sub_prefix, find_tree)?;
+            let sub_entries = list_notes_inner(&sub_tree, hash_kind, &sub_prefix, find_tree)?;
             entries.extend(sub_entries);
         } else if entry.mode.is_blob() {
             // This is a note blob. The filename is the remaining hex of the target.
-            // Use raw bytes to avoid lossy UTF-8 conversion.
             let mut full_hex = Vec::with_capacity(hex_prefix.len() + entry.filename.len());
-            full_hex.extend_from_slice(hex_prefix.as_bytes());
+            full_hex.extend_from_slice(hex_prefix);
             full_hex.extend_from_slice(&entry.filename);
             if full_hex.len() == hash_kind.len_in_hex() {
                 if let Ok(target) = ObjectId::from_hex(&full_hex) {
@@ -363,6 +372,40 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].target, target);
         assert_eq!(entries[0].note_id, note_blob);
+    }
+
+    #[test]
+    fn list_notes_preserves_invalid_fanout_bytes() {
+        let note_blob = oid("1234567890abcdef1234567890abcdef12345678");
+        let sub_tree_oid = oid("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+        let sub_tree = gix_object::Tree {
+            entries: vec![TreeEntry {
+                mode: blob_mode(),
+                filename: "1111111111111111111111111111111111111111".into(),
+                oid: note_blob,
+            }],
+        };
+        let root_tree = gix_object::Tree {
+            entries: vec![TreeEntry {
+                mode: tree_mode(),
+                filename: BString::from(vec![0xff]),
+                oid: sub_tree_oid,
+            }],
+        };
+
+        let mut find_tree = move |id: &ObjectId| -> Result<gix_object::Tree, std::io::Error> {
+            if *id == sub_tree_oid {
+                Ok(sub_tree.clone())
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::NotFound, "unknown tree"))
+            }
+        };
+
+        let entries = list_notes(&root_tree, gix_hash::Kind::Sha1, "", &mut find_tree).unwrap();
+        assert!(
+            entries.is_empty(),
+            "invalid fanout bytes must not be treated as an empty prefix"
+        );
     }
 
     #[test]
