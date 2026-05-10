@@ -190,7 +190,12 @@ where
 
             if let Some(shallow_lock) = shallow_lock {
                 if !previous_response.shallow_updates().is_empty() {
-                    gix_shallow::write(shallow_lock, shallow_commits, previous_response.shallow_updates())?;
+                    gix_shallow::write_with_prune(
+                        shallow_lock,
+                        shallow_commits,
+                        previous_response.shallow_updates(),
+                        |id| negotiate.has_object_for_shallow_pruning(id),
+                    )?;
                 }
             }
             Ok(Some(Outcome {

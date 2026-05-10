@@ -149,13 +149,20 @@ mod blocking_io {
         let (repo, _change) = gix::prepare_clone_bare(remote::repo("base.shallow").path(), tmp.path())?
             .with_in_memory_config_overrides(Some("my.marker=1"))
             .fetch_only(gix::progress::Discard, &AtomicBool::default())?;
+        let shallow_ids = shallow_ids(&repo, "present")?;
         assert_eq!(
-            shallow_ids(&repo, "present")?,
+            shallow_ids,
             vec![
                 hex_to_id("2d9d136fb0765f2e24c44a0f91984318d580d03b"),
                 hex_to_id("dfd0954dabef3b64f458321ef15571cc1a46d552"),
-                hex_to_id("dfd0954dabef3b64f458321ef15571cc1a46d552"),
-            ]
+            ],
+            "shallow information is deduplicated while accepting a shallow remote"
+        );
+        assert!(
+            shallow_ids
+                .iter()
+                .all(|id| gix_object::Exists::exists(&repo.objects, id)),
+            "shallow information only mentions commits that exist in the local repository"
         );
         assert_eq!(
             repo.config_snapshot().boolean("my.marker"),
@@ -168,6 +175,35 @@ mod blocking_io {
                 .boolean("my.marker"),
             None,
             "these options are not persisted"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn from_shallow_prunes_missing_boundary_commits() -> crate::Result {
+        let remote_dir = gix_testtools::scripted_fixture_writable("make_remote_repos.sh")?;
+        let missing = hex_to_id("1111111111111111111111111111111111111111");
+        std::io::Write::write_all(
+            &mut std::fs::OpenOptions::new()
+                .append(true)
+                .open(remote_dir.path().join("base.shallow/.git/shallow"))?,
+            format!("{missing}\n").as_bytes(),
+        )?;
+
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _change) = gix::prepare_clone_bare(remote_dir.path().join("base.shallow"), tmp.path())?
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        let shallow_ids = shallow_ids(&repo, "present")?;
+        assert!(
+            !shallow_ids.contains(&missing),
+            "a shallow commit advertised by the remote but absent from the received pack is pruned"
+        );
+        assert!(
+            shallow_ids
+                .iter()
+                .all(|id| gix_object::Exists::exists(&repo.objects, id)),
+            "all remaining shallow boundary commits exist locally"
         );
         Ok(())
     }

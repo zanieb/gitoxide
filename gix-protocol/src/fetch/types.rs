@@ -82,6 +82,13 @@ mod with_fetch {
             arguments: &mut fetch::Arguments,
             previous_response: Option<&fetch::Response>,
         ) -> Result<(negotiate::Round, bool), negotiate::Error>;
+        /// Return `true` if `id` exists in the local object database and should remain in the shallow boundary.
+        ///
+        /// Implementations that don't have access to an object database may return `true` to retain the previous
+        /// behavior.
+        fn has_object_for_shallow_pruning(&mut self, _id: &gix_hash::ObjectId) -> bool {
+            true
+        }
     }
 
     /// The outcome of [`fetch()`](crate::fetch()).

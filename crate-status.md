@@ -149,7 +149,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] clone
             * [x] shallow
                 * [ ] include-tags when shallow is used (needs separate fetch)
-                * [ ] prune non-existing shallow commits
+                * [x] prune non-existing shallow commits
             * [ ] [bundles](https://git-scm.com/docs/git-bundle)
         * [x] fetch
             * [x] shallow (remains shallow, options to adjust shallow boundary)
