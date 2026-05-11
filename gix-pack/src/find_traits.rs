@@ -223,6 +223,7 @@ mod tests {
                 gix_object::Data {
                     kind: Kind::Blob,
                     data: buffer,
+                    object_hash: gix_hash::Kind::Sha1,
                 },
                 None,
             )))

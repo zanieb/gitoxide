@@ -28,6 +28,7 @@ fn header_footer_parse(c: &mut Criterion) {
         block_size: 4096,
         min_update_index: 1,
         max_update_index: 100,
+        object_hash: gix_hash::Kind::Sha1,
     });
 
     c.bench_function("parse_header", |b| {
@@ -41,6 +42,7 @@ fn header_footer_parse(c: &mut Criterion) {
                 block_size: 4096,
                 min_update_index: 1,
                 max_update_index: 100,
+                object_hash: gix_hash::Kind::Sha1,
             })
         });
     });
