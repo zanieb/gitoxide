@@ -209,6 +209,27 @@ mod blocking_io {
     }
 
     #[test]
+    fn push_annotated_tag_sends_tag_object_and_target() -> gix_testtools::Result {
+        let (repo, bare_path, dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        let working_path = dir.path().join("working");
+
+        git_in(
+            &working_path,
+            &["tag", "-a", "annotated", "-m", "annotated tag", "main"],
+        );
+        let tag_oid = git_in(&working_path, &["rev-parse", "refs/tags/annotated"]);
+        let target_oid = git_in(&working_path, &["rev-parse", "refs/tags/annotated^{}"]);
+
+        do_push(&repo, &bare_url, &["refs/tags/annotated:refs/tags/annotated"])?;
+
+        verify_push_result(&bare_path, "refs/tags/annotated", &tag_oid);
+        assert_eq!(git_in(&bare_path, &["cat-file", "-t", "refs/tags/annotated"]), "tag");
+        assert_eq!(git_in(&bare_path, &["rev-parse", "refs/tags/annotated^{}"]), target_oid);
+        Ok(())
+    }
+
+    #[test]
     fn push_multiple_refs_at_once() -> gix_testtools::Result {
         let (repo, bare_path, _dir) = setup_push_repos()?;
         let bare_url = format!("file://{}", bare_path.display());
@@ -397,6 +418,55 @@ mod blocking_io {
         ));
         verify_push_result(&bare_path, "refs/heads/main", &original_oid);
 
+        Ok(())
+    }
+
+    #[test]
+    fn atomic_push_with_client_side_rejection_does_not_update_other_refs() -> gix_testtools::Result {
+        let (repo, bare_path, dir) = setup_push_repos()?;
+        let bare_url = format!("file://{}", bare_path.display());
+        let original_oid = repo.head_id()?.to_string();
+
+        do_push(&repo, &bare_url, &["refs/heads/main:refs/heads/main"])?;
+        verify_push_result(&bare_path, "refs/heads/main", &original_oid);
+
+        let working_path = dir.path().join("working");
+        git_in(
+            &working_path,
+            &["commit", "--amend", "-m", "amended commit", "--allow-empty"],
+        );
+        let repo = gix::open_opts(&working_path, crate::restricted())?;
+
+        let remote = repo.remote_at(bare_url.as_str())?.with_refspecs(
+            [
+                "refs/heads/main:refs/heads/main",
+                "refs/heads/feature:refs/heads/atomic-feature",
+            ]
+            .iter()
+            .copied(),
+            Direction::Push,
+        )?;
+        let outcome = remote
+            .connect(Direction::Push)?
+            .prepare_push(gix::progress::Discard, Default::default())?
+            .with_atomic(true)
+            .send(gix::progress::Discard, &AtomicBool::default())?;
+
+        assert_eq!(outcome.updates.len(), 2);
+        assert!(outcome.updates.iter().any(|update| matches!(
+            update,
+            gix::remote::push::RefUpdateStatus::Ng { ref_name, reason }
+                if ref_name.as_ref() as &[u8] == b"refs/heads/main"
+                    && reason.as_ref() as &[u8] == b"non-fast-forward"
+        )));
+        assert!(outcome.updates.iter().any(|update| matches!(
+            update,
+            gix::remote::push::RefUpdateStatus::Ng { ref_name, reason }
+                if ref_name.as_ref() as &[u8] == b"refs/heads/atomic-feature"
+                    && reason.as_ref() as &[u8] == b"atomic push failed"
+        )));
+        verify_push_result(&bare_path, "refs/heads/main", &original_oid);
+        verify_ref_absent(&bare_path, "refs/heads/atomic-feature");
         Ok(())
     }
 
