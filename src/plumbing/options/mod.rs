@@ -389,12 +389,12 @@ pub mod worktree {
             /// A branch, tag, or commit to check out in the new worktree.
             /// If not specified, defaults to HEAD.
             commit_ish: Option<String>,
-            /// Check out an existing branch.
+            /// Create a new branch and check it out.
             #[clap(short, long)]
             branch: Option<String>,
-            /// Create a new branch and check it out.
-            #[clap(short = 'B', long)]
-            new_branch: Option<String>,
+            /// Create or reset a branch and check it out.
+            #[clap(short = 'B', long = "force-branch", alias = "new-branch")]
+            reset_branch: Option<String>,
             /// Create the worktree with a detached HEAD.
             #[clap(long)]
             detach: bool,

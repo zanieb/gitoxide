@@ -301,6 +301,8 @@ fn from_nonbare_parent_repo_set_workdir() -> gix_testtools::Result {
 /// Tests for worktree add and remove operations
 #[cfg(feature = "worktree-mutation")]
 mod mutation {
+    use std::process::Command;
+
     use gix::bstr::ByteSlice;
 
     fn repo_rw() -> crate::Result<(gix::Repository, gix_testtools::tempfile::TempDir)> {
@@ -324,6 +326,43 @@ mod mutation {
         std::fs::create_dir_all(&admin_dir)?;
         std::fs::write(admin_dir.join("gitdir"), format!("{}\n", base.join(".git").display()))?;
         Ok(admin_dir)
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> crate::Result {
+        let output = Command::new("git").args(args).current_dir(dir).output()?;
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    }
+
+    fn add_committed_submodule(worktree_path: &std::path::Path) -> crate::Result {
+        let parent = worktree_path.parent().expect("worktree has parent directory");
+        let submodule_origin = parent.join("submodule-origin");
+        std::fs::create_dir(&submodule_origin)?;
+        git(&submodule_origin, &["init", "-q"])?;
+        git(&submodule_origin, &["config", "user.name", "Test User"])?;
+        git(&submodule_origin, &["config", "user.email", "test@example.com"])?;
+        std::fs::write(submodule_origin.join("file"), "submodule\n")?;
+        git(&submodule_origin, &["add", "file"])?;
+        git(&submodule_origin, &["commit", "-q", "-m", "initial submodule"])?;
+
+        let submodule_url = submodule_origin.to_string_lossy();
+        git(
+            worktree_path,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                submodule_url.as_ref(),
+                "nested",
+            ],
+        )?;
+        git(worktree_path, &["commit", "-q", "-m", "add submodule"])?;
+        Ok(())
     }
 
     mod add {
@@ -607,6 +646,75 @@ mod mutation {
             let wt_repo = proxy.into_repo()?;
             let head_name = wt_repo.head_name()?.expect("should have branch");
             assert_eq!(head_name.as_bstr(), "refs/heads/my-new-branch");
+            Ok(())
+        }
+
+        #[test]
+        fn with_reset_branch_resets_existing_branch_to_start_point() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-reset-branch");
+            let old_feature_id = repo.find_reference("refs/heads/feature-1")?.id().detach();
+            let target_id = repo
+                .head_commit()?
+                .parent_ids()
+                .next()
+                .expect("fixture has a parent commit")
+                .detach();
+            let target_spec = target_id.to_string();
+            assert_ne!(
+                old_feature_id, target_id,
+                "fixture should keep feature-1 distinct from HEAD's parent"
+            );
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    reset_branch: Some(b"feature-1".as_bstr()),
+                    start_point: Some(target_spec.as_bytes().as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+
+            assert_eq!(repo.find_reference("refs/heads/feature-1")?.id().detach(), target_id);
+            let wt_repo = proxy.into_repo()?;
+            assert_eq!(
+                wt_repo.head_name()?.expect("should have branch").as_bstr(),
+                "refs/heads/feature-1"
+            );
+            assert_eq!(wt_repo.head_id()?.detach(), target_id);
+            Ok(())
+        }
+
+        #[test]
+        fn reset_branch_fails_when_branch_is_checked_out() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let first_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature-reset");
+            repo.worktree_add(
+                &first_path,
+                gix::worktree::add::Options {
+                    branch: Some(b"feature-1".as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+
+            let second_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature-reset-2");
+            let result = repo.worktree_add(
+                &second_path,
+                gix::worktree::add::Options {
+                    reset_branch: Some(b"feature-1".as_bstr()),
+                    start_point: Some(b"HEAD".as_bstr()),
+                    ..Default::default()
+                },
+            );
+
+            assert!(
+                matches!(result, Err(gix::worktree::add::Error::BranchCheckedOut { .. })),
+                "resetting a checked-out branch must fail, got {result:?}"
+            );
+            assert!(
+                !second_path.exists(),
+                "failure should happen before creating a worktree"
+            );
             Ok(())
         }
 
@@ -1031,6 +1139,33 @@ mod mutation {
             assert!(
                 !worktree_path.exists(),
                 "locked worktree should be removed with force level 2"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn refuses_to_remove_worktree_containing_submodules() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-submodule-remove");
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            )?;
+            let worktree_id = proxy.id().to_owned();
+            add_committed_submodule(&worktree_path)?;
+
+            let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
+            assert!(
+                matches!(result, Err(gix::worktree::remove::Error::ContainsSubmodules { .. })),
+                "worktree remove must refuse worktrees containing submodules, got {result:?}"
+            );
+            assert!(
+                worktree_path.exists(),
+                "refused remove must leave the worktree in place"
             );
             Ok(())
         }
@@ -1872,6 +2007,35 @@ mod mutation {
 
             assert!(!original_path.exists(), "original should be gone");
             assert!(new_path.exists(), "new path should exist");
+            Ok(())
+        }
+
+        #[test]
+        fn refuses_to_move_worktree_containing_submodules() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-submodule-move");
+            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-submodule-moved");
+
+            let proxy = repo.worktree_add(
+                &original_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            )?;
+            let worktree_id = proxy.id().to_owned();
+            add_committed_submodule(&original_path)?;
+
+            let result = repo.worktree_move(worktree_id.as_bstr(), &new_path);
+            assert!(
+                matches!(result, Err(gix::worktree::r#move::Error::ContainsSubmodules { .. })),
+                "worktree move must refuse worktrees containing submodules, got {result:?}"
+            );
+            assert!(
+                original_path.exists(),
+                "refused move must leave the source worktree in place"
+            );
+            assert!(!new_path.exists(), "refused move must not create the destination");
             Ok(())
         }
 

@@ -30,6 +30,8 @@ pub enum Error {
     DirtyWorktree { id: BString },
     #[error("Worktree '{id}' contains untracked files, use force to delete")]
     UntrackedFiles { id: BString },
+    #[error("Cannot remove worktree '{id}' because it contains submodules")]
+    ContainsSubmodules { id: BString },
     #[error("Failed to check worktree status")]
     CheckStatus(#[source] crate::status::is_dirty::Error),
     #[error("Failed to create status platform")]
@@ -38,6 +40,8 @@ pub enum Error {
     CheckUntracked(#[source] crate::status::into_iter::Error),
     #[error("Failed to open worktree as repository")]
     OpenWorktree(#[source] crate::worktree::proxy::into_repo::Error),
+    #[error("Failed to inspect worktree submodules")]
+    Submodules(#[source] crate::submodule::modules::Error),
     #[error("Failed to read worktree base path from gitdir file")]
     ReadBase(#[from] std::io::Error),
     #[error("Worktree '{id}' has invalid gitdir linkage at '{path}'")]
@@ -171,6 +175,10 @@ impl crate::Repository {
                         path: base_path.clone(),
                         source,
                     })?;
+                let worktree_repo = proxy.clone().into_repo().map_err(Error::OpenWorktree)?;
+                if worktree_repo.submodules().map_err(Error::Submodules)?.is_some() {
+                    return Err(Error::ContainsSubmodules { id: id.to_owned() });
+                }
                 std::fs::remove_dir_all(&base_path).map_err(|source| Error::RemoveWorktreeDir {
                     path: base_path,
                     source,

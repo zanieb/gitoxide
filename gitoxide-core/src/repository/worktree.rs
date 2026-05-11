@@ -34,7 +34,17 @@ pub fn list(repo: gix::Repository, out: &mut dyn std::io::Write, format: OutputF
         let base_display = proxy
             .base()
             .map_or_else(|_| "<missing>".to_string(), |p| p.display().to_string());
-        writeln!(out, "{base_display} [{name}]{locked_info}", name = proxy.id())?;
+        let branch = proxy
+            .clone()
+            .into_repo_with_possibly_inaccessible_worktree()
+            .ok()
+            .and_then(|repo| {
+                repo.head_name()
+                    .ok()
+                    .map(|head| head.map_or_else(|| "<detached>".into(), |name| name.shorten().to_owned()))
+            })
+            .unwrap_or_else(|| proxy.id().to_owned());
+        writeln!(out, "{base_display} [{branch}]{locked_info}")?;
     }
     Ok(())
 }
@@ -208,6 +218,8 @@ pub struct AddOptions {
     pub branch: Option<String>,
     /// Create a new branch with this name.
     pub new_branch: Option<String>,
+    /// Create or reset a branch with this name.
+    pub reset_branch: Option<String>,
     /// Detach HEAD at the given commit-ish.
     pub detach: bool,
     /// Lock the worktree after creation.
@@ -229,6 +241,7 @@ pub fn add(
 
     let branch_bytes;
     let new_branch_bytes;
+    let reset_branch_bytes;
     let start_point_bytes;
 
     let options = gix::worktree::add::Options {
@@ -243,6 +256,13 @@ pub fn add(
             Some(b) => {
                 new_branch_bytes = b.as_bytes();
                 Some(new_branch_bytes.as_bstr())
+            }
+            None => None,
+        },
+        reset_branch: match &opts.reset_branch {
+            Some(b) => {
+                reset_branch_bytes = b.as_bytes();
+                Some(reset_branch_bytes.as_bstr())
             }
             None => None,
         },
@@ -266,6 +286,8 @@ pub fn add(
         "Preparing worktree ({})",
         if opts.detach {
             "detached HEAD".to_string()
+        } else if let Some(ref reset_branch) = opts.reset_branch {
+            format!("new/reset branch '{reset_branch}'")
         } else if let Some(ref new_branch) = opts.new_branch {
             format!("new branch '{new_branch}'")
         } else if let Some(ref branch) = opts.branch {

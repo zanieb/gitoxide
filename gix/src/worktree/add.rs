@@ -13,6 +13,9 @@ pub struct Options<'a> {
     /// Create a new branch with this name before checking out.
     /// Mutually exclusive with `branch` and `detach`.
     pub new_branch: Option<&'a BStr>,
+    /// Create or reset a branch with this name before checking it out.
+    /// Mutually exclusive with `branch`, `new_branch`, and `detach`.
+    pub reset_branch: Option<&'a BStr>,
     /// The commit-ish to use as the starting point for the new branch or detached HEAD.
     /// If not provided, defaults to HEAD.
     pub start_point: Option<&'a BStr>,
@@ -72,7 +75,7 @@ pub enum Error {
     Checkout(#[from] crate::clone::checkout::main_worktree::Error),
     #[error("The repository is bare and cannot have worktrees")]
     BareRepository,
-    #[error("Mutually exclusive options: can only specify one of branch, new_branch, or detach")]
+    #[error("Mutually exclusive options: can only specify one of branch, new_branch, reset_branch, or detach")]
     MutuallyExclusiveOptions,
     #[error("Could not find branch '{name}'")]
     BranchNotFound { name: BString },
@@ -106,7 +109,10 @@ impl crate::Repository {
         let path = path.as_ref();
 
         // Validate mutually exclusive options
-        let option_count = options.branch.is_some() as u8 + options.new_branch.is_some() as u8 + options.detach as u8;
+        let option_count = options.branch.is_some() as u8
+            + options.new_branch.is_some() as u8
+            + options.reset_branch.is_some() as u8
+            + options.detach as u8;
         if option_count > 1 {
             return Err(Error::MutuallyExclusiveOptions);
         }
@@ -148,7 +154,7 @@ impl crate::Repository {
         // Check if the branch is already checked out (unless detaching or creating a new branch)
         if let HeadTarget::Symbolic {
             branch: branch_name,
-            create: BranchCreation::None,
+            create: BranchCreation::None | BranchCreation::ResetAt(_),
         } = &head_target
         {
             self.check_branch_not_checked_out(branch_name.as_ref())?;
@@ -212,20 +218,22 @@ impl crate::Repository {
             .map_err(|source| Error::WriteFile { file: ".git", source })?;
 
         // Create inferred or requested branches before opening the worktree.
-        if let HeadTarget::Symbolic {
-            branch,
-            create: BranchCreation::At(target_id),
-        } = &head_target
-        {
-            self.edit_reference(RefEdit {
-                change: Change::Update {
-                    log: Default::default(),
-                    expected: PreviousValue::MustNotExist,
-                    new: gix_ref::Target::Object(*target_id),
-                },
-                name: branch.as_bstr().try_into()?,
-                deref: false,
-            })?;
+        if let HeadTarget::Symbolic { branch, create } = &head_target {
+            if let Some((target_id, expected)) = match create {
+                BranchCreation::At(target_id) => Some((target_id, PreviousValue::MustNotExist)),
+                BranchCreation::ResetAt(target_id) => Some((target_id, PreviousValue::Any)),
+                BranchCreation::None | BranchCreation::Unborn => None,
+            } {
+                self.edit_reference(RefEdit {
+                    change: Change::Update {
+                        log: Default::default(),
+                        expected,
+                        new: gix_ref::Target::Object(*target_id),
+                    },
+                    name: branch.as_bstr().try_into()?,
+                    deref: false,
+                })?;
+            }
         }
 
         // Lock if requested
@@ -294,6 +302,15 @@ impl crate::Repository {
                 create: start_point_id
                     .or_else(|| self.current_head_id())
                     .map_or(BranchCreation::Unborn, BranchCreation::At),
+            })
+        } else if let Some(reset_branch) = options.reset_branch {
+            let branch_ref = local_branch_ref(reset_branch);
+            let target_id = start_point_id
+                .or_else(|| self.current_head_id())
+                .ok_or(Error::UnbornHead)?;
+            Ok(HeadTarget::Symbolic {
+                branch: branch_ref,
+                create: BranchCreation::ResetAt(target_id),
             })
         } else if let Some(id) = start_point_id {
             let branch_ref = match options.start_point {
@@ -383,6 +400,7 @@ enum HeadTarget {
 enum BranchCreation {
     None,
     At(gix_hash::ObjectId),
+    ResetAt(gix_hash::ObjectId),
     Unborn,
 }
 

@@ -37,6 +37,12 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+    #[error("Cannot move worktree '{id}' because it contains submodules")]
+    ContainsSubmodules { id: BString },
+    #[error("Failed to open worktree as repository")]
+    OpenWorktree(#[source] crate::worktree::proxy::into_repo::Error),
+    #[error("Failed to inspect worktree submodules")]
+    Submodules(#[source] crate::submodule::modules::Error),
     #[error("Failed to move worktree directory from '{from}' to '{to}'")]
     MoveWorktreeDir {
         from: PathBuf,
@@ -118,6 +124,10 @@ impl crate::Repository {
                 path: current_path.clone(),
                 source,
             })?;
+        let worktree_repo = proxy.clone().into_repo().map_err(Error::OpenWorktree)?;
+        if worktree_repo.submodules().map_err(Error::Submodules)?.is_some() {
+            return Err(Error::ContainsSubmodules { id: id.to_owned() });
+        }
 
         // Normalize the new path
         let new_path = if new_path.is_absolute() {
