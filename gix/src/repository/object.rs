@@ -318,9 +318,7 @@ impl crate::Repository {
     }
 
     fn validate_object_references(&self, kind: gix_object::Kind, buf: &[u8]) -> Result<(), object::write::Error> {
-        let object = gix_object::Data::new_with_hash(kind, buf, self.object_hash())
-            .decode()
-            .map_err(|err| Box::new(err) as Box<dyn std::error::Error + Send + Sync + 'static>)?;
+        let object = self.decode_object_for_reference_validation(kind, buf)?;
         match object {
             ObjectRef::Blob(_) => {}
             ObjectRef::Tree(tree) => {
@@ -388,6 +386,25 @@ impl crate::Repository {
         }
     }
 
+    fn decode_object_for_reference_validation<'a>(
+        &self,
+        kind: gix_object::Kind,
+        buf: &'a [u8],
+    ) -> Result<ObjectRef<'a>, object::write::Error> {
+        let decode = |object_hash| gix_object::Data::new_with_hash(kind, buf, object_hash).decode();
+        match decode(self.object_hash()) {
+            Ok(object) => Ok(object),
+            Err(primary_err) => {
+                if let Some(alternate_hash) = alternate_object_hash(self.object_hash()) {
+                    if let Ok(object) = decode(alternate_hash) {
+                        return Ok(object);
+                    }
+                }
+                Err(object::write::Error(Box::new(primary_err)))
+            }
+        }
+    }
+
     /// Write a blob from the given `bytes`.
     ///
     /// We avoid writing duplicate objects to slow disks that will eventually have to be garbage collected by
@@ -443,6 +460,17 @@ impl crate::Repository {
             .write_buf(gix_object::Kind::Blob, buf)
             .map_err(Into::into)
             .map(|oid| oid.attach(self))
+    }
+}
+
+fn alternate_object_hash(object_hash: gix_hash::Kind) -> Option<gix_hash::Kind> {
+    match object_hash {
+        #[cfg(all(feature = "sha1", feature = "sha256"))]
+        gix_hash::Kind::Sha1 => Some(gix_hash::Kind::Sha256),
+        #[cfg(all(feature = "sha1", feature = "sha256"))]
+        gix_hash::Kind::Sha256 => Some(gix_hash::Kind::Sha1),
+        #[allow(unreachable_patterns)]
+        _ => None,
     }
 }
 
