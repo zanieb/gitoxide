@@ -1,7 +1,10 @@
 use gix_hash::ObjectId;
 use gix_merge::blob::builtin_driver::text::Labels;
 
-use crate::Repository;
+use crate::{
+    Repository,
+    bstr::{BString, ByteSlice},
+};
 
 /// Options for cherry-pick and revert operations.
 #[derive(Debug, Clone, Default)]
@@ -51,8 +54,12 @@ pub enum Error {
     Conflict,
     #[error("cherry-pick or revert of commit {id} is empty")]
     Empty { id: ObjectId },
+    #[error("index contains uncommitted changes")]
+    DirtyIndex,
     #[error(transparent)]
     WriteObject(#[from] crate::object::write::Error),
+    #[error(transparent)]
+    WriteIndexTree(#[from] gix_index::write_tree::Error),
     #[error(transparent)]
     EditReference(#[from] crate::reference::edit::Error),
     #[error("committer identity is not configured")]
@@ -203,6 +210,9 @@ impl Repository {
             .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: head_id.detach() }))?
             .tree_id()?
             .detach();
+        if !options.no_commit {
+            self.ensure_index_matches_head(head_tree_id)?;
+        }
 
         // Write state files before the merge so they persist on conflict/error.
         let cherry_pick_head_path = self.git_dir().join("CHERRY_PICK_HEAD");
@@ -223,7 +233,7 @@ impl Repository {
 
         let how = crate::merge::tree::TreatAsUnresolved::default();
         if outcome.has_unresolved_conflicts(how) {
-            self.materialize_conflicted_index_and_worktree(&mut outcome)?;
+            self.materialize_conflicted_index_and_worktree(&mut outcome, head_tree_id)?;
             return Err(Error::Conflict);
         }
 
@@ -242,13 +252,13 @@ impl Repository {
         }
 
         // Update index and worktree.
-        self.update_index_and_worktree_to_tree(result_tree_id)?;
+        let final_index_tree_id = self.update_index_and_worktree_to_tree(head_tree_id, result_tree_id)?;
 
         if options.no_commit {
             // Leave state files in place for "cherry-pick in progress" status.
             return Ok(Outcome {
                 commit_id: None,
-                tree_id: result_tree_id,
+                tree_id: final_index_tree_id,
             });
         }
 
@@ -334,6 +344,9 @@ impl Repository {
             .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: head_id.detach() }))?
             .tree_id()?
             .detach();
+        if !options.no_commit {
+            self.ensure_index_matches_head(head_tree_id)?;
+        }
 
         // Build the revert commit message.
         let orig_message = revert_commit.message_raw_sloppy();
@@ -363,7 +376,7 @@ impl Repository {
 
         let how = crate::merge::tree::TreatAsUnresolved::default();
         if outcome.has_unresolved_conflicts(how) {
-            self.materialize_conflicted_index_and_worktree(&mut outcome)?;
+            self.materialize_conflicted_index_and_worktree(&mut outcome, head_tree_id)?;
             return Err(Error::Conflict);
         }
 
@@ -382,13 +395,13 @@ impl Repository {
         }
 
         // Update index and worktree.
-        self.update_index_and_worktree_to_tree(result_tree_id)?;
+        let final_index_tree_id = self.update_index_and_worktree_to_tree(head_tree_id, result_tree_id)?;
 
         if options.no_commit {
             // Leave state files in place for "revert in progress" status.
             return Ok(Outcome {
                 commit_id: None,
-                tree_id: result_tree_id,
+                tree_id: final_index_tree_id,
             });
         }
 
@@ -427,11 +440,12 @@ impl Repository {
     fn materialize_conflicted_index_and_worktree(
         &self,
         outcome: &mut crate::merge::tree::Outcome<'_>,
+        base_tree_id: ObjectId,
     ) -> Result<ObjectId, Error> {
         let workdir = self.workdir().expect("not bare, checked above").to_owned();
         let old_index = self.open_index().ok();
         let result_tree_id = outcome.tree.write()?.detach();
-        let mut index = self.index_from_tree(&result_tree_id)?;
+        let mut index = self.index_with_operation_changes(base_tree_id, result_tree_id, old_index.as_ref())?;
 
         if let Some(old_idx) = &old_index {
             Self::remove_worktree_files_not_in_index(old_idx, &index, &workdir, true);
@@ -449,13 +463,16 @@ impl Repository {
     }
 
     /// Update the index and working tree to match the given tree.
-    fn update_index_and_worktree_to_tree(&self, tree_id: ObjectId) -> Result<(), Error> {
+    fn update_index_and_worktree_to_tree(
+        &self,
+        base_tree_id: ObjectId,
+        result_tree_id: ObjectId,
+    ) -> Result<ObjectId, Error> {
         let workdir = self.workdir().expect("not bare, checked above").to_owned();
 
         // Read the old index so we can detect deleted files.
         let old_index = self.open_index().ok();
-
-        let mut index = self.index_from_tree(&tree_id)?;
+        let mut index = self.index_with_operation_changes(base_tree_id, result_tree_id, old_index.as_ref())?;
 
         // Remove files from the worktree that are in the old index but not in the new one.
         // Path traversal check is enabled to prevent deleting files outside the worktree.
@@ -470,6 +487,72 @@ impl Repository {
         // Checkout updates stat information in the index entries it writes.
         index.write(Default::default())?;
 
+        Ok(index
+            .write_tree_to(|tree| self.write_object(tree).map(super::super::types::Id::detach))?
+            .tree_id)
+    }
+
+    fn ensure_index_matches_head(&self, head_tree_id: ObjectId) -> Result<(), Error> {
+        let mut index = match self.open_index() {
+            Ok(index) => index,
+            Err(_) => self.index_from_tree(&head_tree_id)?,
+        };
+        let index_tree_id = index
+            .write_tree_to(|tree| self.write_object(tree).map(super::super::types::Id::detach))?
+            .tree_id;
+        if index_tree_id != head_tree_id {
+            return Err(Error::DirtyIndex);
+        }
         Ok(())
+    }
+
+    fn index_with_operation_changes(
+        &self,
+        base_tree_id: ObjectId,
+        result_tree_id: ObjectId,
+        current_index: Option<&gix_index::File>,
+    ) -> Result<gix_index::File, Error> {
+        let base_index = self.index_from_tree(&base_tree_id)?;
+        let result_index = self.index_from_tree(&result_tree_id)?;
+        let changed_paths = Self::paths_changed_between_indexes(&base_index, &result_index);
+        let mut index = match current_index {
+            Some(index) => index.clone(),
+            None => base_index.clone(),
+        };
+
+        for path in changed_paths {
+            let path = path.as_bstr();
+            index.remove_entry_by_path_and_stage(path, gix_index::entry::Stage::Unconflicted);
+            if let Some(entry) = result_index.entry_by_path_and_stage(path, gix_index::entry::Stage::Unconflicted) {
+                index.add_entry(entry.stat, entry.id, entry.flags, entry.mode, path);
+            }
+        }
+
+        Ok(index)
+    }
+
+    fn paths_changed_between_indexes(base_index: &gix_index::File, result_index: &gix_index::File) -> Vec<BString> {
+        let mut paths = std::collections::BTreeSet::<Vec<u8>>::new();
+        for entry in base_index.entries() {
+            if entry.stage() != gix_index::entry::Stage::Unconflicted {
+                continue;
+            }
+            let path = entry.path(base_index);
+            let result_entry = result_index.entry_by_path_and_stage(path, gix_index::entry::Stage::Unconflicted);
+            if result_entry.is_none_or(|other| other.id != entry.id || other.mode != entry.mode) {
+                paths.insert(path.to_vec());
+            }
+        }
+        for entry in result_index.entries() {
+            if entry.stage() != gix_index::entry::Stage::Unconflicted {
+                continue;
+            }
+            let path = entry.path(result_index);
+            let base_entry = base_index.entry_by_path_and_stage(path, gix_index::entry::Stage::Unconflicted);
+            if base_entry.is_none_or(|other| other.id != entry.id || other.mode != entry.mode) {
+                paths.insert(path.to_vec());
+            }
+        }
+        paths.into_iter().map(Into::into).collect()
     }
 }
