@@ -39,20 +39,21 @@ today's code and goals.
 
 * **workflows already supported in plumbing**
     * [x] `clone`, `fetch`, `ls-refs` and shallow variants
+    * [x] `push` over the existing smart transports
     * [x] `commit` and low-level ref/object/index mutation
     * [x] `status` and worktree-vs-index comparison
     * [x] blob and tree diffing - mainly `gix-diff` and `gix`
     * [x] `merge-base`, revision parsing and commit description
     * [x] worktree streaming, archive creation and low-level checkout
 * **common workflows that still need plumbing across crates**
-    * [ ] `checkout`, `switch`, `restore` and `reset` - mainly `gix`, `gix-worktree-state`, `gix-index`, `gix-filter`, `gix-hook`
-    * [ ] `merge`, `cherry-pick` and `revert` - mainly `gix`, `gix-merge`, `gix-cherry-pick`, `gix-sequencer`, `gix-rerere`, `gix-hook`
-    * [ ] `rebase` - mainly `gix-rebase`, `gix-sequencer`, `gix-merge`, `gix-apply`, `gix-rerere`, `gix-hook`, `gix`
+    * [ ] `checkout`, `switch` and `restore` - mainly `gix`, `gix-worktree-state`, `gix-index`, `gix-filter`, `gix::hook`
+    * [ ] `merge` and multi-commit `cherry-pick` / `revert` sequences - mainly `gix`, `gix-merge`, `gix-sequencer`, `gix-rerere`, `gix::hook`
+    * [ ] `rebase` - mainly `gix-rebase`, `gix-sequencer`, `gix-merge`, `gix-apply`, `gix-rerere`, `gix::hook`, `gix`
     * [ ] `bisect` - mainly `gix-bisect`, `gix-sequencer`, `gix-revision`, `gix-revwalk`, `gix-traverse`, `gix`
-    * [ ] `stash`, `am` and `apply` - mainly `gix-stash`, `gix-apply`, `gix-mailbox`, `gix`, `gix-diff`, `gix-worktree-state`, `gix-sequencer`, `gix-rerere`
-    * [ ] `push` and self-contained clone/fetch over `file://` and `ssh://` - mainly `gix`, `gix-protocol`, `gix-transport`, `gix-ssh`
+    * [ ] stash subcommands beyond save/apply/pop/drop/list, plus `am` and `apply` - mainly `gix`, `gix-apply`, `gix-mailbox`, `gix-diff`, `gix-worktree-state`, `gix-sequencer`, `gix-rerere`
+    * [ ] self-contained clone/fetch/push over `file://` and `ssh://` without external `git-*` or `ssh` helpers - mainly `gix`, `gix-protocol`, `gix-transport`, `gix-ssh`
 * **cross-cutting parity work**
-    * [ ] hook discovery and execution - mainly `gix-hook`, `gix`, `gix-ref`, `gix-protocol`
+    * [ ] hook integration into workflows - mainly `gix`, `gix-ref`, `gix-protocol`
     * [ ] Git 3.0 compatibility (`SHA-256`, `reftable`) - mainly `gix-hash`, `gix-ref`, `gix-reftable`, `gix-protocol`, `gix-odb`
     * [ ] partial clone, promisor and bundle bootstrapping - mainly `gix-odb`, `gix-pack`, `gix-bundle`, `gix-protocol`, `gix`
     * [ ] big-repo accelerators (`commit-graph`, bitmaps, split-index, sparse-index, fsmonitor, untracked-cache) - mainly `gix-commitgraph`, `gix-pack`, `gix-index`, `gix-status`, `gix-dir`
@@ -68,13 +69,16 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
 * [x] strict object creation (validate objects referenced by newly created objects exist)
 * [x] strict hash verification (validate that objects actually have the hashes they claim to have)
 * **workflow composition**
-    * [ ] checkout, switch, restore and reset orchestration over refs, index and worktree mutation
+    * [x] reset orchestration over refs, index and worktree mutation
+    * [ ] checkout, switch and restore orchestration over refs, index and worktree mutation
     * [ ] merge workflow orchestration
         * [ ] persist and resume conflicted merges with [`MERGE_HEAD`](https://git-scm.com/docs/gitrepository-layout), [`MERGE_MSG`](https://git-scm.com/docs/git-merge) and [`MERGE_MODE`](https://github.com/git/git/blob/ce74208c2fa13943fffa58f168ac27a76d0eb789/path.c#L1585) compatible state
-    * [ ] rebase workflow orchestration
-    * [ ] cherry-pick and revert workflow orchestration
+    * [ ] repository-level rebase workflow orchestration
+    * [x] single-commit cherry-pick and revert workflow orchestration
+        * [ ] multi-commit sequence `continue`, `skip`, `abort` and `quit` flows
     * [ ] bisect workflow orchestration
-    * [ ] stash workflow orchestration
+    * [x] stash save, apply, pop, drop and list workflow orchestration
+        * [ ] stash show, branch, autostash and rerere integration
     * [ ] `git am` and `git apply` workflow orchestration
         * [ ] connect mailbox ingestion, patch application, hook execution and resulting commit creation
 * **Repository**
@@ -162,7 +166,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
         * [x] ls-refs with ref-spec filter
         * [x] list, find by name
         * [x] create in memory
-        * [ ] save to configuration on disk
+        * [x] save to a configuration file representation (`Remote::save_to()`, `Remote::save_as_to()`)
         * [ ] write [`FETCH_HEAD`](https://git-scm.com/docs/gitrepository-layout)
         * [x] apply transport and remote configuration from `git-config`, including `http.*`
         * [x] groups (`Repository::remote_group_names()`, `Repository::remote_names_by_group()`)
@@ -360,7 +364,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
     * **patches**
         * There are various ways to generate a patch from two blobs.
         * [x] text
-        * [ ] binary
+        * [x] binary diff messages for binary blobs
         * [ ] `git-apply` compatibility
         * [x] merge hunks that are close enough based on line-setting (`interhunk-lines`)
         * [ ] white-space related settings
@@ -384,7 +388,7 @@ Check out the [performance discussion][gix-diff-performance] as well.
     * [x] caching of diff-able data
     * [x] prepare invocation of external diff program
         - [ ] pass meta-info
-* [ ] working with hunks of data
+* [x] working with hunks of data (`Diff::hunks()` and unified-diff hunk consumers)
 * [ ] diff-heuristics match Git perfectly
 * [x] API documentation
     * [x] Examples
@@ -512,9 +516,10 @@ A utility crate with types and functionality related to shallow-file handling.
 * [x] API documentation
     * [x] Some examples
 
-### gix-ssh
+### gix-ssh (future)
 
 Provide a native SSH transport and authentication backend so `gix` users can ship a self-contained client binary.
+No standalone `gix-ssh` crate exists yet; current SSH transports invoke an external `ssh` binary via `gix-transport`.
 
 * [ ] native SSH transport without invoking external `ssh`
 * [ ] host key verification
@@ -559,7 +564,8 @@ Provide a native SSH transport and authentication backend so `gix` users can shi
 * [x] push
     * [x] send-pack / receive-pack client plumbing
     * [x] report-status, sideband, delete-refs and atomic pushes
-    * [ ] push-options and dry-run
+    * [x] dry-run support in the `gix` push layer
+    * [ ] push-options
     * [ ] object-format negotiation
 * [ ] upload-pack / receive-pack server plumbing for in-process transports
 * [ ] bundle-uri protocol integration
@@ -659,18 +665,19 @@ A basic crate for comon error types and utilities, changed as needed to replace 
   - [x] as absolute paths to programs with optional arguments
   - [x] program name with optional arguments, transformed into `git credential-<name>`
 * [x] `helper::main()` for easy custom credential helper programs written in Rust
-* [ ] (correctness/security) select helpers against rewritten or redirected URLs
-  - If a remote URL is rewritten via [`url.<base>.insteadOf|pushInsteadOf`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-urlltbasegtinsteadOf), or an HTTP request is redirected to another host,
-    helper matching should use the effective URL that is actually contacted, not only the original URL.
+* [ ] (correctness/security) select helpers against redirected URLs
+  - Remote URLs rewritten via [`url.<base>.insteadOf|pushInsteadOf`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-urlltbasegtinsteadOf) are matched after rewriting in the `gix` remote layer.
+    HTTP redirects still need helper matching against the effective URL that is actually contacted, not only the original URL.
 * [ ] support pure-Rust SSH authentication backends
 
-### gix-hook
+### gix::hook (no standalone `gix-hook` crate)
 
-Provide discovery and execution of Git hooks for client and receive-side workflows.
+Provide repository-level discovery and execution of Git hooks for client and receive-side workflows.
 
-* [ ] discover hooks in `$GIT_DIR/hooks` and [`core.hooksPath`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)
-* [ ] execute hooks with Git-compatible cwd, env, argv and stdin
-* [ ] client-side hooks for commit, checkout, rebase, merge, am and push
+* [x] discover hooks in `$GIT_DIR/hooks` and [`core.hooksPath`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)
+* [x] execute hooks with Git-compatible cwd, env, argv and stdin
+* [x] model common client and receive-side hook names
+* [ ] wire hooks into client-side workflows for commit, checkout, rebase, merge, am and push
 * [ ] receive-side hooks and [`reference-transaction`](https://git-scm.com/docs/githooks#_reference_transaction)
 * [ ] [quarantine](https://git-scm.com/docs/git-receive-pack#_quarantine_environment)-aware hook execution
 
@@ -691,43 +698,52 @@ Provides a trust model to share across gitoxide crates. It helps configuring how
    * [x] gix
 
 ### gix-rebase
-* [x] obtain rebase status
-* [x] drive a rebase operation (pick, reword, edit, squash, fixup, drop, break, noop via `Driver` trait)
-    * [ ] apply backend
-    * [ ] merge backend
-    * [ ] [`--onto`, `--keep-base`, `--fork-point`, `--rebase-merges`](https://git-scm.com/docs/git-rebase)
-    * [ ] interactive todo parsing and editing
+* [x] obtain rebase status and read/write `.git/rebase-merge/` state
+* [x] drive an interactive rebase operation via the `Driver` trait
+    * [x] `pick`, `reword`, `edit`, `squash`, `fixup`, `drop`, `break`, `noop` and `exec`
+    * [x] `label`, `reset`, `merge`, `update-ref` and `revert` operations used by rebase-merges style todos
+    * [x] `continue_rebase()` and `abort()` state helpers
+    * [x] interactive todo parsing and writing through `gix-sequencer`
+    * [ ] built-in apply backend
+    * [ ] built-in merge/cherry-pick backend independent of a caller-provided `Driver`
+    * [ ] rebase planning options like [`--onto`, `--keep-base`, `--fork-point`](https://git-scm.com/docs/git-rebase) and constructing `--rebase-merges` todo lists
     * [ ] [autostash](https://git-scm.com/docs/git-rebase#Documentation/git-rebase.txt---autostash), [rerere](https://git-scm.com/docs/git-rerere) and hook integration
 
-### gix-cherry-pick
+### gix::cherry_pick (no standalone `gix-cherry-pick` crate)
 
 Provide plumbing for [`git cherry-pick`](https://git-scm.com/docs/git-cherry-pick) style workflows, including single-pick
 and multi-commit sequences.
 
-* [ ] create and apply cherry-pick sequences
+* [x] apply a single cherry-pick or revert onto `HEAD`
+* [x] create commits for successful single cherry-picks and reverts
+* [x] support `--no-commit` and merge-commit parent selection
+* [x] write `CHERRY_PICK_HEAD`, `REVERT_HEAD` and `MERGE_MSG` state for in-progress single operations
+* [ ] create and apply multi-commit cherry-pick/revert sequences
 * [ ] support `--continue`, `--skip`, `--abort` and `--quit`
-* [ ] support `--no-commit` and merge-commit parent selection
-* [ ] integrate hooks, rerere and reflog messages
+* [ ] integrate hooks and rerere
 
-### gix-bisect
+### gix-bisect (future)
 
 Provide plumbing for [`git bisect`](https://git-scm.com/docs/git-bisect) / binary-search workflows over commit history.
 
+* [x] detect in-progress bisect state via `Repository::state()`
 * [ ] obtain and persist bisect state
 * [ ] choose next candidates using include/exclude aware revision traversal
 * [ ] support `good` / `bad` / `skip`, log / replay and reset flows
 * [ ] integrate with checkout / reset orchestration
 
-### gix-stash
+### gix::stash (no standalone `gix-stash` crate)
 
 Provide plumbing for [`git stash`](https://git-scm.com/docs/git-stash) style workflows.
 
-* [ ] create stash entries for worktree, index and optionally untracked changes
-* [ ] list, show, drop and branch from stash entries
-* [ ] apply and pop stash entries with rerere and conflict handling
-* [ ] support [autostash](https://git-scm.com/docs/git-rebase#Documentation/git-rebase.txt---autostash) integration for rebase-like workflows
+* [x] create stash entries for worktree, index and optionally untracked changes
+* [x] list and drop stash entries
+* [ ] show and branch from stash entries
+* [x] apply and pop stash entries with conflict checks and optional index reinstatement
+* [x] support `--keep-index` and `--include-untracked`
+* [ ] support [autostash](https://git-scm.com/docs/git-rebase#Documentation/git-rebase.txt---autostash) and [rerere](https://git-scm.com/docs/git-rerere) integration for rebase-like workflows
 
-### gix-apply
+### gix-apply (future)
 
 Provide plumbing for [`git apply`](https://git-scm.com/docs/git-apply) and the patch-application parts reused by
 [`git am`](https://git-scm.com/docs/git-am), [`git rebase`](https://git-scm.com/docs/git-rebase) and stash application.
@@ -737,11 +753,12 @@ Provide plumbing for [`git apply`](https://git-scm.com/docs/git-apply) and the p
 * [ ] support 3-way fallback where applicable
 * [ ] expose reusable patch application primitives for sequencer-based workflows
 
-### gix-mailbox
+### gix-mailbox (future)
 
 Provide ingestion for email-based patch series as used by [`git am`](https://git-scm.com/docs/git-am), separating
 mailbox parsing from patch application.
 
+* [x] detect in-progress mailbox-apply state via `Repository::state()`
 * [ ] split mailbox input similar to [`git mailsplit`](https://git-scm.com/docs/git-mailsplit)
 * [ ] extract commit message, author, subject prefix and patch payload similar to [`git mailinfo`](https://git-scm.com/docs/git-mailinfo)
 * [ ] support common `mbox` variants and metadata normalization needed by `git am`
@@ -751,13 +768,15 @@ mailbox parsing from patch application.
 
 Handle human-aided operations which cannot be completed in one command invocation.
 
+* [x] parse and write `git-rebase-todo` / `.git/sequencer/todo` operation lists
+* [x] represent `pick`, `reword`, `edit`, `squash`, `fixup`, `exec`, `break`, `drop`, `revert`, `merge`, `label`, `reset`, `update-ref` and `noop`
 * [ ] shared state machine with `continue`, `skip`, `abort` and `quit`
 * [ ] cherry-pick and revert sequences
 * [ ] mailbox apply / `git am` sequence support
     * [ ] consume parsed mailbox messages from `gix-mailbox`
 * [ ] common reflog messages and state refs like [`CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`, `ORIG_HEAD`](https://git-scm.com/docs/gitrevisions) and bisect refs
 
-### gix-rerere
+### gix-rerere (future)
 
 Record and reuse conflict resolutions across mergy workflows.
 
@@ -769,6 +788,10 @@ Record and reuse conflict resolutions across mergy workflows.
 
 Implement git large file support using the process protocol and make it flexible enough to handle a variety of cases.
 Make it the best-performing implementation and the most convenient one.
+The `gix-lfs` crate exists but is currently an empty placeholder.
+
+* [ ] LFS pointer parsing, process filter integration and transfer client support
+* [ ] high-performance parallel transfer/compression implementation
 
 ### gix-glob
 * [x] parse pattern
@@ -801,7 +824,8 @@ Make it the best-performing implementation and the most convenient one.
         - [x] `ident`
         - [x] filter processes
         - [x] single-invocation clean/smudge filters
-* [ ] apply tree and index changes for **reset**, **switch**, **restore** and stash workflows
+* [ ] expose reusable high-level tree/index application for **reset**, **switch**, **restore** and stash workflows
+    - Repository workflows in `gix` already compose checkout, index and worktree helpers for reset, stash, cherry-pick and revert.
 * access to per-path information, like `.gitignore` and `.gitattributes` in a manner well suited for efficient lookups
     * [x] _exclude_ information
     * [x] attributes
@@ -963,6 +987,7 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 * [x] produce a stream of entries
 * [x] add custom entries to the stream
 * [x] respect `export-ignore` git attribute
+* [ ] support `export-subst` attribute expansion
 * [x] apply standard worktree conversion to simulate an actual checkout
 * [x] support for submodule inclusion
 * [x] API documentation
@@ -978,8 +1003,8 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
     * [x] Some examples
 
 ### gix-bundle
-* [ ] create a bundle from an archive
-   * [ ] respect `export-ignore` and `export-subst`
+* [x] create bundle files with v2/v3 headers and a caller-provided pack writer
+* [ ] repository-level bundle creation from selected refs/ranges
 * [x] extract a branch from a bundle into a repository
    * implemented via `Repository::bundle_unbundle()`, which verifies prerequisites, writes the embedded pack, and imports non-pseudo refs while preserving `HEAD`
 * [ ] integrate bundle bootstrapping and bundle-uri metadata for clone/fetch
@@ -1056,7 +1081,9 @@ See its [README.md](https://github.com/GitoxideLabs/gitoxide/blob/main/gix-lock/
 
 Provide a reftable backend for refs and reflogs as part of Git 3.0 compatibility.
 
-* [ ] read and write reftable stacks
+* [x] read reftable stacks from `tables.list` and resolve visible refs
+* [x] write C Git-readable ref tables/blocks
+* [ ] write/update stack manifests as backend operations
 * [ ] transactions and reflogs
 * [ ] compaction and table management
 * [ ] backend selection and migration between `files` and `reftable`
@@ -1084,14 +1111,6 @@ Provide a reftable backend for refs and reflogs as part of Git 3.0 compatibility
 ### gix-tix
 
 A re-implementation of a minimal `tig` like UI that aims to be fast and to the point.
-
-### gix-lfs
-
-Definitely optimize for performance and see how we fare compared to [oxen](https://github.com/Oxen-AI/oxen-release/blob/main/Performance.md).
-Right now, `git lfs` is 40x slower, due to sequential uploads and lack of fast compression. It seems this can be greatly improved to get
-close to 6min for 200k images (1.4GB). GitHub seems to cap upload speeds to 100kb/s, one major reason it's so slow, and it can only do
-it sequentially as `git-lfs` doesn't use the new `filter-process` protocol which would allow parallelization.
-Oxen uses the XXH3 (30gb/s) which greatly outperforms SHA1 - however, it doesn't look like the hash is necessarily the bottleneck in typical benchmarks.
 
 [tagname-validation]: https://github.com/git/git/blob/master/Documentation/technical/protocol-common.txt#L23:L23
 [this post]: http://blog.danieljanus.pl/2021/07/01/commit-groups/
