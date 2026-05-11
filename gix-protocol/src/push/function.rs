@@ -59,6 +59,18 @@ where
         )));
     }
 
+    if options.dry_run {
+        return Ok(Outcome {
+            ref_updates: commands
+                .iter()
+                .map(|cmd| push::response::StatusV1::Ok {
+                    ref_name: cmd.ref_name.clone(),
+                })
+                .collect(),
+            unpack_status: push::response::UnpackStatus::Ok,
+        });
+    }
+
     let capabilities = &handshake.capabilities;
     let protocol_version = handshake.server_protocol_version;
 
@@ -104,8 +116,8 @@ where
     }
     // Add agent
     let agent_str = match &user_agent.1 {
-        Some(v) => format!("agent={}={}", user_agent.0, v),
-        None => format!("agent={}", user_agent.0),
+        Some(v) => format!("{}={}", user_agent.0, v),
+        None => user_agent.0.to_owned(),
     };
 
     // For V1/V0 protocol, we write commands as packet lines directly using the transport's
@@ -117,7 +129,7 @@ where
         );
 
     let mut writer = transport.request(
-        gix_transport::client::WriteMode::OneLfTerminatedLinePerWriteCall,
+        gix_transport::client::WriteMode::Binary,
         gix_transport::client::MessageKind::Flush,
         trace_packetlines,
     )?;
@@ -155,31 +167,16 @@ where
 
     // Send the pack if needed.
     if needs_pack {
-        // Transition to binary mode for pack data.
-        // We need to send a flush first to end the command list, then the pack data.
-        let (mut raw_writer, mut reader) = writer.into_parts();
-
-        // Write flush packet to end the command list.
-        // We write the raw "0000" bytes directly because `into_parts()` gave us the raw transport
-        // writer (not a packetline writer). A flush packet is defined as exactly these 4 ASCII bytes
-        // in the Git protocol spec, regardless of protocol version. This matches C Git's
-        // `packet_flush()` behavior at the wire level.
-        //
-        // NOTE: This assumes `into_parts()` returns a writer that does NOT add packetline framing.
-        // If the transport wraps output (e.g., HTTP smart protocol chunked encoding), this must be
-        // handled at a lower layer. The `gix-transport` crate guarantees this for all built-in
-        // transports: `into_parts()` yields the raw byte stream.
+        // End the command-list packet stream before switching to raw pack bytes.
         #[cfg(feature = "blocking-client")]
         {
-            raw_writer.write_all(b"0000")?;
-            raw_writer.flush()?;
+            writer.write_message(gix_transport::client::MessageKind::Flush)?;
         }
         #[cfg(feature = "async-client")]
         {
-            use futures_lite::AsyncWriteExt;
-            raw_writer.write_all(b"0000").await?;
-            raw_writer.flush().await?;
+            writer.write_message(gix_transport::client::MessageKind::Flush).await?;
         }
+        let (mut raw_writer, mut reader) = writer.into_parts();
 
         // Write pack data.
         // In async mode, wrap the AsyncWrite in BlockOn to provide a sync Write interface

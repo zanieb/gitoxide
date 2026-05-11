@@ -4,8 +4,8 @@ use crate::{
     bstr::{BString, ByteSlice, ByteVec},
     ext::ObjectIdExt,
 };
-use gix_object::Exists as _;
 use gix_object::Write as _;
+use gix_object::{Exists as _, FindExt as _};
 use gix_refspec::match_group::SourceRef;
 #[cfg(feature = "async-network-client")]
 use gix_transport::client::async_io::Transport;
@@ -71,6 +71,22 @@ where
                 })
                 .collect();
             updates.extend(client_updates);
+            return Ok(Outcome {
+                ref_map: std::mem::take(&mut self.ref_map),
+                handshake,
+                updates,
+                unpack_ok: true,
+            });
+        }
+
+        // Atomic pushes must not let locally-rejected ref updates coexist with remote
+        // commands, or the remote can apply the accepted subset.
+        if self.atomic && !client_updates.is_empty() {
+            let mut updates = client_updates;
+            updates.extend(commands.iter().map(|cmd| gix_protocol::push::response::StatusV1::Ng {
+                ref_name: cmd.ref_name.clone(),
+                reason: "atomic push failed".into(),
+            }));
             return Ok(Outcome {
                 ref_map: std::mem::take(&mut self.ref_map),
                 handshake,
@@ -286,14 +302,11 @@ fn build_push_commands(
                 continue;
             }
 
-            let new_id = repo.rev_parse_single(src).map_err(|e| Error::FindLocalRef {
-                name: src.to_owned(),
-                source: Box::new(e),
-            })?;
+            let new_id = resolve_push_revspec_source(repo, src)?;
             supplemental_updates.push(SupplementalUpdate {
                 src: src.to_owned(),
                 dst: expand_push_destination(dst),
-                new_id: new_id.detach(),
+                new_id,
                 allow_non_fast_forward,
             });
         }
@@ -444,6 +457,30 @@ fn build_push_commands(
     }
 
     Ok((commands, client_updates))
+}
+
+#[cfg(feature = "revision")]
+fn resolve_push_revspec_source(repo: &crate::Repository, src: &crate::bstr::BStr) -> Result<gix_hash::ObjectId, Error> {
+    repo.rev_parse_single(src)
+        .map(|id| id.detach())
+        .map_err(|e| Error::FindLocalRef {
+            name: src.to_owned(),
+            source: Box::new(e),
+        })
+}
+
+#[cfg(not(feature = "revision"))]
+fn resolve_push_revspec_source(
+    _repo: &crate::Repository,
+    src: &crate::bstr::BStr,
+) -> Result<gix_hash::ObjectId, Error> {
+    Err(Error::FindLocalRef {
+        name: src.to_owned(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "revision parsing requires the `revision` feature",
+        )),
+    })
 }
 
 fn client_side_push_rejection(
@@ -599,14 +636,16 @@ fn write_pack_for_push(
     // The subsequent `TreeAdditionsComparedToAncestor` expansion on the resulting commits
     // correctly enumerates all tree and blob objects that differ from their ancestors,
     // which is the standard approach for computing the minimal set of objects to send.
+    let (pack_roots, commit_tips) = push_pack_roots(odb, new_tips)?;
     let remote_set: gix_hashtable::HashSet = known_remote.iter().copied().collect();
     let new_commits: Vec<gix_hash::ObjectId> =
-        gix_traverse::commit::Simple::filtered(new_tips.iter().copied(), odb.clone(), |oid| !remote_set.contains(oid))
+        gix_traverse::commit::Simple::filtered(commit_tips, odb.clone(), |oid| !remote_set.contains(oid))
             .map(|info| info.map(|i| i.id))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
-    if new_commits.is_empty() {
+    let object_roots: Vec<_> = pack_roots.into_iter().chain(new_commits).collect();
+    if object_roots.is_empty() {
         return write_empty_pack(writer, object_hash);
     }
 
@@ -618,7 +657,7 @@ fn write_pack_for_push(
     let (counts, _stats) = output::count::objects(
         odb.clone(),
         Box::new(
-            new_commits
+            object_roots
                 .into_iter()
                 .map(Ok::<_, Box<dyn std::error::Error + Send + Sync>>),
         ),
@@ -676,6 +715,44 @@ fn write_pack_for_push(
     }
 
     Ok(())
+}
+
+fn push_pack_roots(
+    odb: &gix_odb::HandleArc,
+    new_tips: &[gix_hash::ObjectId],
+) -> Result<(Vec<gix_hash::ObjectId>, Vec<gix_hash::ObjectId>), Box<dyn std::error::Error + Send + Sync>> {
+    let mut pack_roots = Vec::new();
+    let mut commit_tips = Vec::new();
+    let mut buf = Vec::new();
+
+    for &tip in new_tips {
+        let mut id = tip;
+        let mut seen_tags = gix_hashtable::HashSet::default();
+        loop {
+            let obj = odb.find(&id, &mut buf)?;
+            match obj.kind {
+                gix_object::Kind::Commit => {
+                    commit_tips.push(id);
+                    break;
+                }
+                gix_object::Kind::Tag => {
+                    if id == tip {
+                        pack_roots.push(tip);
+                    }
+                    if !seen_tags.insert(id) {
+                        return Err(format!("tag cycle while preparing push pack at {id}").into());
+                    }
+                    id = gix_object::TagRefIter::from_bytes(obj.data, obj.object_hash).target_id()?;
+                }
+                gix_object::Kind::Tree | gix_object::Kind::Blob => {
+                    pack_roots.push(tip);
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok((pack_roots, commit_tips))
 }
 
 /// Write an empty pack (header with 0 objects + trailing hash) to `writer`.
