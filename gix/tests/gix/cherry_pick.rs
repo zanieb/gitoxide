@@ -18,6 +18,21 @@ mod cherry_pick {
             .detach()
     }
 
+    fn git(workdir: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(workdir)
+            .output()
+            .expect("git must be on PATH");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
     #[test]
     fn cherry_pick_adds_new_file() -> crate::Result {
         let (repo, _tmp) = repo_cherry_pick()?;
@@ -141,6 +156,80 @@ mod cherry_pick {
             "local unrelated change\n",
             "cherry-pick must not rewrite dirty tracked files outside the picked diff"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn cherry_pick_rejects_unrelated_staged_tracked_file() -> crate::Result {
+        let (repo, tmp) = repo_cherry_pick()?;
+        let workdir = tmp.path();
+        let head_before = repo.head_id()?.detach();
+
+        std::fs::write(workdir.join("other.txt"), "staged unrelated change\n")?;
+        git(workdir, &["add", "other.txt"]);
+        let staged_tree_before = git(workdir, &["write-tree"]);
+
+        let feature_tip = branch_tip(&repo, "feature");
+        let feature_tip_commit = repo.find_object(feature_tip)?.into_commit();
+        let feature_modify_id = feature_tip_commit
+            .parent_ids()
+            .next()
+            .expect("feature tip has a parent")
+            .detach();
+
+        let result = repo.cherry_pick(feature_modify_id, Options::default());
+
+        assert!(
+            matches!(result, Err(gix::repository::cherry_pick::Error::DirtyIndex)),
+            "cherry-pick must reject staged input before replay, got {result:?}"
+        );
+        assert_eq!(repo.head_id()?.detach(), head_before, "HEAD must not move");
+        assert_eq!(
+            git(workdir, &["write-tree"]),
+            staged_tree_before,
+            "staged unrelated change must remain staged"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("other.txt"))?,
+            "staged unrelated change\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cherry_pick_no_commit_preserves_unrelated_staged_tracked_file() -> crate::Result {
+        let (repo, tmp) = repo_cherry_pick()?;
+        let workdir = tmp.path();
+
+        std::fs::write(workdir.join("other.txt"), "staged unrelated change\n")?;
+        git(workdir, &["add", "other.txt"]);
+
+        let feature_tip = branch_tip(&repo, "feature");
+        let feature_tip_commit = repo.find_object(feature_tip)?.into_commit();
+        let feature_modify_id = feature_tip_commit
+            .parent_ids()
+            .next()
+            .expect("feature tip has a parent")
+            .detach();
+
+        let outcome = repo.cherry_pick(
+            feature_modify_id,
+            Options {
+                no_commit: true,
+                ..Default::default()
+            },
+        )?;
+
+        assert!(outcome.commit_id.is_none());
+        assert_eq!(outcome.tree_id.to_string(), git(workdir, &["write-tree"]));
+        assert_eq!(std::fs::read_to_string(workdir.join("file.txt"))?, "feature change\n");
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("other.txt"))?,
+            "staged unrelated change\n"
+        );
+        let staged_names = git(workdir, &["diff", "--cached", "--name-only"]);
+        assert!(staged_names.lines().any(|name| name == "file.txt"));
+        assert!(staged_names.lines().any(|name| name == "other.txt"));
         Ok(())
     }
 
@@ -372,6 +461,39 @@ mod cherry_pick {
             "empty revert should leave state for skip/continue handling"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn revert_rejects_unrelated_staged_tracked_file() -> crate::Result {
+        let (repo, tmp) = repo_cherry_pick()?;
+        let workdir = tmp.path();
+
+        let feature_tip = branch_tip(&repo, "feature");
+        let pick_outcome = repo.cherry_pick(feature_tip, Options::default())?;
+        let picked_commit_id = pick_outcome.commit_id.unwrap();
+        let head_before_revert = repo.head_id()?.detach();
+
+        std::fs::write(workdir.join("other.txt"), "staged unrelated change\n")?;
+        git(workdir, &["add", "other.txt"]);
+        let staged_tree_before = git(workdir, &["write-tree"]);
+
+        let result = repo.revert(picked_commit_id, Options::default());
+
+        assert!(
+            matches!(result, Err(gix::repository::cherry_pick::Error::DirtyIndex)),
+            "revert must reject staged input before replay, got {result:?}"
+        );
+        assert_eq!(repo.head_id()?.detach(), head_before_revert, "HEAD must not move");
+        assert_eq!(
+            git(workdir, &["write-tree"]),
+            staged_tree_before,
+            "staged unrelated change must remain staged"
+        );
+        assert!(
+            workdir.join("new_file.txt").exists(),
+            "rejected revert must not touch the reverted file"
+        );
         Ok(())
     }
 
