@@ -58,6 +58,52 @@ impl crate::Repository {
         Ok(())
     }
 
+    /// Check out only entries whose object id or mode differs from `old_index`.
+    ///
+    /// The full `index` remains the state that will be written to disk by the caller, while
+    /// the temporary checkout index limits worktree writes to paths actually affected by
+    /// the operation. This avoids clobbering unrelated dirty tracked files.
+    pub(crate) fn checkout_changed_index_entries_to_worktree_impl(
+        &self,
+        old_index: Option<&gix_index::File>,
+        index: &mut gix_index::File,
+        workdir: &std::path::Path,
+    ) -> Result<(), CheckoutError> {
+        let Some(old_index) = old_index else {
+            return self.checkout_index_to_worktree_impl(index, workdir);
+        };
+
+        let mut checkout_index = index.clone();
+        checkout_index.remove_entries(|_, path, entry| {
+            if entry.stage() != gix_index::entry::Stage::Unconflicted {
+                return false;
+            }
+            old_index
+                .entry_by_path_and_stage(path, gix_index::entry::Stage::Unconflicted)
+                .is_some_and(|old| old.id == entry.id && old.mode == entry.mode)
+        });
+
+        if checkout_index.entries().is_empty() {
+            return Ok(());
+        }
+
+        self.checkout_index_to_worktree_impl(&mut checkout_index, workdir)?;
+
+        let updated_stats: std::collections::HashMap<Vec<u8>, gix_index::entry::Stat> = checkout_index
+            .entries()
+            .iter()
+            .map(|entry| (entry.path(&checkout_index).to_vec(), entry.stat))
+            .collect();
+        for (entry, path) in index.entries_mut_with_paths() {
+            let path: &[u8] = path.as_ref();
+            if let Some(stat) = updated_stats.get(path) {
+                entry.stat = *stat;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Remove working tree files that are in `old_index` but not in `new_index`.
     ///
     /// This handles the case where a reset/checkout moves to a tree that no longer

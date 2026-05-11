@@ -223,6 +223,7 @@ impl Repository {
 
         let how = crate::merge::tree::TreatAsUnresolved::default();
         if outcome.has_unresolved_conflicts(how) {
+            self.materialize_conflicted_index_and_worktree(&mut outcome)?;
             return Err(Error::Conflict);
         }
 
@@ -362,6 +363,7 @@ impl Repository {
 
         let how = crate::merge::tree::TreatAsUnresolved::default();
         if outcome.has_unresolved_conflicts(how) {
+            self.materialize_conflicted_index_and_worktree(&mut outcome)?;
             return Err(Error::Conflict);
         }
 
@@ -421,6 +423,31 @@ impl Repository {
         })
     }
 
+    /// Write conflict-marker blobs to the worktree and unmerged stages to the index.
+    fn materialize_conflicted_index_and_worktree(
+        &self,
+        outcome: &mut crate::merge::tree::Outcome<'_>,
+    ) -> Result<ObjectId, Error> {
+        let workdir = self.workdir().expect("not bare, checked above").to_owned();
+        let old_index = self.open_index().ok();
+        let result_tree_id = outcome.tree.write()?.detach();
+        let mut index = self.index_from_tree(&result_tree_id)?;
+
+        if let Some(old_idx) = &old_index {
+            Self::remove_worktree_files_not_in_index(old_idx, &index, &workdir, true);
+        }
+
+        self.checkout_changed_index_entries_to_worktree_impl(old_index.as_ref(), &mut index, &workdir)?;
+
+        outcome.index_changed_after_applying_conflicts(
+            &mut index,
+            crate::merge::tree::TreatAsUnresolved::default(),
+            crate::merge::tree::apply_index_entries::RemovalMode::Prune,
+        );
+        index.write(Default::default())?;
+        Ok(result_tree_id)
+    }
+
     /// Update the index and working tree to match the given tree.
     fn update_index_and_worktree_to_tree(&self, tree_id: ObjectId) -> Result<(), Error> {
         let workdir = self.workdir().expect("not bare, checked above").to_owned();
@@ -436,8 +463,9 @@ impl Repository {
             Self::remove_worktree_files_not_in_index(old_idx, &index, &workdir, true);
         }
 
-        // Check out files to the working tree.
-        self.checkout_index_to_worktree_impl(&mut index, &workdir)?;
+        // Check out only paths changed by the pick/revert, preserving unrelated
+        // dirty tracked files in the working tree.
+        self.checkout_changed_index_entries_to_worktree_impl(old_index.as_ref(), &mut index, &workdir)?;
 
         // Checkout updates stat information in the index entries it writes.
         index.write(Default::default())?;
