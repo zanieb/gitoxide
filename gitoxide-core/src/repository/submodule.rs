@@ -1,5 +1,5 @@
 use anyhow::bail;
-use gix::{Repository, Submodule, commit::describe::SelectRef, prelude::ObjectIdExt};
+use gix::{Repository, Submodule, bstr::ByteSlice, commit::describe::SelectRef, prelude::ObjectIdExt};
 
 use crate::OutputFormat;
 
@@ -103,6 +103,7 @@ pub fn update(
 
     let should_interrupt = std::sync::atomic::AtomicBool::new(false);
     let update_opts = gix::submodule::update::Options::new(options.init, options.recursive);
+    let mut failures = Vec::new();
 
     for sm in submodules {
         let name = sm.name().to_owned();
@@ -121,8 +122,16 @@ pub fn update(
             }
             Err(err) => {
                 writeln!(out, "warning: failed to update submodule '{name}': {err}")?;
+                failures.push(name.to_str_lossy().into_owned());
             }
         }
+    }
+    if !failures.is_empty() {
+        bail!(
+            "failed to update {} submodule(s): {}",
+            failures.len(),
+            failures.join(", ")
+        );
     }
     Ok(())
 }

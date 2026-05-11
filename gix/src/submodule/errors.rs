@@ -189,6 +189,8 @@ pub mod update {
         #[error(transparent)]
         Init(#[from] super::init::Error),
         #[error(transparent)]
+        State(#[from] super::state::Error),
+        #[error(transparent)]
         PathConfiguration(#[from] gix_submodule::config::path::Error),
         #[error(transparent)]
         UrlConfiguration(#[from] gix_submodule::config::url::Error),
