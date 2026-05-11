@@ -164,9 +164,17 @@ mod loose {
         Ok(())
     }
 
+    #[cfg(feature = "sha256")]
     #[test]
     fn loose_refs_can_contain_sha256_ids() -> crate::Result {
         let (_tmp, store) = store_writable("make_ref_repository.sh")?;
+        let store = gix_ref::file::Store::at(
+            store.git_dir().to_owned(),
+            gix_ref::store::init::Options {
+                object_hash: gix_hash::Kind::Sha256,
+                ..crate::file::store_options()
+            },
+        );
         let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?;
         std::fs::write(store.git_dir().join("refs/heads/sha256"), format!("{id}\n"))?;
 

@@ -87,7 +87,7 @@ mod init {
     fn alternates_can_be_disabled() -> crate::Result {
         let tmp = gix_testtools::tempfile::TempDir::new()?;
         let (object_path, linked_object_path) = alternate(tmp.path().join("a"), tmp.path().join("b"))?;
-        let alternate_store = gix_odb::loose::Store::at(linked_object_path, gix_hash::Kind::Sha1);
+        let alternate_store = gix_odb::loose::Store::at(linked_object_path, gix_hash::Kind::Sha1, None);
         let alternate_id = alternate_store.write_buf(gix_object::Kind::Blob, b"alternate")?;
 
         let db_with_alternates = gix_odb::at(object_path.clone())?;

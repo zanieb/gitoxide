@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let other = std::fs::read(other_path)?;
 
     let mut merged = Vec::new();
-    let mut input = imara_diff::intern::InternedInput::default();
+    let mut input = imara_diff::InternedInput::default();
     let resolution = gix_merge::blob::builtin_driver::text(
         &mut merged,
         &mut input,
