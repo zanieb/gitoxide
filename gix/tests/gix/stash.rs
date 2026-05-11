@@ -1846,6 +1846,30 @@ mod stash {
         Ok(())
     }
 
+    #[test]
+    fn stash_apply_preserves_unrelated_dirty_tracked_file() -> crate::Result {
+        let (repo, tmp) = repo_rw_stash()?;
+        let workdir = tmp.path().to_owned();
+
+        repo.stash_save(None)?;
+        write_and_commit_file(&workdir, "other-tracked.txt", "base\n", "add tracked unrelated")?;
+        std::fs::write(workdir.join("other-tracked.txt"), "local unrelated change\n")?;
+
+        repo.stash_apply(0)?;
+
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("file.txt"))?,
+            "modified\n",
+            "stashed content should be applied"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("other-tracked.txt"))?,
+            "local unrelated change\n",
+            "stash apply must not rewrite dirty tracked files outside the stash diff"
+        );
+        Ok(())
+    }
+
     /// Stash message format: verify "On <branch>: <message>" format.
     /// Corresponds to C Git test: "push -m shows right message".
     #[test]

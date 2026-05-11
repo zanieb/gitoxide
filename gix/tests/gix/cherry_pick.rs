@@ -118,6 +118,33 @@ mod cherry_pick {
     }
 
     #[test]
+    fn cherry_pick_preserves_unrelated_dirty_tracked_file() -> crate::Result {
+        let (repo, tmp) = repo_cherry_pick()?;
+        let workdir = tmp.path();
+
+        std::fs::write(workdir.join("other.txt"), "local unrelated change\n")?;
+
+        // Get the "feature: modify file.txt" commit, which does not touch other.txt.
+        let feature_tip = branch_tip(&repo, "feature");
+        let feature_tip_commit = repo.find_object(feature_tip)?.into_commit();
+        let feature_modify_id = feature_tip_commit
+            .parent_ids()
+            .next()
+            .expect("feature tip has a parent")
+            .detach();
+
+        repo.cherry_pick(feature_modify_id, Options::default())?;
+
+        assert_eq!(std::fs::read_to_string(workdir.join("file.txt"))?, "feature change\n");
+        assert_eq!(
+            std::fs::read_to_string(workdir.join("other.txt"))?,
+            "local unrelated change\n",
+            "cherry-pick must not rewrite dirty tracked files outside the picked diff"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn cherry_pick_no_commit() -> crate::Result {
         let (repo, _tmp) = repo_cherry_pick()?;
         let head_before = repo.head_id()?.detach();
@@ -405,7 +432,7 @@ mod cherry_pick {
     /// Ported from t3505: cherry-picking a commit that conflicts should return an error.
     #[test]
     fn cherry_pick_conflict_returns_error() -> crate::Result {
-        let (repo, _tmp) = repo_rw("make_cherry_pick_conflict_repo.sh")?;
+        let (repo, tmp) = repo_rw("make_cherry_pick_conflict_repo.sh")?;
 
         let conflict_tip = branch_tip(&repo, "conflict-feature");
         let result = repo.cherry_pick(conflict_tip, Options::default());
@@ -416,6 +443,67 @@ mod cherry_pick {
             }
             Ok(_) => panic!("cherry-pick with conflict should fail"),
         }
+
+        let git_dir = repo.git_dir();
+        assert!(git_dir.join("CHERRY_PICK_HEAD").exists());
+        assert!(git_dir.join("MERGE_MSG").exists());
+        let content = std::fs::read_to_string(tmp.path().join("file.txt"))?;
+        assert!(
+            content.contains("<<<<<<< HEAD"),
+            "worktree conflict markers missing: {content}"
+        );
+        assert!(
+            content.contains(">>>>>>> cherry-picked"),
+            "cherry-picked side marker missing: {content}"
+        );
+        let index = repo.open_index()?;
+        let conflict_stages = index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage() != gix::index::entry::Stage::Unconflicted)
+            .count();
+        assert_eq!(
+            conflict_stages, 3,
+            "conflict should leave base/ours/theirs index stages"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn revert_conflict_materializes_index_and_worktree() -> crate::Result {
+        let (repo, tmp) = repo_rw("make_cherry_pick_conflict_repo.sh")?;
+
+        let conflict_tip = branch_tip(&repo, "conflict-feature");
+        let result = repo.revert(conflict_tip, Options::default());
+        match result {
+            Err(gix::repository::cherry_pick::Error::Conflict) => {}
+            Err(err) => panic!("expected conflict, got {err}"),
+            Ok(_) => panic!("revert with conflict should fail"),
+        }
+
+        let git_dir = repo.git_dir();
+        assert!(git_dir.join("REVERT_HEAD").exists());
+        assert!(git_dir.join("MERGE_MSG").exists());
+        let content = std::fs::read_to_string(tmp.path().join("file.txt"))?;
+        assert!(
+            content.contains("<<<<<<< HEAD"),
+            "worktree conflict markers missing: {content}"
+        );
+        assert!(
+            content.contains(">>>>>>> parent-of-reverted"),
+            "revert side marker missing: {content}"
+        );
+        let index = repo.open_index()?;
+        let conflict_stages = index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage() != gix::index::entry::Stage::Unconflicted)
+            .count();
+        assert_eq!(
+            conflict_stages, 3,
+            "conflict should leave base/ours/theirs index stages"
+        );
 
         Ok(())
     }

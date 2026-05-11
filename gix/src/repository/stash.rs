@@ -851,7 +851,11 @@ impl Repository {
         // Check out affected files to the worktree. If the resulting index is
         // empty, there is nothing for checkout to materialize.
         if !worktree_index.entries().is_empty() {
-            self.checkout_index_to_worktree_impl(&mut worktree_index, &workdir)?;
+            self.checkout_changed_index_entries_to_worktree_impl(
+                Some(&index_before_apply),
+                &mut worktree_index,
+                &workdir,
+            )?;
         }
 
         for (path, content) in &merged_worktree_files {
