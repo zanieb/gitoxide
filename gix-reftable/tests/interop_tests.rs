@@ -48,7 +48,7 @@ fn read_c_git_produced_reftable() {
     let repo_path = dir.path().join("repo");
 
     // Create a C Git repo with reftable backend
-    git_in(dir.path(), &["init", "--ref-format=reftable", "repo"]);
+    git_in(dir.path(), &["init", "-b", "main", "--ref-format=reftable", "repo"]);
     git_in(&repo_path, &["config", "user.name", "Test"]);
     git_in(&repo_path, &["config", "user.email", "test@test.com"]);
 
@@ -138,7 +138,7 @@ fn c_git_reads_gitoxide_produced_reftable() {
     let repo_path = dir.path().join("repo");
 
     // Create a C Git repo with reftable backend to get the basic structure
-    git_in(dir.path(), &["init", "--ref-format=reftable", "repo"]);
+    git_in(dir.path(), &["init", "-b", "main", "--ref-format=reftable", "repo"]);
     git_in(&repo_path, &["config", "user.name", "Test"]);
     git_in(&repo_path, &["config", "user.email", "test@test.com"]);
 
@@ -285,7 +285,7 @@ fn reftable_roundtrip_through_c_git() {
     let repo_path = dir.path().join("repo");
 
     // Create a C Git repo and make a commit
-    git_in(dir.path(), &["init", "--ref-format=reftable", "repo"]);
+    git_in(dir.path(), &["init", "-b", "main", "--ref-format=reftable", "repo"]);
     git_in(&repo_path, &["config", "user.name", "Test"]);
     git_in(&repo_path, &["config", "user.email", "test@test.com"]);
 
