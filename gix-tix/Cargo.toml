@@ -37,6 +37,7 @@ gix-trace = { version = "^0.3.1", path = "../gix-trace", features = ["forest"] }
 gix-worktree = { version = "^0.59.0", path = "../gix-worktree", default-features = false, features = ["remove"] }
 notify = "8.2.0"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "unstable-rendered-line-info"] }
+tempfile = "3.26.0"
 terminal-colorsaurus = "1.0.3"
 tracing = "0.1.37"
 tracing-appender = "0.2.4"

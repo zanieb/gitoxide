@@ -2683,6 +2683,7 @@ dependencies = [
  "insta",
  "notify",
  "ratatui",
+ "tempfile",
  "terminal-colorsaurus",
  "tracing",
  "tracing-appender",

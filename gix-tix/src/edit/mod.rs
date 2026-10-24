@@ -117,10 +117,13 @@ pub(crate) fn edit_document_without_terminal(
     document: &[u8],
     filename: &str,
 ) -> Result<Option<Vec<u8>>> {
+    let directory = tempfile::tempdir().or_raise(|| message("could not create editor directory"))?;
     let mut tempfile = gix::tempfile::writable_at(
-        std::env::temp_dir().join(filename),
+        directory.path().join(filename),
         gix::tempfile::ContainingDirectory::Exists,
-        gix::tempfile::AutoRemove::Tempfile,
+        gix::tempfile::AutoRemove::TempfileAndEmptyParentDirectoriesUntil {
+            boundary_directory: std::env::temp_dir(),
+        },
     )
     .or_raise(|| message("could not create commit message file"))?;
     tempfile
@@ -228,6 +231,24 @@ mod tests {
             .into());
         }
         Ok(output.stdout)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_editor_document_can_share_its_name_with_an_open_file() -> gix_testtools::Result {
+        let occupied = gix_testtools::tempfile::Builder::new()
+            .prefix("tix-doc-")
+            .suffix(".md")
+            .tempfile()?;
+        let name = occupied
+            .path()
+            .file_name()
+            .expect("named tempfile")
+            .to_str()
+            .expect("ASCII name");
+        assert!(edit_document_without_terminal(gix::command::prepare("true"), b"unchanged\n", name)?.is_none());
+        assert!(std::fs::read(occupied.path())?.is_empty());
+        Ok(())
     }
 
     #[test]
