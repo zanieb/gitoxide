@@ -49,7 +49,7 @@ pub enum Error {
         /// The one-based line number.
         line: usize,
         /// The underlying object-id decode error.
-        source: gix_hash::decode::Error,
+        source: gix_error::Error,
     },
 }
 

@@ -2983,3 +2983,2024 @@ fn run_assertions(main_repo: gix::Repository, should_be_bare: bool) -> Result {
     }
     Ok(())
 }
+
+/// Tests for worktree add and remove operations
+#[cfg(feature = "worktree-mutation")]
+mod mutation {
+    use std::process::Command;
+
+    use gix::bstr::ByteSlice;
+
+    fn repo_rw() -> crate::Result<(gix::Repository, gix_testtools::tempfile::TempDir)> {
+        let dir = gix_testtools::scripted_fixture_writable("make_worktree_repo_for_mutation.sh")?;
+        let repo = gix::open_opts(dir.path().join("repo"), crate::restricted())?;
+        Ok((repo, dir))
+    }
+
+    fn bare_repo_rw() -> crate::Result<(gix::Repository, gix_testtools::tempfile::TempDir)> {
+        let dir = gix_testtools::scripted_fixture_writable("make_worktree_repo_for_mutation.sh")?;
+        let repo = gix::open_opts(dir.path().join("repo.git"), crate::restricted())?;
+        Ok((repo, dir))
+    }
+
+    fn add_unbacklinked_worktree_entry(
+        repo: &gix::Repository,
+        id: &str,
+        base: &std::path::Path,
+    ) -> std::io::Result<std::path::PathBuf> {
+        let admin_dir = repo.common_dir().join("worktrees").join(id);
+        std::fs::create_dir_all(&admin_dir)?;
+        std::fs::write(admin_dir.join("gitdir"), format!("{}\n", base.join(".git").display()))?;
+        Ok(admin_dir)
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> crate::Result {
+        let output = Command::new("git").args(args).current_dir(dir).output()?;
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    }
+
+    fn add_committed_submodule(worktree_path: &std::path::Path) -> crate::Result {
+        let parent = worktree_path.parent().expect("worktree has parent directory");
+        let submodule_origin = parent.join("submodule-origin");
+        std::fs::create_dir(&submodule_origin)?;
+        git(&submodule_origin, &["init", "-q"])?;
+        git(&submodule_origin, &["config", "user.name", "Test User"])?;
+        git(&submodule_origin, &["config", "user.email", "test@example.com"])?;
+        std::fs::write(submodule_origin.join("file"), "submodule\n")?;
+        git(&submodule_origin, &["add", "file"])?;
+        git(&submodule_origin, &["commit", "-q", "-m", "initial submodule"])?;
+
+        let submodule_url = submodule_origin.to_string_lossy();
+        git(
+            worktree_path,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                submodule_url.as_ref(),
+                "nested",
+            ],
+        )?;
+        git(worktree_path, &["commit", "-q", "-m", "add submodule"])?;
+        Ok(())
+    }
+
+    mod add {
+        use std::path::PathBuf;
+
+        use super::*;
+
+        #[test]
+        fn detached_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-detached");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let base = proxy.base()?;
+
+            assert_eq!(base, worktree_path);
+            assert!(worktree_path.join(".git").is_file(), ".git file should exist");
+            assert!(worktree_path.join("a").is_file(), "files should be checked out");
+
+            // Verify HEAD is detached
+            let wt_repo = proxy.into_repo()?;
+            let head = wt_repo.head()?;
+            assert!(
+                head.referent_name().is_none(),
+                "HEAD should be detached, not pointing to a branch"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn default_creates_branch_from_path_basename() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let head_id = repo.head_id()?.detach();
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt.default-branch");
+
+            let proxy = repo.worktree_add(&worktree_path, Default::default())?;
+            let wt_repo = proxy.into_repo()?;
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/wt.default-branch"
+            );
+            assert_eq!(wt_repo.head_id()?.detach(), head_id);
+            assert!(worktree_path.join("a").is_file(), "files should be checked out");
+            Ok(())
+        }
+
+        #[test]
+        fn default_on_unborn_repo_creates_unborn_branch_from_path_basename() -> crate::Result {
+            let tmp = gix_testtools::tempfile::tempdir()?;
+            let repo_path = tmp.path().join("repo");
+            let repo = gix::ThreadSafeRepository::init_opts(
+                &repo_path,
+                gix::create::Kind::WithWorktree,
+                Default::default(),
+                crate::restricted(),
+            )?
+            .to_thread_local();
+            let worktree_path = tmp.path().join("wt-unborn");
+
+            let proxy = repo.worktree_add(&worktree_path, Default::default())?;
+            let wt_repo = proxy.into_repo()?;
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/wt-unborn"
+            );
+            let mut head = wt_repo.head()?;
+            assert!(head.try_peel_to_id()?.is_none(), "unborn branch has no object id");
+            assert!(
+                !repo.git_dir().join("refs").join("heads").join("wt-unborn").exists(),
+                "unborn branches are not materialized as refs"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn detach_on_unborn_repo_without_start_point_fails() -> crate::Result {
+            let tmp = gix_testtools::tempfile::tempdir()?;
+            let repo_path = tmp.path().join("repo");
+            let repo = gix::ThreadSafeRepository::init_opts(
+                &repo_path,
+                gix::create::Kind::WithWorktree,
+                Default::default(),
+                crate::restricted(),
+            )?
+            .to_thread_local();
+            let worktree_path = tmp.path().join("wt-detach-unborn");
+
+            let result = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            );
+
+            assert!(
+                result.as_ref().is_err_and(gix::Error::is_validation),
+                "detaching an unborn HEAD without a start point must fail, got {result:?}"
+            );
+            assert!(!worktree_path.exists(), "failure happens before creating the worktree");
+            Ok(())
+        }
+
+        #[test]
+        fn checkout_respects_configured_ntfs_protection() -> crate::Result {
+            let (mut repo, _keep) = repo_rw()?;
+            {
+                let mut config = repo.config_edit()?;
+                config.set_value(&gix::config::tree::Core::PROTECT_NTFS, "false")?;
+                config.commit()?;
+            }
+
+            let blob_id = repo.write_blob("content\n")?.detach();
+            let file_tree_id = repo
+                .write_object(gix::objs::TreeRef {
+                    entries: vec![gix::objs::tree::EntryRef {
+                        mode: gix::objs::tree::EntryKind::Blob.into(),
+                        filename: b"file".as_bstr(),
+                        oid: blob_id.as_ref(),
+                    }],
+                })?
+                .detach();
+            let root_tree_id = repo
+                .write_object(gix::objs::TreeRef {
+                    entries: vec![gix::objs::tree::EntryRef {
+                        mode: gix::objs::tree::EntryKind::Tree.into(),
+                        filename: b"git~1".as_bstr(),
+                        oid: file_tree_id.as_ref(),
+                    }],
+                })?
+                .detach();
+            let parent = repo.head_id()?.detach();
+            let commit_id = repo.commit("HEAD", "add ntfs opt-out path", root_tree_id, [parent])?;
+
+            let worktree_path = repo
+                .workdir()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("wt-protect-ntfs-disabled");
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            )?;
+
+            assert_eq!(proxy.into_repo()?.head_id()?.detach(), commit_id.detach());
+            assert!(
+                worktree_path.join("git~1").join("file").is_file(),
+                "worktree add should honor core.protectNTFS=false when creating the checkout index"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn with_existing_branch() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature");
+
+            let options = gix::worktree::add::Options {
+                branch: Some(b"feature-1".as_bstr()),
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let wt_repo = proxy.into_repo()?;
+
+            // Verify HEAD points to the branch
+            let head_name = wt_repo.head_name()?.expect("should have branch");
+            assert_eq!(head_name.as_bstr(), "refs/heads/feature-1");
+            Ok(())
+        }
+
+        #[test]
+        fn start_point_local_branch_checks_out_branch() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-start-branch");
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    start_point: Some(b"feature-1".as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+            let wt_repo = proxy.into_repo()?;
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/feature-1"
+            );
+            assert_eq!(
+                wt_repo.head_id()?.detach(),
+                repo.find_reference("refs/heads/feature-1")?.id().detach()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn start_point_prefers_local_branch_over_ambiguous_tag() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let tag_target = repo.head_commit()?.parent_ids().next().expect("parent");
+            repo.tag(
+                "feature-1",
+                tag_target,
+                gix_object::Kind::Commit,
+                Some(repo.committer().expect("present")?),
+                "ambiguous with branch",
+                gix_ref::transaction::PreviousValue::MustNotExist,
+            )?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-ambiguous-start");
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    start_point: Some(b"feature-1".as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+            let wt_repo = proxy.into_repo()?;
+            let branch_id = repo.find_reference("refs/heads/feature-1")?.id().detach();
+
+            assert_eq!(
+                wt_repo.head_name()?.expect("symbolic HEAD").as_bstr(),
+                "refs/heads/feature-1"
+            );
+            assert_eq!(wt_repo.head_id()?.detach(), branch_id);
+            assert_ne!(branch_id, tag_target, "fixture keeps the tag target distinct");
+            Ok(())
+        }
+
+        #[test]
+        fn start_point_checked_out_branch_fails_before_creating_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-main-again");
+
+            let result = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    start_point: Some(b"main".as_bstr()),
+                    ..Default::default()
+                },
+            );
+
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::add::Error>()),
+                    Some(gix::worktree::add::Error::CheckedOut { .. })
+                ),
+                "local branch start points must be subject to checked-out branch protection, got {result:?}"
+            );
+            assert!(!worktree_path.exists(), "failure should happen before creating files");
+            Ok(())
+        }
+
+        #[test]
+        fn with_new_branch() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-new-branch");
+
+            let options = gix::worktree::add::Options {
+                new_branch: Some(b"my-new-branch".as_bstr()),
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+
+            // Verify branch was created in main repo
+            assert!(
+                repo.try_find_reference("refs/heads/my-new-branch")?.is_some(),
+                "new branch should exist in main repo"
+            );
+
+            // Verify worktree HEAD points to new branch
+            let wt_repo = proxy.into_repo()?;
+            let head_name = wt_repo.head_name()?.expect("should have branch");
+            assert_eq!(head_name.as_bstr(), "refs/heads/my-new-branch");
+            Ok(())
+        }
+
+        #[test]
+        fn with_reset_branch_resets_existing_branch_to_start_point() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-reset-branch");
+            let old_feature_id = repo.find_reference("refs/heads/feature-1")?.id().detach();
+            let target_id = repo
+                .head_commit()?
+                .parent_ids()
+                .next()
+                .expect("fixture has a parent commit")
+                .detach();
+            let target_spec = target_id.to_string();
+            assert_ne!(
+                old_feature_id, target_id,
+                "fixture should keep feature-1 distinct from HEAD's parent"
+            );
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    reset_branch: Some(b"feature-1".as_bstr()),
+                    start_point: Some(target_spec.as_bytes().as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+
+            assert_eq!(repo.find_reference("refs/heads/feature-1")?.id().detach(), target_id);
+            let wt_repo = proxy.into_repo()?;
+            assert_eq!(
+                wt_repo.head_name()?.expect("should have branch").as_bstr(),
+                "refs/heads/feature-1"
+            );
+            assert_eq!(wt_repo.head_id()?.detach(), target_id);
+            Ok(())
+        }
+
+        #[test]
+        fn reset_branch_fails_when_branch_is_checked_out() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let first_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature-reset");
+            repo.worktree_add(
+                &first_path,
+                gix::worktree::add::Options {
+                    branch: Some(b"feature-1".as_bstr()),
+                    ..Default::default()
+                },
+            )?;
+
+            let second_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature-reset-2");
+            let result = repo.worktree_add(
+                &second_path,
+                gix::worktree::add::Options {
+                    reset_branch: Some(b"feature-1".as_bstr()),
+                    start_point: Some(b"HEAD".as_bstr()),
+                    ..Default::default()
+                },
+            );
+
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::add::Error>()),
+                    Some(gix::worktree::add::Error::CheckedOut { .. })
+                ),
+                "resetting a checked-out branch must fail, got {result:?}"
+            );
+            assert!(
+                !second_path.exists(),
+                "failure should happen before creating a worktree"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn with_lock() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-locked");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+
+            assert!(proxy.is_locked(), "worktree should be locked");
+            assert!(proxy.git_dir().join("locked").is_file(), "locked file should exist");
+            Ok(())
+        }
+
+        #[test]
+        fn no_checkout() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-no-checkout");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                no_checkout: true,
+                ..Default::default()
+            };
+
+            let _proxy = repo.worktree_add(&worktree_path, options)?;
+
+            assert!(worktree_path.join(".git").is_file(), ".git file should exist");
+            assert!(!worktree_path.join("a").exists(), "files should NOT be checked out");
+            Ok(())
+        }
+
+        #[test]
+        fn fails_on_existing_non_empty_path() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-existing");
+
+            // Create a non-empty directory
+            std::fs::create_dir_all(&worktree_path)?;
+            std::fs::write(worktree_path.join("file"), "content")?;
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+
+            let result = repo.worktree_add(&worktree_path, options);
+            assert!(
+                result.as_ref().is_err_and(|err| err
+                    .downcast_any_ref::<std::io::Error>()
+                    .is_some_and(|source| source.kind() == std::io::ErrorKind::AlreadyExists)),
+                "should fail with PathExists error, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn succeeds_on_empty_directory() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-empty-dir");
+
+            // Create an empty directory
+            std::fs::create_dir_all(&worktree_path)?;
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            assert!(proxy.base()?.exists());
+            Ok(())
+        }
+
+        #[test]
+        fn fails_when_branch_already_checked_out() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            // Create first worktree with feature-1 branch
+            let wt1_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature1");
+            let options = gix::worktree::add::Options {
+                branch: Some(b"feature-1".as_bstr()),
+                ..Default::default()
+            };
+            let _proxy1 = repo.worktree_add(&wt1_path, options)?;
+
+            // Try to create another worktree with the same branch
+            let wt2_path = repo.workdir().unwrap().parent().unwrap().join("wt-feature1-dup");
+            let options = gix::worktree::add::Options {
+                branch: Some(b"feature-1".as_bstr()),
+                ..Default::default()
+            };
+            let result = repo.worktree_add(&wt2_path, options);
+
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::add::Error>()),
+                    Some(gix::worktree::add::Error::CheckedOut { .. })
+                ),
+                "should fail because branch is already checked out, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn fails_with_nonexistent_branch() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-nonexistent");
+
+            let options = gix::worktree::add::Options {
+                branch: Some(b"nonexistent-branch".as_bstr()),
+                ..Default::default()
+            };
+
+            let result = repo.worktree_add(&worktree_path, options);
+            assert!(
+                result.as_ref().is_err_and(gix::Error::is_not_found),
+                "should fail with BranchNotFound error, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn fails_with_mutually_exclusive_options() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-invalid");
+
+            let options = gix::worktree::add::Options {
+                branch: Some(b"feature-1".as_bstr()),
+                detach: true, // Can't have both branch and detach
+                ..Default::default()
+            };
+
+            let result = repo.worktree_add(&worktree_path, options);
+            assert!(
+                result.as_ref().is_err_and(gix::Error::is_validation),
+                "should fail with MutuallyExclusiveOptions error, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn from_bare_repo_with_new_branch() -> crate::Result {
+            let (repo, _keep) = bare_repo_rw()?;
+            let worktree_path: PathBuf = repo.git_dir().parent().unwrap().join("wt-from-bare");
+
+            let options = gix::worktree::add::Options {
+                new_branch: Some(b"bare-branch".as_bstr()),
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+
+            assert!(worktree_path.join(".git").is_file());
+            assert!(worktree_path.join("a").is_file(), "files should be checked out");
+
+            let wt_repo = proxy.into_repo()?;
+            let head_name = wt_repo.head_name()?.expect("should have branch");
+            assert_eq!(head_name.as_bstr(), "refs/heads/bare-branch");
+            Ok(())
+        }
+
+        #[test]
+        fn generates_unique_id_for_duplicate_names() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let parent = repo.workdir().unwrap().parent().unwrap();
+
+            // Create worktrees with the same basename from different paths
+            let wt1_path = parent.join("wt-same");
+            let wt2_path = parent.join("subdir").join("wt-same");
+            std::fs::create_dir_all(wt2_path.parent().unwrap())?;
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+
+            let proxy1 = repo.worktree_add(&wt1_path, options.clone())?;
+            let proxy2 = repo.worktree_add(&wt2_path, options)?;
+
+            // Both should exist with different IDs
+            assert_ne!(proxy1.id()?, proxy2.id()?, "IDs should be different");
+            Ok(())
+        }
+
+        #[test]
+        fn with_lock_and_reason() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-locked-reason");
+
+            let lock_reason = "this is why it's locked";
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                lock_reason: Some(lock_reason.into()),
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+
+            assert!(proxy.is_locked(), "worktree should be locked");
+            assert_eq!(
+                proxy.lock_reason().as_deref().map(|s| s.as_bstr()),
+                Some(lock_reason.as_bytes().as_bstr()),
+                "lock reason should match"
+            );
+
+            // Also verify the locked file contains the reason
+            let locked_content = std::fs::read_to_string(proxy.git_dir().join("locked"))?;
+            assert_eq!(locked_content, format!("{lock_reason}\n"));
+            Ok(())
+        }
+
+        #[test]
+        fn reason_without_lock_still_locks() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-reason-only");
+
+            // Providing a lock_reason without lock=true should still lock
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock_reason: Some(b"reason implies lock".as_bstr()),
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            assert!(proxy.is_locked(), "providing lock_reason should imply lock");
+            Ok(())
+        }
+
+        #[test]
+        fn from_linked_checkout() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            // First create a linked worktree
+            let first_wt_path = repo.workdir().unwrap().parent().unwrap().join("wt-first");
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let first_proxy = repo.worktree_add(&first_wt_path, options)?;
+            let first_wt_repo = first_proxy.into_repo()?;
+
+            // Now add another worktree from the linked checkout
+            let second_wt_path = repo.workdir().unwrap().parent().unwrap().join("wt-nested");
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let second_proxy = first_wt_repo.worktree_add(&second_wt_path, options)?;
+
+            assert!(second_wt_path.join(".git").is_file(), ".git file should exist");
+            assert!(second_wt_path.join("a").is_file(), "files should be checked out");
+
+            // The second worktree should be visible from the main repo
+            let worktrees = repo.worktrees()?;
+            assert_eq!(worktrees.len(), 2, "both worktrees should be visible from main repo");
+
+            // Both should be visible from the linked worktree too
+            let wts_from_linked = first_wt_repo.worktrees()?;
+            assert_eq!(
+                wts_from_linked.len(),
+                2,
+                "both worktrees should be visible from linked wt"
+            );
+
+            // Verify the second worktree is a valid repo
+            let second_repo = second_proxy.into_repo()?;
+            assert!(second_repo.head().is_ok());
+            Ok(())
+        }
+
+        #[test]
+        fn from_subdir() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            // Test adding a worktree using a path that is a sibling of the workdir.
+            // Instead of changing the process-global CWD (which breaks parallel tests),
+            // we compute an absolute path that a relative "../sibling-wt" would resolve to.
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("sibling-wt");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+
+            // Verify the worktree was created correctly
+            let base = proxy.base()?;
+            assert!(base.is_dir());
+            assert!(base.join("a").is_file(), "files should be checked out");
+            Ok(())
+        }
+
+        #[test]
+        fn with_start_point() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-start-point");
+
+            // Get the parent commit of HEAD
+            let head_commit = repo.head_commit()?;
+            let parent_id = head_commit.parent_ids().next().expect("should have parent");
+            let parent_id_str = parent_id.to_string();
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                start_point: Some(parent_id_str.as_str().into()),
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let wt_repo = proxy.into_repo()?;
+
+            // Verify HEAD is at the parent commit
+            let wt_head_id = wt_repo.head()?.try_peel_to_id()?.expect("should have id").detach();
+            assert_eq!(wt_head_id, parent_id, "HEAD should be at start_point");
+            Ok(())
+        }
+
+        #[test]
+        fn new_branch_with_start_point() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-new-branch-sp");
+
+            // Get the parent commit of HEAD
+            let head_commit = repo.head_commit()?;
+            let parent_id = head_commit.parent_ids().next().expect("should have parent");
+            let parent_id_str = parent_id.to_string();
+
+            let options = gix::worktree::add::Options {
+                new_branch: Some(b"branch-at-parent".as_bstr()),
+                start_point: Some(parent_id_str.as_str().into()),
+                ..Default::default()
+            };
+
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let wt_repo = proxy.into_repo()?;
+
+            // Verify HEAD points to the new branch
+            let head_name = wt_repo.head_name()?.expect("should have branch");
+            assert_eq!(head_name.as_bstr(), "refs/heads/branch-at-parent");
+
+            // Verify the branch is at the parent commit
+            let wt_head_id = wt_repo.head_id()?;
+            assert_eq!(wt_head_id, parent_id, "branch should be at start_point");
+            Ok(())
+        }
+    }
+
+    mod remove {
+        use super::*;
+
+        #[test]
+        fn removes_worktree_and_git_dir() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-to-remove");
+
+            // First add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+            let git_dir = proxy.git_dir().to_owned();
+
+            assert!(worktree_path.exists());
+            assert!(git_dir.exists());
+
+            // Now remove it
+            repo.worktree_remove(worktree_id.as_bstr(), Default::default())?;
+
+            assert!(!worktree_path.exists(), "worktree directory should be removed");
+            assert!(!git_dir.exists(), "worktree git directory should be removed");
+            Ok(())
+        }
+
+        #[test]
+        fn fails_on_locked_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-locked-remove");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Try to remove without force
+            let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
+
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::remove::Error>()),
+                    Some(gix::worktree::remove::Error::Locked { .. })
+                ),
+                "should fail because worktree is locked, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn force_removes_locked_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-force-remove");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Remove with force level 2 (required for locked worktrees)
+            let remove_options = gix::worktree::remove::Force::OverrideLock;
+            repo.worktree_remove(worktree_id.as_bstr(), remove_options)?;
+
+            assert!(
+                !worktree_path.exists(),
+                "locked worktree should be removed with force level 2"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn refuses_to_remove_worktree_containing_submodules() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-submodule-remove");
+
+            let proxy = repo.worktree_add(
+                &worktree_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            )?;
+            let worktree_id = proxy.id()?.to_owned();
+            add_committed_submodule(&worktree_path)?;
+
+            let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::remove::Error>()),
+                    Some(gix::worktree::remove::Error::ContainsSubmodule { .. })
+                ),
+                "worktree remove must refuse worktrees containing submodules, got {result:?}"
+            );
+            assert!(
+                worktree_path.exists(),
+                "refused remove must leave the worktree in place"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn fails_on_nonexistent_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            let result = repo.worktree_remove(b"nonexistent".as_bstr(), Default::default());
+
+            assert!(
+                result.as_ref().is_err_and(gix::Error::is_not_found),
+                "should fail with NotFound error, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn handles_missing_worktree_directory() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-missing-dir");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+            let git_dir = proxy.git_dir().to_owned();
+
+            // Manually delete the worktree directory (simulating prunable state)
+            std::fs::remove_dir_all(&worktree_path)?;
+
+            // Remove should still work (cleaning up the git dir)
+            repo.worktree_remove(worktree_id.as_bstr(), Default::default())?;
+
+            assert!(!git_dir.exists(), "worktree git directory should be removed");
+            Ok(())
+        }
+
+        #[test]
+        fn cleans_up_worktrees_dir_when_last_removed() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktrees_dir = repo.common_dir().join("worktrees");
+
+            // Initially there should be no worktrees directory
+            assert!(!worktrees_dir.exists(), "worktrees dir should not exist initially");
+
+            // Add a worktree
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-cleanup-test");
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            assert!(worktrees_dir.exists(), "worktrees dir should exist after add");
+
+            // Remove the worktree
+            repo.worktree_remove(worktree_id.as_bstr(), Default::default())?;
+
+            assert!(
+                !worktrees_dir.exists(),
+                "worktrees dir should be removed when last worktree is removed"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn does_not_remove_worktrees_dir_when_others_remain() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktrees_dir = repo.common_dir().join("worktrees");
+
+            // Add two worktrees
+            let wt1_path = repo.workdir().unwrap().parent().unwrap().join("wt-remain-1");
+            let wt2_path = repo.workdir().unwrap().parent().unwrap().join("wt-remain-2");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy1 = repo.worktree_add(&wt1_path, options.clone())?;
+            let wt1_id = proxy1.id()?.to_owned();
+            let _proxy2 = repo.worktree_add(&wt2_path, options)?;
+
+            // Remove only the first worktree
+            repo.worktree_remove(wt1_id.as_bstr(), Default::default())?;
+
+            assert!(
+                worktrees_dir.exists(),
+                "worktrees dir should still exist when other worktrees remain"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn fails_on_missing_but_locked_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-missing-locked");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                lock_reason: Some(b"important work".as_bstr()),
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Manually delete the worktree directory (simulating prunable state)
+            std::fs::remove_dir_all(&worktree_path)?;
+
+            // Remove should fail because it's locked (even though the dir is missing)
+            let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::remove::Error>()),
+                    Some(gix::worktree::remove::Error::Locked { .. })
+                ),
+                "should fail because worktree is locked, got {result:?}"
+            );
+
+            // But with force level 2 it should succeed
+            repo.worktree_remove(worktree_id.as_bstr(), gix::worktree::remove::Force::OverrideLock)?;
+            Ok(())
+        }
+
+        #[test]
+        fn lock_reason_shown_in_error() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-lock-reason-error");
+
+            let lock_reason = "my custom lock reason";
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                lock_reason: Some(lock_reason.into()),
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Try to remove without force
+            let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
+
+            // Verify the error contains the lock reason
+            match result
+                .as_ref()
+                .err()
+                .and_then(|err| err.downcast_any_ref::<gix::worktree::remove::Error>())
+            {
+                Some(gix::worktree::remove::Error::Locked { path, reason }) => {
+                    assert_eq!(path, &worktree_path);
+                    assert_eq!(
+                        reason.as_ref().map(|s| s.as_bstr()),
+                        Some(lock_reason.as_bytes().as_bstr()),
+                        "lock reason should be in error"
+                    );
+                }
+                other => panic!("expected Locked error, got {other:?}"),
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn fails_on_dirty_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-dirty-remove");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Make the worktree dirty by modifying a tracked file
+            std::fs::write(worktree_path.join("a"), "modified content")?;
+
+            // Try to remove without force - should fail
+            let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::remove::Error>()),
+                    Some(gix::worktree::remove::Error::Dirty { .. })
+                ),
+                "should fail because worktree is dirty, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn force_level_1_removes_dirty_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-dirty-force1");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Make the worktree dirty
+            std::fs::write(worktree_path.join("a"), "modified content")?;
+
+            // Remove with force level 1 - should succeed
+            let remove_options = gix::worktree::remove::Force::DiscardChanges;
+            repo.worktree_remove(worktree_id.as_bstr(), remove_options)?;
+
+            assert!(!worktree_path.exists(), "dirty worktree should be removed with force 1");
+            Ok(())
+        }
+
+        #[test]
+        fn fails_on_untracked_files() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-untracked-remove");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Create an untracked file (not added to git)
+            std::fs::write(worktree_path.join("untracked-file.txt"), "untracked content")?;
+
+            // Try to remove without force - should fail
+            let result = repo.worktree_remove(worktree_id.as_bstr(), Default::default());
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::remove::Error>()),
+                    Some(gix::worktree::remove::Error::Dirty { .. })
+                ),
+                "should fail because worktree has untracked files, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn force_level_1_removes_worktree_with_untracked_files() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-untracked-force1");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Create an untracked file
+            std::fs::write(worktree_path.join("untracked-file.txt"), "untracked content")?;
+
+            // Remove with force level 1 - should succeed
+            let remove_options = gix::worktree::remove::Force::DiscardChanges;
+            repo.worktree_remove(worktree_id.as_bstr(), remove_options)?;
+
+            assert!(
+                !worktree_path.exists(),
+                "worktree with untracked files should be removed with force 1"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn force_level_1_still_fails_on_locked() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-locked-force1");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Remove with force level 1 - should still fail because locked
+            let remove_options = gix::worktree::remove::Force::DiscardChanges;
+            let result = repo.worktree_remove(worktree_id.as_bstr(), remove_options);
+            assert!(
+                matches!(
+                    result
+                        .as_ref()
+                        .err()
+                        .and_then(|err| err.downcast_any_ref::<gix::worktree::remove::Error>()),
+                    Some(gix::worktree::remove::Error::Locked { .. })
+                ),
+                "force level 1 should still fail on locked worktrees, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn refuses_to_remove_directory_without_gitfile_backlink() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let victim = repo.workdir().unwrap().parent().unwrap().join("not-a-worktree");
+            std::fs::create_dir_all(&victim)?;
+            std::fs::write(victim.join("important"), "keep me")?;
+            let admin_dir = add_unbacklinked_worktree_entry(&repo, "unbacklinked-remove", &victim)?;
+
+            let result = repo.worktree_remove(
+                b"unbacklinked-remove".as_bstr(),
+                gix::worktree::remove::Force::OverrideLock,
+            );
+
+            assert!(
+                result.as_ref().is_err_and(gix::Error::is_not_found),
+                "should refuse to remove a directory without a matching .git backlink, got {result:?}"
+            );
+            assert!(victim.join("important").exists(), "unrelated directory must remain");
+            assert!(admin_dir.exists(), "admin dir remains for repair or explicit cleanup");
+            Ok(())
+        }
+    }
+
+    mod lock_unlock {
+        use super::*;
+
+        #[test]
+        fn lock_main_worktree_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            // The main worktree's id would need to be found via worktree()
+            // but since we can't lock main worktree, we test via the API
+            // Main worktree has no entry in worktrees/ so worktree_proxy_by_id won't find it
+            let result = repo.worktree_lock(b"main".as_bstr(), Default::default());
+            assert!(
+                matches!(result, Err(gix::worktree::lock::Error::NotFound { .. })),
+                "main worktree should not be lockable (not found in worktrees/), got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn unlock_main_worktree_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            let result = repo.worktree_unlock(b"main".as_bstr());
+            assert!(
+                matches!(result, Err(gix::worktree::lock::UnlockError::NotFound { .. })),
+                "main worktree should not be unlockable (not found in worktrees/), got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn lock_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-lock-test");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Verify not locked initially
+            assert!(!proxy.is_locked());
+
+            // Lock it
+            repo.worktree_lock(worktree_id.as_bstr(), Default::default())?;
+
+            // Verify locked via proxy
+            let proxy = repo
+                .worktree_proxy_by_id(worktree_id.as_bstr())?
+                .expect("registered worktree");
+            assert!(proxy.is_locked());
+            Ok(())
+        }
+
+        #[test]
+        fn lock_with_reason() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-lock-reason");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            let lock_reason = "external drive";
+            repo.worktree_lock(
+                worktree_id.as_bstr(),
+                gix::worktree::lock::Options {
+                    reason: Some(lock_reason.into()),
+                },
+            )?;
+
+            let proxy = repo
+                .worktree_proxy_by_id(worktree_id.as_bstr())?
+                .expect("registered worktree");
+            assert!(proxy.is_locked());
+            assert_eq!(
+                proxy.lock_reason().as_deref().map(|s| s.as_bstr()),
+                Some(lock_reason.as_bytes().as_bstr())
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn lock_already_locked_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-already-locked");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Try to lock again
+            let result = repo.worktree_lock(worktree_id.as_bstr(), Default::default());
+            assert!(
+                matches!(result, Err(gix::worktree::lock::Error::AlreadyLocked { .. })),
+                "should fail because already locked, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn unlock_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-unlock-test");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            assert!(proxy.is_locked());
+
+            // Unlock it
+            repo.worktree_unlock(worktree_id.as_bstr())?;
+
+            // Verify unlocked
+            let proxy = repo
+                .worktree_proxy_by_id(worktree_id.as_bstr())?
+                .expect("registered worktree");
+            assert!(!proxy.is_locked());
+            Ok(())
+        }
+
+        #[test]
+        fn unlock_not_locked_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-unlock-not-locked");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Try to unlock when not locked
+            let result = repo.worktree_unlock(worktree_id.as_bstr());
+            assert!(
+                matches!(result, Err(gix::worktree::lock::UnlockError::NotLocked { .. })),
+                "should fail because not locked, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn lock_nonexistent_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            let result = repo.worktree_lock(b"nonexistent".as_bstr(), Default::default());
+            assert!(
+                matches!(result, Err(gix::worktree::lock::Error::NotFound { .. })),
+                "should fail with NotFound, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn unlock_nonexistent_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            let result = repo.worktree_unlock(b"nonexistent".as_bstr());
+            assert!(
+                matches!(result, Err(gix::worktree::lock::UnlockError::NotFound { .. })),
+                "should fail with NotFound, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn lock_from_another_worktree() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+
+            // Create two worktrees
+            let wt1_path = repo.workdir().unwrap().parent().unwrap().join("wt-lock-from-1");
+            let wt2_path = repo.workdir().unwrap().parent().unwrap().join("wt-lock-from-2");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy1 = repo.worktree_add(&wt1_path, options.clone())?;
+            let wt1_id = proxy1.id()?.to_owned();
+            let proxy2 = repo.worktree_add(&wt2_path, options)?;
+            let wt2_repo = proxy2.into_repo()?;
+
+            // Lock wt1 from wt2
+            wt2_repo.worktree_lock(wt1_id.as_bstr(), Default::default())?;
+
+            // Verify it's locked
+            let proxy1 = repo
+                .worktree_proxy_by_id(wt1_id.as_bstr())?
+                .expect("registered worktree");
+            assert!(proxy1.is_locked(), "worktree should be locked from another worktree");
+            Ok(())
+        }
+
+        #[test]
+        fn lock_from_within_locked_worktree_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-self-lock");
+
+            // Create and lock a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let wt_id = proxy.id()?.to_owned();
+            let wt_repo = proxy.into_repo()?;
+
+            // Try to lock it again from within itself
+            let result = wt_repo.worktree_lock(wt_id.as_bstr(), Default::default());
+            assert!(
+                matches!(result, Err(gix::worktree::lock::Error::AlreadyLocked { .. })),
+                "should fail because already locked, got {result:?}"
+            );
+            Ok(())
+        }
+    }
+
+    mod prune {
+        use super::*;
+
+        #[test]
+        fn prune_missing_worktree_path() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-prune-missing");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+            let git_dir = proxy.git_dir().to_owned();
+
+            // Manually delete the worktree directory
+            std::fs::remove_dir_all(&worktree_path)?;
+
+            // Prune should remove the stale entry
+            let pruned = repo.worktree_prune(Default::default())?;
+
+            assert_eq!(pruned.len(), 1);
+            assert_eq!(pruned[0].id.as_bstr(), worktree_id.as_bstr());
+            assert!(!git_dir.exists(), "worktree git dir should be removed by prune");
+            Ok(())
+        }
+
+        #[test]
+        fn prune_dry_run() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-prune-dry-run");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+            let git_dir = proxy.git_dir().to_owned();
+
+            // Manually delete the worktree directory
+            std::fs::remove_dir_all(&worktree_path)?;
+
+            // Dry run prune
+            let pruned = repo.worktree_prune(gix::worktree::prune::Options { dry_run: true })?;
+
+            assert_eq!(pruned.len(), 1);
+            assert_eq!(pruned[0].id.as_bstr(), worktree_id.as_bstr());
+            assert!(git_dir.exists(), "worktree git dir should NOT be removed in dry run");
+            Ok(())
+        }
+
+        #[test]
+        fn prune_skips_locked() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-prune-locked");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let git_dir = proxy.git_dir().to_owned();
+
+            // Manually delete the worktree directory
+            std::fs::remove_dir_all(&worktree_path)?;
+
+            // Prune should NOT remove the locked entry
+            let pruned = repo.worktree_prune(Default::default())?;
+
+            assert!(pruned.is_empty(), "locked worktrees should not be pruned");
+            assert!(git_dir.exists(), "locked worktree git dir should remain");
+            Ok(())
+        }
+
+        #[test]
+        fn prune_does_nothing_when_all_valid() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-prune-valid");
+
+            // Add a valid worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let _proxy = repo.worktree_add(&worktree_path, options)?;
+
+            // Prune should do nothing
+            let pruned = repo.worktree_prune(Default::default())?;
+
+            assert!(pruned.is_empty(), "valid worktrees should not be pruned");
+            assert!(worktree_path.exists(), "worktree should still exist");
+            Ok(())
+        }
+
+        #[test]
+        fn prune_cleans_empty_worktrees_dir() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-prune-cleanup");
+            let worktrees_dir = repo.common_dir().join("worktrees");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let _proxy = repo.worktree_add(&worktree_path, options)?;
+
+            assert!(worktrees_dir.exists());
+
+            // Delete the worktree directory
+            std::fs::remove_dir_all(&worktree_path)?;
+
+            // Prune should clean up
+            let _pruned = repo.worktree_prune(Default::default())?;
+
+            assert!(
+                !worktrees_dir.exists(),
+                "empty worktrees dir should be removed after prune"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn prune_directories_without_gitdir() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktrees_dir = repo.common_dir().join("worktrees");
+
+            // Manually create a worktree entry without a gitdir file
+            let fake_wt_dir = worktrees_dir.join("fake-wt");
+            std::fs::create_dir_all(&fake_wt_dir)?;
+            // Don't create a gitdir file
+
+            // Prune should remove it
+            let pruned = repo.worktree_prune(Default::default())?;
+
+            assert_eq!(pruned.len(), 1);
+            assert_eq!(pruned[0].id.as_bstr(), b"fake-wt".as_bstr());
+            assert!(
+                matches!(pruned[0].reason, gix::worktree::prune::PruneReason::MissingGitdir),
+                "should be pruned for missing gitdir"
+            );
+            assert!(!fake_wt_dir.exists(), "fake worktree dir should be removed");
+            Ok(())
+        }
+
+        #[test]
+        fn prune_directories_with_invalid_gitdir() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktrees_dir = repo.common_dir().join("worktrees");
+
+            // Manually create a worktree entry with an empty gitdir file
+            let fake_wt_dir = worktrees_dir.join("invalid-gitdir-wt");
+            std::fs::create_dir_all(&fake_wt_dir)?;
+            std::fs::write(fake_wt_dir.join("gitdir"), "")?; // Empty content is invalid
+
+            // Prune should remove it
+            let pruned = repo.worktree_prune(Default::default())?;
+
+            assert_eq!(pruned.len(), 1);
+            assert_eq!(pruned[0].id.as_bstr(), b"invalid-gitdir-wt".as_bstr());
+            assert!(
+                matches!(pruned[0].reason, gix::worktree::prune::PruneReason::InvalidGitdir),
+                "should be pruned for invalid gitdir"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn prune_files_inside_worktrees_dir() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktrees_dir = repo.common_dir().join("worktrees");
+
+            // Create worktrees dir and put a file (not a directory) in it
+            std::fs::create_dir_all(&worktrees_dir)?;
+            std::fs::write(worktrees_dir.join("some-file"), "content")?;
+
+            // Also create a valid worktree entry
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-with-file");
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let _proxy = repo.worktree_add(&worktree_path, options)?;
+
+            // Prune should not fail and should not touch the file (we skip non-directories)
+            let pruned = repo.worktree_prune(Default::default())?;
+
+            // The file is not a directory, so it won't be considered a worktree entry
+            assert!(pruned.is_empty(), "valid worktrees should not be pruned");
+            // The file should still exist (we only process directories)
+            assert!(worktrees_dir.join("some-file").exists());
+            Ok(())
+        }
+    }
+
+    mod move_worktree {
+        use super::*;
+
+        #[test]
+        fn move_worktree_to_new_path() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-to-move");
+            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-moved");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&original_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            assert!(original_path.exists());
+            assert!(!new_path.exists());
+
+            // Move it
+            repo.worktree_move(worktree_id.as_bstr(), &new_path)?;
+
+            assert!(!original_path.exists(), "original path should not exist after move");
+            assert!(new_path.exists(), "new path should exist after move");
+            assert!(new_path.join(".git").exists(), ".git file should exist in new location");
+            Ok(())
+        }
+
+        #[test]
+        fn move_updates_gitdir_file() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-gitdir");
+            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-gitdir-new");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&original_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+            let gitdir_path = proxy.git_dir().join("gitdir");
+
+            // Move it
+            repo.worktree_move(worktree_id.as_bstr(), &new_path)?;
+
+            // Verify gitdir file points to new location
+            let gitdir_content = std::fs::read_to_string(&gitdir_path)?;
+            assert!(
+                gitdir_content.contains("wt-move-gitdir-new"),
+                "gitdir should point to new location, got: {gitdir_content}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn move_locked_worktree_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-locked");
+            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-locked-new");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&original_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Try to move without force
+            let result = repo.worktree_move(worktree_id.as_bstr(), &new_path);
+            assert!(
+                matches!(result, Err(gix::worktree::r#move::Error::Locked { .. })),
+                "should fail because worktree is locked, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn move_locked_worktree_with_force() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-locked-force");
+            let new_path = repo
+                .workdir()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("wt-move-locked-force-new");
+
+            // Add a locked worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                lock: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&original_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Move with force level 2
+            let move_options = gix::worktree::r#move::Options { force: 2 };
+            repo.worktree_move_opts(worktree_id.as_bstr(), &new_path, move_options)?;
+
+            assert!(!original_path.exists(), "original should be gone");
+            assert!(new_path.exists(), "new path should exist");
+            Ok(())
+        }
+
+        #[test]
+        fn refuses_to_move_worktree_containing_submodules() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-submodule-move");
+            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-submodule-moved");
+
+            let proxy = repo.worktree_add(
+                &original_path,
+                gix::worktree::add::Options {
+                    detach: true,
+                    ..Default::default()
+                },
+            )?;
+            let worktree_id = proxy.id()?.to_owned();
+            add_committed_submodule(&original_path)?;
+
+            let result = repo.worktree_move(worktree_id.as_bstr(), &new_path);
+            assert!(
+                matches!(result, Err(gix::worktree::r#move::Error::ContainsSubmodules { .. })),
+                "worktree move must refuse worktrees containing submodules, got {result:?}"
+            );
+            assert!(
+                original_path.exists(),
+                "refused move must leave the source worktree in place"
+            );
+            assert!(!new_path.exists(), "refused move must not create the destination");
+            Ok(())
+        }
+
+        #[test]
+        fn move_to_existing_path_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-exists");
+            let existing_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-exists-dest");
+
+            // Create destination path
+            std::fs::create_dir_all(&existing_path)?;
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&original_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Try to move to existing path
+            let result = repo.worktree_move(worktree_id.as_bstr(), &existing_path);
+            assert!(
+                matches!(result, Err(gix::worktree::r#move::Error::DestinationExists { .. })),
+                "should fail because destination exists, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn move_nonexistent_worktree_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-nonexistent-dest");
+
+            let result = repo.worktree_move(b"nonexistent".as_bstr(), &new_path);
+            assert!(
+                matches!(result, Err(gix::worktree::r#move::Error::NotFound { .. })),
+                "should fail with NotFound, got {result:?}"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn move_creates_parent_directories() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let original_path = repo.workdir().unwrap().parent().unwrap().join("wt-move-parent");
+            let new_path = repo
+                .workdir()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("nested")
+                .join("deep")
+                .join("wt-moved");
+
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&original_path, options)?;
+            let worktree_id = proxy.id()?.to_owned();
+
+            // Move to nested path (parent directories don't exist)
+            repo.worktree_move(worktree_id.as_bstr(), &new_path)?;
+
+            assert!(new_path.exists(), "worktree should be moved to nested path");
+            Ok(())
+        }
+
+        #[test]
+        fn refuses_to_move_directory_without_gitfile_backlink() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let victim = repo.workdir().unwrap().parent().unwrap().join("not-a-worktree-move");
+            let destination = repo.workdir().unwrap().parent().unwrap().join("moved-victim");
+            std::fs::create_dir_all(&victim)?;
+            std::fs::write(victim.join("important"), "keep me")?;
+            let admin_dir = add_unbacklinked_worktree_entry(&repo, "unbacklinked-move", &victim)?;
+
+            let result = repo.worktree_move(b"unbacklinked-move".as_bstr(), &destination);
+
+            assert!(
+                matches!(result, Err(gix::worktree::r#move::Error::InvalidWorktreeLink { .. })),
+                "should refuse to move a directory without a matching .git backlink, got {result:?}"
+            );
+            assert!(victim.join("important").exists(), "unrelated directory must remain");
+            assert!(
+                !destination.exists(),
+                "destination must not be created by a failed move"
+            );
+            assert!(admin_dir.exists(), "admin dir remains for repair or explicit cleanup");
+            Ok(())
+        }
+    }
+
+    mod repair {
+        use super::*;
+
+        #[test]
+        fn repair_missing_dot_git_file() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-repair-dotgit");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let _proxy = repo.worktree_add(&worktree_path, options)?;
+
+            // Delete the .git file to simulate corruption
+            std::fs::remove_file(worktree_path.join(".git"))?;
+            assert!(!worktree_path.join(".git").exists());
+
+            // Repair
+            let repairs = repo.worktree_repair(std::slice::from_ref(&worktree_path))?;
+
+            assert_eq!(repairs.len(), 1);
+            assert!(
+                matches!(repairs[0].kind, gix::worktree::repair::RepairKind::GitFile),
+                "should repair .git file"
+            );
+            assert!(worktree_path.join(".git").exists(), ".git file should be restored");
+            Ok(())
+        }
+
+        #[test]
+        fn repair_incorrect_gitdir_file() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-repair-gitdir");
+
+            // Add a worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let proxy = repo.worktree_add(&worktree_path, options)?;
+            let gitdir_path = proxy.git_dir().join("gitdir");
+
+            // Move worktree manually (without using worktree_move)
+            let new_path = repo.workdir().unwrap().parent().unwrap().join("wt-repair-gitdir-moved");
+            std::fs::rename(&worktree_path, &new_path)?;
+
+            // Repair should fix the gitdir file
+            let repairs = repo.worktree_repair(std::slice::from_ref(&new_path))?;
+
+            // Should repair both .git file (now pointing to wrong place) and gitdir
+            assert!(!repairs.is_empty(), "should have performed repairs");
+
+            // Verify gitdir now points to correct location
+            let gitdir_content = std::fs::read_to_string(&gitdir_path)?;
+            assert!(
+                gitdir_content.contains("wt-repair-gitdir-moved"),
+                "gitdir should point to new location"
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn repair_nothing_when_valid() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-repair-valid");
+
+            // Add a valid worktree
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let _proxy = repo.worktree_add(&worktree_path, options)?;
+
+            // Repair should do nothing
+            let repairs = repo.worktree_repair(&[worktree_path])?;
+
+            assert!(repairs.is_empty(), "valid worktree should not need repair");
+            Ok(())
+        }
+
+        #[test]
+        fn repair_all_worktrees() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let wt1_path = repo.workdir().unwrap().parent().unwrap().join("wt-repair-all-1");
+            let wt2_path = repo.workdir().unwrap().parent().unwrap().join("wt-repair-all-2");
+
+            // Add two worktrees
+            let options = gix::worktree::add::Options {
+                detach: true,
+                ..Default::default()
+            };
+            let _proxy1 = repo.worktree_add(&wt1_path, options.clone())?;
+            let _proxy2 = repo.worktree_add(&wt2_path, options)?;
+
+            // Delete .git files from both
+            std::fs::remove_file(wt1_path.join(".git"))?;
+            std::fs::remove_file(wt2_path.join(".git"))?;
+
+            // Repair all (empty paths means repair all)
+            let repairs = repo.worktree_repair(&[])?;
+
+            assert_eq!(repairs.len(), 2, "should repair both worktrees");
+            Ok(())
+        }
+
+        #[test]
+        fn repair_nonexistent_path_fails() -> crate::Result {
+            let (repo, _keep) = repo_rw()?;
+            let nonexistent = repo.workdir().unwrap().parent().unwrap().join("nonexistent-repair");
+
+            let result = repo.worktree_repair(&[nonexistent]);
+            assert!(
+                matches!(result, Err(gix::worktree::repair::Error::InvalidPath { .. })),
+                "should fail with InvalidPath, got {result:?}"
+            );
+            Ok(())
+        }
+    }
+}

@@ -75,6 +75,7 @@ extras = [
     "blame",
     "merge",
     "notes",
+    "hooks",
 ]
 
 ## Various progress-related features that improve the look of progress message units.
@@ -109,7 +110,6 @@ sha1 = [
     "gix-index?/sha1",
     "gix-merge?/sha1",
     "gix-negotiate?/sha1",
-    "gix-note?/sha1",
     "gix-object/sha1",
     "gix-odb/sha1",
     "gix-pack/sha1",
@@ -207,7 +207,7 @@ blame = ["dep:gix-blame", "blob-diff"]
 bundle = ["dep:gix-bundle", "gix-pack/streaming-input"]
 
 ## Support for git notes (add, read, list, remove).
-note = ["dep:gix-note"]
+note = ["notes"]
 
 ## Make it possible to turn a tree into a stream of bytes, which can be decoded to entries and turned into various other formats.
 ##
@@ -377,6 +377,8 @@ progress-tree = ["prodash/progress-tree"]
 cache-efficiency-debug = ["gix-utils/cache-efficiency-debug"]
 
 [dependencies]
+thiserror = "2.0.18"
+gix-bundle = { version = "^0.1.0", path = "../gix-bundle", default-features = false, optional = true }
 gix-parallel = { version = "^0.50.1", path = "../gix-parallel", features = ["once_cell"] }
 gix-error = { version = "^0.5.2", path = "../gix-error", features = ["bstr"] }
 gix-utils = { version = "^0.5.2", path = "../gix-utils", features = ["bstr", "interrupt", "progress"] }

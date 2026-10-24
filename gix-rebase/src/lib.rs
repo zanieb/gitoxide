@@ -68,7 +68,7 @@ pub enum ReadStateError {
     ParseObjectId {
         path: PathBuf,
         content: String,
-        source: gix_hash::decode::Error,
+        source: gix_error::Error,
     },
     #[error("object id in '{path}' uses hash kind {actual:?}, expected {expected:?}")]
     ObjectHashKind {
@@ -499,10 +499,10 @@ impl MergeState {
         if stopped_path.exists() {
             let _ = std::fs::remove_file(&stopped_path);
         }
-        if self.accumulated_squash_message.is_some() {
-            if let Some(message) = driver.read_head_message().map_err(StepError::ReadCommitMessage)? {
-                self.accumulated_squash_message = Some(message);
-            }
+        if self.accumulated_squash_message.is_some()
+            && let Some(message) = driver.read_head_message().map_err(StepError::ReadCommitMessage)?
+        {
+            self.accumulated_squash_message = Some(message);
         }
 
         if self.todo.operations.is_empty() {
@@ -621,10 +621,10 @@ impl MergeState {
                 let result = driver.cherry_pick(commit_id, message.as_deref())?;
                 match amend_message {
                     gix_sequencer::todo::AmendMessage::No => {
-                        if self.accumulated_squash_message.is_none() {
-                            if let Some(msg) = message {
-                                self.accumulated_squash_message = Some(msg);
-                            }
+                        if self.accumulated_squash_message.is_none()
+                            && let Some(msg) = message
+                        {
+                            self.accumulated_squash_message = Some(msg);
                         }
                         Ok(StepOutcome::Applied {
                             new_commit: result.new_commit_id,

@@ -41,7 +41,7 @@ pub fn function(mut repo: gix::Repository, spec: Option<String>, mut out: impl s
     // Walk all commits, checking each one for connectivity
     for commit in commits {
         let commit = commit?;
-        check.check_commit_with_options(&commit.id, options)?;
+        check.check_commit_with_options(&commit.id, options).or_error()?;
         // The checker validates parent links itself. The outer walk preserves the
         // command's previous traversal shape, while the seen set keeps repeated
         // roots cheap and `skip_commit_parents` handles shallow boundaries.

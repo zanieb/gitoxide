@@ -293,6 +293,16 @@ impl crate::Repository {
         resolve(self, target.as_ref())
     }
 
+    /// Remove the linked worktree with administrative `id`, applying the requested force level.
+    #[cfg(feature = "status")]
+    pub fn worktree_remove(&self, id: &crate::bstr::BStr, force: Force) -> Result<()> {
+        use gix_error::OptionExt;
+        let proxy = self
+            .worktree_proxy_by_id(id)?
+            .ok_or_raise(|| message!("No linked worktree with id {id}").not_found())?;
+        proxy.remove(force, gix_utils::progress::Discard)
+    }
+
     /// Resolve `target` and remove the linked worktree using [`Options::default()`].
     ///
     /// Combines [`Self::prepare_remove_worktree()`] with [`Target::remove()`], which documents target selection,
@@ -407,7 +417,7 @@ fn resolve<'repo>(repo: &'repo crate::Repository, target: &Path) -> Result<Targe
     }
 }
 
-fn validate_backlink(work_dir: &Path, git_dir: &Path, ignore_case: bool) -> Result<()> {
+pub(super) fn validate_backlink(work_dir: &Path, git_dir: &Path, ignore_case: bool) -> Result<()> {
     let path = work_dir.join(gix_discover::DOT_GIT_DIR);
     let actual = gix_discover::path::from_gitdir_file(&path)
         .or_raise(|| message!("Could not read the .git file at \"{}\"", path.display()))?;

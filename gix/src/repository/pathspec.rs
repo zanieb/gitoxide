@@ -1,7 +1,7 @@
 use crate::error::{ResultExt, message};
 use gix_pathspec::MagicSignature;
 
-use crate::{AttributeStack, Pathspec, Repository, Result, bstr::BStr, config::cache::util::ApplyLeniencyDefault};
+use crate::{AttributeStack, Pathspec, Repository, Result, config::cache::util::ApplyLeniencyDefault};
 
 impl Repository {
     /// Create a new pathspec abstraction that allows to conduct searches using `patterns`.
@@ -40,11 +40,10 @@ impl Repository {
         patterns: impl IntoIterator<Item = gix_pathspec::Pattern>,
         index: &gix_index::State,
         attributes_source: gix_worktree::stack::state::attributes::Source,
-    ) -> Result<Pathspec<'_>, crate::pathspec::init::Error> {
+    ) -> Result<Pathspec<'_>> {
         Pathspec::from_patterns(self, empty_patterns_match_prefix, patterns, || {
             self.attributes_only(index, attributes_source)
                 .map(AttributeStack::detach)
-                .map_err(Into::into)
         })
     }
 

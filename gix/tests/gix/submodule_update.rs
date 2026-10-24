@@ -39,7 +39,7 @@ mod init {
         let url = snap2
             .string("submodule.submodule.url")
             .expect("url should be present after init");
-        assert!(!url.as_ref().is_empty(), "url should be non-empty after init");
+        assert!(!url.is_empty(), "url should be non-empty after init");
         Ok(())
     }
 
@@ -55,7 +55,7 @@ mod init {
 
         // Verify the custom url is set
         let snap = repo.config_snapshot();
-        let url_before = snap.string("submodule.submodule.url").expect("url set").into_owned();
+        let url_before = snap.string("submodule.submodule.url").expect("url set");
         assert!(url_before.starts_with(b"https://custom.example.com"));
 
         // Init without force should be a no-op
@@ -101,9 +101,8 @@ mod init {
         // (since the command was rejected) or set to "none" -- either is acceptable.
         if let Some(val) = snap2.string("submodule.submodule.update") {
             assert!(
-                !val.as_ref().starts_with(b"!"),
-                "command should not be written from .gitmodules, got: {:?}",
-                val.as_ref()
+                !val.starts_with(b"!"),
+                "command should not be written from .gitmodules, got: {val:?}"
             );
         }
         Ok(())
@@ -122,7 +121,7 @@ mod init {
 
         // The update strategy from local config (.git/config) is 'none'
         // since we set it in the fixture.
-        let update = sm.update_strategy()?;
+        let update = sm.update()?;
         assert_eq!(
             update,
             Some(gix::submodule::config::Update::None),
@@ -206,7 +205,7 @@ mod update {
         );
 
         assert!(
-            matches!(result, Err(gix::submodule::update::Error::InvalidName { .. })),
+            matches!(&result, Err(gix::submodule::update::Error::Operation(err)) if err.is_validation()),
             "submodule update must reject names escaping .git/modules, got {result:?}"
         );
         assert!(
@@ -243,7 +242,7 @@ mod update {
         .expect("update should clone the submodule");
 
         let sm_repo = sm.open()?.expect("submodule should be openable after update");
-        assert!(sm_repo.is_shallow(), "submodule clone should be shallow");
+        assert!(sm_repo.is_shallow()?, "submodule clone should be shallow");
         assert_eq!(
             sm_repo.shallow_commits()?.expect("shallow commits").len(),
             1,

@@ -156,14 +156,15 @@ impl Fixture {
     fn new(worktree_path: PathBuf) -> gix_testtools::Result<Fixture> {
         use gix_ref::store::WriteReflog;
 
-        let store = gix_ref::file::Store::at(
+        let store = gix_ref::file::Store::at_opts(
             worktree_path.join(".git"),
+            gix_hash::Kind::Sha1,
             gix_ref::store::init::Options {
                 write_reflog: WriteReflog::Disable,
                 ..Default::default()
             },
         );
-        let odb = gix_odb::at(worktree_path.join(".git/objects"))?;
+        let odb = gix_odb::at(worktree_path.join(".git/objects"), gix_hash::Kind::Sha1)?;
 
         let mut reference = gix_ref::file::Store::find(&store, "HEAD")?;
 
@@ -190,7 +191,7 @@ impl Fixture {
                     old_root: None,
                     new_root: None,
                 },
-                gix_filter::Pipeline::new(Default::default(), Default::default()),
+                gix_filter::Pipeline::new(Default::default(), gix_hash::Kind::Sha1, Default::default()),
                 vec![],
                 gix_diff::blob::pipeline::Options {
                     large_file_threshold_bytes: 0,
@@ -222,15 +223,16 @@ impl Fixture {
         &mut self,
         source_file_name: &bstr::BStr,
         options: gix_blame::Options,
-    ) -> Result<gix_blame::Outcome, gix_blame::Error> {
-        gix_blame::file(
+    ) -> gix_error::Result<gix_blame::Outcome> {
+        gix_blame::file_with_progress(
             &self.odb,
-            self.suspect,
+            gix_blame::Start::Commit(self.suspect),
             None,
             &mut self.resource_cache,
             source_file_name,
             options,
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )
     }
 
@@ -240,15 +242,16 @@ impl Fixture {
         suspect: ObjectId,
         source_file_name: &bstr::BStr,
         options: gix_blame::Options,
-    ) -> Result<gix_blame::Outcome, gix_blame::Error> {
-        gix_blame::file(
+    ) -> gix_error::Result<gix_blame::Outcome> {
+        gix_blame::file_with_progress(
             &self.odb,
-            suspect,
+            gix_blame::Start::Commit(suspect),
             None,
             &mut self.resource_cache,
             source_file_name,
             options,
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )
     }
 

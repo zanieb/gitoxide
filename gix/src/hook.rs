@@ -134,9 +134,9 @@ pub mod run {
         #[error("Failed to read hook stderr")]
         ReadStderr(#[source] std::io::Error),
         #[error(transparent)]
-        CommandContext(#[from] crate::config::command_context::Error),
+        CommandContext(#[from] gix_error::Error),
         #[error("Could not interpolate the hooks path from configuration")]
-        HooksPathInterpolation(#[source] gix_config::path::interpolate::Error),
+        HooksPathInterpolation(#[source] gix_error::Error),
         #[error("The hook at '{path}' exited with code {code}")]
         HookFailed {
             /// The path of the hook that failed.
@@ -154,6 +154,6 @@ pub mod find {
     #[allow(missing_docs)]
     pub enum Error {
         #[error("Could not interpolate the hooks path from configuration")]
-        InterpolatePath(#[from] gix_config::path::interpolate::Error),
+        InterpolatePath(#[from] gix_error::Error),
     }
 }

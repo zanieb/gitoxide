@@ -89,24 +89,6 @@ pub fn file(
     Ok(())
 }
 
-fn normalize_merge_path(repo: &gix::Repository, index: &gix::index::File, path: BString) -> anyhow::Result<BString> {
-    let specs = repo.pathspec(
-        false,
-        [path],
-        true,
-        index,
-        gix::worktree::stack::state::attributes::Source::WorktreeThenIdMapping.adjust_for_bare(repo.is_bare()),
-    )?;
-
-    let normalized = specs
-        .search()
-        .patterns()
-        .map(|p| p.path().to_owned())
-        .next()
-        .context("pathspec normalization unexpectedly produced no pattern")?;
-    Ok(normalized)
-}
-
 fn worktree_roots(
     base: Option<gix::Id<'_>>,
     ours: Option<gix::Id<'_>>,
@@ -133,7 +115,7 @@ mod tests {
     use crate::OutputFormat;
 
     #[test]
-    fn merge_file_preserves_argument_order_after_path_normalization() -> anyhow::Result<()> {
+    fn merge_file_preserves_argument_order_after_path_normalization() -> gix_testtools::TestResult {
         let worktree = tempfile::TempDir::new()?;
         let repo = gix::init(worktree.path())?;
         let tree_id = repo.write_object(gix::objs::TreeRef::empty())?;

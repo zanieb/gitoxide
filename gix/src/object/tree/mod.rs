@@ -81,7 +81,7 @@ impl<'repo> Tree<'repo> {
         buf.extend_from_slice(&self.data);
 
         let mut iter = path.into_iter().peekable();
-        let mut data = gix_object::Data::new_with_hash(gix_object::Kind::Tree, buf, self.id.kind());
+        let mut data = gix_object::Data::new(buf, gix_object::Kind::Tree, self.id.kind());
 
         loop {
             data = match next_entry(&mut iter, data) {
@@ -114,7 +114,7 @@ impl<'repo> Tree<'repo> {
         P: PartialEq<BStr>,
     {
         let mut iter = path.into_iter().peekable();
-        let mut data = gix_object::Data::new_with_hash(gix_object::Kind::Tree, &self.data, self.id.kind());
+        let mut data = gix_object::Data::new(&self.data, gix_object::Kind::Tree, self.id.kind());
         let mut data_id = self.id;
 
         loop {
@@ -218,7 +218,7 @@ mod iter {
         /// Return an iterator over tree entries to obtain information about files and directories this tree contains.
         pub fn iter(&self) -> impl Iterator<Item = Result<EntryRef<'repo, '_>>> {
             let repo = self.repo;
-            gix_object::TreeRefIter::from_bytes_with_hash(&self.data, self.id.kind())
+            gix_object::TreeRefIter::from_bytes(&self.data, self.id.kind())
                 .map(move |e| e.map(|entry| EntryRef { inner: entry, repo }))
         }
     }

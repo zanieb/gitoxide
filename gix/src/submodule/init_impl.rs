@@ -24,15 +24,14 @@ impl Submodule<'_> {
     /// Following git's behavior, commands (`!cmd`) in the `update` field of `.gitmodules` cause
     /// `update = none` to be written to the local config (git prints a warning and falls back).
     pub fn init(&self, force: bool) -> Result<(), super::init::Error> {
-        self.validated_git_dir()
-            .map_err(|name| super::init::Error::InvalidName { name })?;
+        self.git_dir()?;
 
         // Validate submodule path for symlink attacks before any config writes.
-        if let Some(worktree) = self.state.repo.workdir() {
-            if let Ok(sm_path_bstr) = self.path() {
-                let sm_path = gix_path::from_bstr(sm_path_bstr.as_ref());
-                super::validate_submodule_path(&sm_path, worktree)?;
-            }
+        if let Some(worktree) = self.state.repo.workdir()
+            && let Ok(sm_path_bstr) = self.path()
+        {
+            let sm_path = gix_path::from_bstr(sm_path_bstr)?;
+            super::validate_submodule_path(&sm_path, worktree)?;
         }
 
         let name = self.name();
@@ -59,7 +58,7 @@ impl Submodule<'_> {
         // relative to the worktree directory (git falls back to getcwd() similarly).
         let raw_url = self.url()?;
         let resolved_url = {
-            let rel_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(raw_url.path.as_ref()));
+            let rel_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(raw_url.path.as_ref()))?;
             if rel_path.is_relative() && raw_url.scheme == gix_url::Scheme::File {
                 let cwd = self.state.repo.options.current_dir_or_empty();
 
@@ -74,7 +73,7 @@ impl Submodule<'_> {
                             .map(std::borrow::ToOwned::to_owned)
                     })
                     .and_then(|base_url| {
-                        let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref()));
+                        let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref())).ok()?;
                         let candidate = base_path.join(&rel_path);
                         gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS)
                             .ok()
@@ -88,7 +87,7 @@ impl Submodule<'_> {
                     let candidate = worktree.join(&rel_path);
                     gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS).unwrap_or(candidate)
                 });
-                gix_path::into_bstr(resolved).into_owned()
+                gix_path::into_bstr(resolved)?.into_owned()
             } else {
                 raw_url.to_bstring()
             }
@@ -101,12 +100,12 @@ impl Submodule<'_> {
                 .expect("'submodule' is a valid section name");
             // Remove existing url values before setting new one, to match git behavior
             while section.remove("url").is_some() {}
-            section.push("url".try_into().expect("valid key"), Some(BStr::new(&resolved_url)));
+            section.push("url", Some(BStr::new(&resolved_url)))?;
 
             // Set active flag if not already set in local config.
             // Git's init_submodule() sets submodule.<name>.active = true.
             if section.value("active").is_none() {
-                section.push("active".try_into().expect("valid key"), Some(BStr::new(b"true")));
+                section.push("active", Some(BStr::new(b"true")))?;
             }
         }
 
@@ -134,7 +133,7 @@ impl Submodule<'_> {
                     .section_mut("submodule", Some(name))
                     .expect("just created above");
                 while section.remove("update").is_some() {}
-                section.push("update".try_into().expect("valid key"), Some(BStr::new(update_value)));
+                section.push("update", Some(BStr::new(update_value)))?;
             }
         }
 

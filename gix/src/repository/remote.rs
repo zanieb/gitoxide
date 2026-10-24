@@ -1,5 +1,7 @@
+use crate::bstr::{BString, ByteSlice};
 use crate::{Remote, Result, bstr::BStr, config, remote};
 use gix_error::{ErrorExt, ResultExt};
+use std::borrow::Cow;
 
 impl crate::Repository {
     /// Create a new remote available at the given `url`.
@@ -280,7 +282,7 @@ impl crate::Repository {
         };
 
         match (urls, fetch_specs, push_urls, push_specs) {
-            (None, None, None, None) if !remote_is_configured => None,
+            (None, None, None, None) if !remote_is_configured => self.try_find_legacy_remote(name_or_url, rewrite_urls),
             (urls, fetch_specs, push_urls, push_specs) => {
                 let mut urls = match urls {
                     Some(Ok(v)) => v,
@@ -337,11 +339,11 @@ impl crate::Repository {
         }
     }
 
-    fn try_find_legacy_remote(&self, name: &BStr, rewrite_urls: bool) -> Option<Result<Remote<'_>, find::Error>> {
+    fn try_find_legacy_remote(&self, name: &BStr, rewrite_urls: bool) -> Option<Result<Remote<'_>>> {
         if !is_valid_legacy_remote_name(name) {
             return None;
         }
-        let name_path = gix_path::try_from_bstr(name).ok()?;
+        let name_path = gix_path::from_bstr(name).ok()?;
         let remotes_file = self.common_dir().join("remotes").join(name_path.as_ref());
         match std::fs::read(&remotes_file) {
             Ok(data) => {
@@ -351,10 +353,11 @@ impl crate::Repository {
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => {
-                return Some(Err(find::Error::LegacyRemoteFileIo {
-                    path: remotes_file,
-                    source: err,
-                }));
+                return Some(
+                    Err(err).or_raise(|| {
+                        gix_error::message!("Could not read legacy remote file {}", remotes_file.display())
+                    }),
+                );
             }
         }
 
@@ -362,10 +365,10 @@ impl crate::Repository {
         match std::fs::read(&branches_file) {
             Ok(data) => self.remote_from_legacy_branches_file(name, data.as_bstr(), rewrite_urls),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-            Err(err) => Some(Err(find::Error::LegacyRemoteFileIo {
-                path: branches_file,
-                source: err,
-            })),
+            Err(err) => Some(
+                Err(err)
+                    .or_raise(|| gix_error::message!("Could not read legacy remote file {}", branches_file.display())),
+            ),
         }
     }
 
@@ -374,7 +377,7 @@ impl crate::Repository {
         name: &BStr,
         data: &BStr,
         rewrite_urls: bool,
-    ) -> Option<Result<Remote<'_>, find::Error>> {
+    ) -> Option<Result<Remote<'_>>> {
         let mut url = None;
         let mut fetch_specs = Vec::new();
         let mut push_specs = Vec::new();
@@ -405,15 +408,14 @@ impl crate::Repository {
 
             Remote::from_preparsed_config(
                 Some(name.to_owned()),
-                Some(url),
-                None,
+                vec![url],
+                vec![],
                 fetch_specs,
                 push_specs,
                 rewrite_urls,
                 Default::default(),
                 self,
             )
-            .map_err(Into::into)
         }))
     }
 
@@ -422,7 +424,7 @@ impl crate::Repository {
         name: &BStr,
         data: &BStr,
         rewrite_urls: bool,
-    ) -> Option<Result<Remote<'_>, find::Error>> {
+    ) -> Option<Result<Remote<'_>>> {
         let line = data.lines().next()?.trim();
         if line.is_empty() {
             return None;
@@ -434,7 +436,7 @@ impl crate::Repository {
                     .config
                     .resolved
                     .string(config::tree::Init::DEFAULT_BRANCH)
-                    .unwrap_or_else(|| Cow::Borrowed(crate::init::DEFAULT_BRANCH_NAME.into()));
+                    .map_or_else(|| Cow::Borrowed(crate::init::DEFAULT_BRANCH_NAME.into()), Cow::Owned);
                 (line, branch)
             }
         };
@@ -458,15 +460,14 @@ impl crate::Repository {
                 )?;
                 Remote::from_preparsed_config(
                     Some(name.to_owned()),
-                    Some(url),
-                    None,
+                    vec![url],
+                    vec![],
                     fetch_specs,
                     push_specs,
                     rewrite_urls,
                     Default::default(),
                     self,
                 )
-                .map_err(Into::into)
             }),
         )
     }
@@ -477,7 +478,7 @@ fn config_spec<'a, T, Specs>(
     name_or_url: &BStr,
     key: &'static config::tree::keys::Any<T>,
     op: gix_refspec::parse::Operation,
-) -> Result<Vec<gix_refspec::RefSpec>, find::Error>
+) -> Result<Vec<gix_refspec::RefSpec>>
 where
     T: config::tree::keys::Validate,
     Specs: IntoIterator<Item = Cow<'a, BStr>>,
@@ -486,13 +487,10 @@ where
     specs
         .into_iter()
         .map(|spec| {
-            key.try_into_refspec(spec, op).map_err(|err| find::Error::RefSpec {
-                remote_name: name_or_url.into(),
-                kind,
-                source: err,
-            })
+            key.try_into_refspec(spec, op)
+                .or_raise(|| gix_error::message!("Invalid {kind} refspec for remote {name_or_url}").validation())
         })
-        .collect::<Result<Vec<_>, _>>()
+        .collect::<Result<Vec<_>>>()
         .map(|mut specs| {
             specs.sort();
             specs.dedup();
@@ -500,14 +498,10 @@ where
         })
 }
 
-fn parse_legacy_url(url: impl Into<BString>, name: &BStr, kind: &'static str) -> Result<gix_url::Url, find::Error> {
+fn parse_legacy_url(url: impl Into<BString>, name: &BStr, kind: &'static str) -> Result<gix_url::Url> {
     config::tree::Remote::URL
-        .try_into_url(Cow::Owned(url.into()))
-        .map_err(|err| find::Error::Url {
-            remote_name: name.into(),
-            kind,
-            source: err,
-        })
+        .try_into_url(url.into())
+        .or_raise(|| gix_error::message!("Invalid {kind} URL for remote {name}").validation())
 }
 
 fn legacy_branches_fetch_spec(branch: &BStr, name: &BStr) -> Cow<'static, BStr> {

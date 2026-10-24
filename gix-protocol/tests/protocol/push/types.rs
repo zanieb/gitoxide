@@ -273,9 +273,9 @@ mod progress_id {
 
     #[test]
     fn progress_ids_are_unique_4byte_codes() {
-        let remote: gix_features::progress::Id = ProgressId::RemoteProgress.into();
-        let sending: gix_features::progress::Id = ProgressId::SendingPack.into();
-        let counting: gix_features::progress::Id = ProgressId::CountingObjects.into();
+        let remote: gix_utils::progress::Id = ProgressId::RemoteProgress.into();
+        let sending: gix_utils::progress::Id = ProgressId::SendingPack.into();
+        let counting: gix_utils::progress::Id = ProgressId::CountingObjects.into();
 
         // Each progress ID should be unique
         assert_ne!(remote, sending);
@@ -286,9 +286,9 @@ mod progress_id {
     #[test]
     fn progress_ids_are_readable_4byte_ascii() {
         // The progress IDs should be readable ASCII for debugging
-        let remote: gix_features::progress::Id = ProgressId::RemoteProgress.into();
-        let sending: gix_features::progress::Id = ProgressId::SendingPack.into();
-        let counting: gix_features::progress::Id = ProgressId::CountingObjects.into();
+        let remote: gix_utils::progress::Id = ProgressId::RemoteProgress.into();
+        let sending: gix_utils::progress::Id = ProgressId::SendingPack.into();
+        let counting: gix_utils::progress::Id = ProgressId::CountingObjects.into();
 
         assert_eq!(&remote, b"PURP");
         assert_eq!(&sending, b"PUSP");
@@ -343,7 +343,6 @@ mod command_properties {
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 mod error {
     use gix_protocol::push;
-    use gix_transport::IsSpuriousError;
 
     #[test]
     fn io_connection_reset_is_spurious() {
@@ -351,7 +350,10 @@ mod error {
             std::io::ErrorKind::ConnectionReset,
             "connection reset by peer",
         ));
-        assert!(err.is_spurious(), "connection reset should be spurious for retry logic");
+        assert!(
+            gix_error::classify(&err).can_retry_lenient(),
+            "connection reset should be spurious for retry logic"
+        );
     }
 
     #[test]
@@ -361,7 +363,7 @@ mod error {
             "connection aborted",
         ));
         assert!(
-            err.is_spurious(),
+            gix_error::classify(&err).can_retry_lenient(),
             "connection aborted should be spurious for retry logic"
         );
     }
@@ -372,7 +374,10 @@ mod error {
             std::io::ErrorKind::PermissionDenied,
             "permission denied",
         ));
-        assert!(!err.is_spurious(), "permission denied should not be spurious");
+        assert!(
+            !gix_error::classify(&err).can_retry_lenient(),
+            "permission denied should not be spurious"
+        );
     }
 
     #[test]
@@ -381,7 +386,7 @@ mod error {
             reason: "index-pack failed".to_string(),
         };
         assert!(
-            !err.is_spurious(),
+            !gix_error::classify(&err).can_retry_lenient(),
             "unpack failure is a server-side issue, not spurious"
         );
     }
@@ -389,18 +394,27 @@ mod error {
     #[test]
     fn atomic_not_supported_is_not_spurious() {
         let err = push::Error::AtomicNotSupported;
-        assert!(!err.is_spurious(), "capability mismatch is not spurious");
+        assert!(
+            !gix_error::classify(&err).can_retry_lenient(),
+            "capability mismatch is not spurious"
+        );
     }
 
     #[test]
     fn no_commands_is_not_spurious() {
         let err = push::Error::NoCommands;
-        assert!(!err.is_spurious(), "no commands is a client-side issue");
+        assert!(
+            !gix_error::classify(&err).can_retry_lenient(),
+            "no commands is a client-side issue"
+        );
     }
 
     #[test]
     fn pack_generation_is_not_spurious() {
         let err = push::Error::PackGeneration(Box::new(std::io::Error::other("pack error")));
-        assert!(!err.is_spurious(), "pack generation failure is not spurious");
+        assert!(
+            !gix_error::classify(&err).can_retry_lenient(),
+            "pack generation failure is not spurious"
+        );
     }
 }

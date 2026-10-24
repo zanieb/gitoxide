@@ -3,12 +3,12 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use gix_features::progress::DynNestedProgress;
+use gix_utils::progress::DynNestedProgress;
 
 use crate::push::{self, Command, Error, Options, Outcome, ProgressId};
-#[cfg(feature = "async-client")]
+#[crate::bisync::only_async]
 use crate::transport::client::async_io::{ExtendedBufRead, HandleProgress, Transport};
-#[cfg(feature = "blocking-client")]
+#[crate::bisync::only_sync]
 use crate::transport::client::blocking_io::{ExtendedBufRead, HandleProgress, Transport};
 
 /// Perform one push operation using the given `transport`.
@@ -28,7 +28,7 @@ use crate::transport::client::blocking_io::{ExtendedBufRead, HandleProgress, Tra
 ///
 /// **Note that the interaction will never be ended**, even on error or failure, leaving it up to the caller to do that.
 #[allow(clippy::too_many_arguments)]
-#[maybe_async::maybe_async]
+#[crate::bisync::bisync]
 pub async fn push<P, T, E>(
     commands: &[Command],
     write_pack: impl FnOnce(&mut dyn Write, &mut dyn DynNestedProgress, &AtomicBool) -> Result<bool, E>,
@@ -36,12 +36,12 @@ pub async fn push<P, T, E>(
     should_interrupt: &AtomicBool,
     handshake: &crate::Handshake,
     transport: &mut T,
-    user_agent: (&'static str, Option<std::borrow::Cow<'static, str>>),
+    user_agent: (&'static str, Option<String>),
     trace_packetlines: bool,
     options: Options,
 ) -> Result<Outcome, Error>
 where
-    P: gix_features::progress::NestedProgress,
+    P: gix_utils::progress::NestedProgress,
     P::SubProgress: 'static,
     T: Transport,
     E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
@@ -158,7 +158,7 @@ where
         {
             writer.write_all(&line)?;
         }
-        #[cfg(feature = "async-client")]
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         {
             use futures_lite::AsyncWriteExt;
             writer.write_all(&line).await?;
@@ -172,7 +172,7 @@ where
         {
             writer.write_message(gix_transport::client::MessageKind::Flush)?;
         }
-        #[cfg(feature = "async-client")]
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         {
             writer.write_message(gix_transport::client::MessageKind::Flush).await?;
         }
@@ -187,7 +187,7 @@ where
             write_pack(&mut *raw_writer, &mut progress, should_interrupt)
                 .map_err(|e| Error::PackGeneration(e.into()))?
         };
-        #[cfg(feature = "async-client")]
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         let wrote_pack = {
             let mut blocking_writer = crate::futures_lite::io::BlockOn::new(raw_writer);
             let result = write_pack(&mut blocking_writer, &mut progress, should_interrupt)
@@ -205,7 +205,7 @@ where
         {
             raw_writer.flush()?;
         }
-        #[cfg(feature = "async-client")]
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         {
             use futures_lite::AsyncWriteExt;
             raw_writer.flush().await?;
@@ -242,7 +242,7 @@ where
     }
 }
 
-#[maybe_async::maybe_async]
+#[crate::bisync::bisync]
 async fn read_response<'a>(
     mut reader: Box<dyn ExtendedBufRead<'a> + Unpin + 'a>,
     progress: &mut dyn DynNestedProgress,
@@ -268,7 +268,7 @@ async fn read_response<'a>(
     // extract the content from both layers of framing.
     let mut raw_sideband_data = Vec::new();
     {
-        #[cfg(feature = "async-client")]
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         use crate::transport::client::async_io::ReadlineBufRead;
         #[cfg(feature = "blocking-client")]
         use crate::transport::client::blocking_io::ReadlineBufRead;
@@ -289,7 +289,7 @@ async fn read_response<'a>(
     Ok(response_data)
 }
 
-#[maybe_async::maybe_async]
+#[crate::bisync::bisync]
 async fn parse_push_response<'a>(
     reader: Option<Box<dyn ExtendedBufRead<'a> + Unpin + 'a>>,
     commands: &[Command],

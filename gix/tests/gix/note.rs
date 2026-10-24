@@ -443,10 +443,10 @@ mod note {
         let add_error = repo
             .note_add(commit_a, b"new note\n", Some(broken_ref), true)
             .unwrap_err();
-        assert!(matches!(add_error, gix::repository::note::Error::PeelToCommit(_)));
+        assert!(add_error.to_string().contains("commit"), "{add_error}");
 
         let remove_error = repo.note_remove(&commit_a, Some(broken_ref)).unwrap_err();
-        assert!(matches!(remove_error, gix::repository::note::Error::PeelToCommit(_)));
+        assert!(remove_error.to_string().contains("commit"), "{remove_error}");
         assert_eq!(
             repo.find_reference(broken_ref)?.id().detach(),
             blob_id,

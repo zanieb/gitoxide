@@ -4,7 +4,12 @@ use gix_testtools::TestResult;
 #[cfg(all(feature = "worktree-mutation", feature = "blocking-network-client"))]
 mod blocking_io {
     use gix_testtools::{Result, TestResult};
-    use std::{borrow::Cow, path::Path, sync::atomic::AtomicBool};
+    use std::{
+        borrow::Cow,
+        path::{Path, PathBuf},
+        process::Command,
+        sync::{LazyLock, atomic::AtomicBool},
+    };
 
     use crate::{
         remote,
@@ -355,10 +360,9 @@ mod blocking_io {
             .fetch_only(gix::progress::Discard, &AtomicBool::default())?;
         let shallow_ids = shallow_ids(&repo, "present")?;
         assert_eq!(
-            shallow_ids(&repo, "present")?,
+            shallow_ids,
             sorted([
                 hex_to_id("2d9d136fb0765f2e24c44a0f91984318d580d03b"),
-                hex_to_id("dfd0954dabef3b64f458321ef15571cc1a46d552"),
                 hex_to_id("dfd0954dabef3b64f458321ef15571cc1a46d552"),
             ])
         );
@@ -1562,6 +1566,183 @@ mod blocking_io {
         assert_eq!(
             origin_remotes, 1,
             "exactly one `origin` remote is written despite the adoption retry"
+        );
+        Ok(())
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .expect("git must be on PATH");
+        assert!(
+            output.status.success(),
+            "git {} failed in {}:\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn fetch_shallow_dry_run_unshallow_keeps_shallow_file_unchanged() -> crate::Result {
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _out) = gix::prepare_clone_bare(remote::repo("base").path(), tmp.path())?
+            .with_shallow(Shallow::DepthAtRemote(2.try_into().expect("non-zero")))
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        let shallow_file = repo.shallow_file()?;
+        let shallow_before = std::fs::read(&shallow_file)?;
+        let remote = repo
+            .head()?
+            .into_remote(Direction::Fetch)
+            .expect("present")?
+            .with_refspecs(Some("refs/heads/main"), Direction::Fetch)?;
+
+        let outcome = remote
+            .connect(Direction::Fetch)?
+            .prepare_fetch(gix::progress::Discard, Default::default())?
+            .with_shallow(Shallow::undo())
+            .with_dry_run(true)
+            .receive(gix::progress::Discard, &AtomicBool::default())?;
+
+        assert!(
+            matches!(
+                outcome.status,
+                gix::remote::fetch::Status::NoPackReceived { dry_run: true, .. }
+            ),
+            "dry-run mode reports the update without applying it"
+        );
+        assert_eq!(
+            std::fs::read(&shallow_file)?,
+            shallow_before,
+            "dry-run unshallow must not alter the real shallow boundary"
+        );
+        assert!(repo.is_shallow()?, "the repository remains shallow after dry-run");
+        Ok(())
+    }
+
+    #[test]
+    fn shallow_clone_fetches_included_tags_only() -> crate::Result {
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _out) = gix::prepare_clone_bare(remote::repo("base").path(), tmp.path())?
+            .with_shallow(Shallow::DepthAtRemote(1.try_into()?))
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        assert!(
+            repo.references()?.prefixed("refs/tags/")?.next().is_none(),
+            "shallow clone should not fetch unrelated tags"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn shallow_clone_includes_tags_pointing_to_received_history() -> crate::Result {
+        let remote_dir = gix_testtools::scripted_fixture_writable("make_remote_repos.sh")?;
+        let base = remote_dir.path().join("base");
+        git(&base, &["tag", "tip-light", "main"]);
+        git(
+            &base,
+            &[
+                "-c",
+                "user.name=Bundle Test",
+                "-c",
+                "user.email=bundle@example.com",
+                "tag",
+                "-m",
+                "tip annotated",
+                "tip-annotated",
+                "main",
+            ],
+        );
+
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _out) = gix::prepare_clone_bare(base, tmp.path())?
+            .with_shallow(Shallow::DepthAtRemote(1.try_into()?))
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        assert!(repo.find_reference("refs/tags/tip-light").is_ok());
+        assert!(repo.find_reference("refs/tags/tip-annotated").is_ok());
+        assert!(
+            repo.try_find_reference("refs/tags/future-tag")?.is_none(),
+            "shallow clone should not fetch tags outside the received history"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn from_shallow_prunes_missing_boundary_commits() -> crate::Result {
+        let remote_dir = gix_testtools::scripted_fixture_writable("make_remote_repos.sh")?;
+        let missing = hex_to_id("1111111111111111111111111111111111111111");
+        std::io::Write::write_all(
+            &mut std::fs::OpenOptions::new()
+                .append(true)
+                .open(remote_dir.path().join("base.shallow/.git/shallow"))?,
+            format!("{missing}\n").as_bytes(),
+        )?;
+
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let (repo, _change) = gix::prepare_clone_bare(remote_dir.path().join("base.shallow"), tmp.path())?
+            .fetch_only(gix::progress::Discard, &std::sync::atomic::AtomicBool::default())?;
+
+        let shallow_ids = shallow_ids(&repo, "present")?;
+        assert!(
+            !shallow_ids.contains(&missing),
+            "a shallow commit advertised by the remote but absent from the received pack is pruned"
+        );
+        assert!(
+            shallow_ids
+                .iter()
+                .all(|id| gix_object::Exists::exists(&repo.objects, id)),
+            "all remaining shallow boundary commits exist locally"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fetch_and_checkout_uses_filter_drivers() -> crate::Result {
+        let remote_dir = gix_testtools::tempfile::TempDir::new()?;
+        git(remote_dir.path(), &["init", "-q"]);
+        git(remote_dir.path(), &["config", "user.name", "gitoxide"]);
+        git(remote_dir.path(), &["config", "user.email", "gitoxide@localhost"]);
+
+        let driver = driver_exe();
+        git(
+            remote_dir.path(),
+            &["config", "filter.arrow.clean", &format!("{driver} clean %f")],
+        );
+        git(
+            remote_dir.path(),
+            &["config", "filter.arrow.smudge", &format!("{driver} smudge %f")],
+        );
+        git(remote_dir.path(), &["config", "filter.arrow.required", "true"]);
+        std::fs::write(remote_dir.path().join(".gitattributes"), "*.txt filter=arrow\n")?;
+        std::fs::write(remote_dir.path().join("tracked.txt"), "hello\nthere\n")?;
+        git(remote_dir.path(), &["add", ".gitattributes", "tracked.txt"]);
+        git(remote_dir.path(), &["commit", "-q", "-m", "filtered"]);
+
+        let tmp = gix_testtools::tempfile::TempDir::new()?;
+        let mut prepare = gix::clone::PrepareFetch::new(
+            remote_dir.path(),
+            tmp.path(),
+            gix::create::Kind::WithWorktree,
+            Default::default(),
+            restricted(),
+        )?
+        .with_in_memory_config_overrides([
+            format!("filter.arrow.clean={driver} clean %f"),
+            format!("filter.arrow.smudge={driver} smudge %f"),
+            "filter.arrow.required=true".to_owned(),
+        ]);
+        let (mut checkout, _out) = prepare.fetch_then_checkout(gix::progress::Discard, &AtomicBool::default())?;
+        let (repo, _) = checkout.main_worktree(gix::progress::Discard, &AtomicBool::default())?;
+
+        assert_eq!(
+            std::fs::read(repo.workdir().expect("worktree").join("tracked.txt"))?.as_bstr(),
+            b"\xe2\x9e\xa1hello\n\xe2\x9e\xa1there\n".as_bstr(),
+            "checkout applies the smudge side of the configured filter driver"
         );
         Ok(())
     }

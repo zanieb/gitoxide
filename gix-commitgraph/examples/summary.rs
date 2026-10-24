@@ -4,7 +4,7 @@ fn main() {
     let path = std::env::args_os()
         .nth(1)
         .map_or_else(|| ".git/objects/info".into(), PathBuf::from);
-    let graph = match gix_commitgraph::Graph::at(&path) {
+    let graph = match gix_commitgraph::Graph::at(&path, gix_hash::Kind::default(), None) {
         Ok(graph) => graph,
         Err(err) => {
             eprintln!("{err}");

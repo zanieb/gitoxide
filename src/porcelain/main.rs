@@ -45,6 +45,7 @@ pub fn main() -> Result<()> {
             bare,
             no_tags,
             ref_name,
+            revision,
             remote,
             shallow,
             directory,
@@ -55,14 +56,12 @@ pub fn main() -> Result<()> {
                 handshake_info,
                 no_tags,
                 ref_name,
+                revision,
                 shallow: shallow.into(),
             };
             prepare_and_run(
                 "clone",
-                trace,
                 verbose,
-                progress,
-                progress_keep_open,
                 core::repository::clone::PROGRESS_RANGE,
                 move |progress, out, err| {
                     core::repository::clone(remote, directory, Vec::new(), progress, out, err, opts)

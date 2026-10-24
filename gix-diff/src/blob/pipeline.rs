@@ -203,6 +203,38 @@ impl Pipeline {
         convert: Mode,
         out: &mut Vec<u8>,
     ) -> Result<Outcome> {
+        self.convert_to_diffable_inner(id, mode, rela_path, kind, attributes, objects, convert, out, false)
+    }
+
+    /// Prepare the resource and keep its bytes in `out` even if it is classified as binary.
+    #[expect(clippy::too_many_arguments)]
+    pub fn convert_to_diffable_retaining_binary(
+        &mut self,
+        id: &gix_hash::oid,
+        mode: EntryKind,
+        rela_path: &BStr,
+        kind: ResourceKind,
+        attributes: &mut dyn FnMut(&BStr, &mut gix_filter::attributes::search::Outcome),
+        objects: &dyn gix_object::FindObjectOrHeader,
+        convert: Mode,
+        out: &mut Vec<u8>,
+    ) -> Result<Outcome> {
+        self.convert_to_diffable_inner(id, mode, rela_path, kind, attributes, objects, convert, out, true)
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    pub(super) fn convert_to_diffable_inner(
+        &mut self,
+        id: &gix_hash::oid,
+        mode: EntryKind,
+        rela_path: &BStr,
+        kind: ResourceKind,
+        attributes: &mut dyn FnMut(&BStr, &mut gix_filter::attributes::search::Outcome),
+        objects: &dyn gix_object::FindObjectOrHeader,
+        convert: Mode,
+        out: &mut Vec<u8>,
+        retain_binary: bool,
+    ) -> Result<Outcome> {
         let is_symlink = match mode {
             EntryKind::Link => true,
             EntryKind::Blob | EntryKind::BlobExecutable => false,

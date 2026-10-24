@@ -2,7 +2,7 @@
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error(transparent)]
+    #[error("push I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Transport(#[from] gix_transport::client::Error),
@@ -21,16 +21,4 @@ pub enum Error {
     PackGeneration(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("no commands to send to the server")]
     NoCommands,
-}
-
-impl crate::transport::IsSpuriousError for Error {
-    fn is_spurious(&self) -> bool {
-        match self {
-            Error::Io(err) => {
-                err.kind() == std::io::ErrorKind::ConnectionReset || err.kind() == std::io::ErrorKind::ConnectionAborted
-            }
-            Error::Transport(err) => err.is_spurious(),
-            _ => false,
-        }
-    }
 }

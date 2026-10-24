@@ -58,6 +58,7 @@ required-features = ["blob"]
 path = "./benches/rewrite_tracker.rs"
 
 [dependencies]
+thiserror = "2.0.18"
 gix-index = { version = "^0.58.0", path = "../gix-index", optional = true }
 gix-pathspec = { version = "^0.22.1", path = "../gix-pathspec", optional = true }
 gix-attributes = { version = "^0.37.1", path = "../gix-attributes", optional = true }

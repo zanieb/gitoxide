@@ -535,7 +535,7 @@ impl Platform {
                     cmd.args(["/dev/null", ".", "."]);
                     None
                 }
-                resource::Data::Buffer { buf, is_derived: _ } => {
+                resource::Data::Buffer { buf, .. } | resource::Data::Binary { data: Some(buf), .. } => {
                     let mut tmp = gix_tempfile::new(
                         std::env::temp_dir(),
                         gix_tempfile::ContainingDirectory::Exists,
@@ -571,7 +571,7 @@ impl Platform {
                     })?;
                     Some(tmp)
                 }
-                resource::Data::Binary { .. } => {
+                resource::Data::Binary { data: None, .. } => {
                     bail!(validation(
                         "Binary resources can't be diffed with an external command (as we don't have the data anymore)"
                     ));
@@ -661,24 +661,27 @@ impl Platform {
             }
         };
 
-        match (old.conversion.data, new.conversion.data) {
-            (None, None) => {
-                bail!(prepare_diff::Error::SourceAndDestinationRemoved);
-            }
-            (Some(pipeline::Data::Binary { .. }), _) | (_, Some(pipeline::Data::Binary { .. })) => return Ok(out),
-            _either_missing_or_non_binary => {
-                if let Some(command) = old
-                    .conversion
-                    .driver_index
-                    .and_then(|idx| self.filter.drivers[idx].command.as_deref())
-                    .filter(|_| self.options.skip_internal_diff_if_external_is_configured)
-                {
-                    out.operation = prepare_diff::Operation::ExternalCommand {
-                        command: command.as_bstr(),
-                    };
-                    return Ok(out);
-                }
-            }
+        if matches!((old.conversion.data, new.conversion.data), (None, None)) {
+            bail!(prepare_diff::Error::SourceAndDestinationRemoved);
+        }
+
+        if let Some(command) = old
+            .conversion
+            .driver_index
+            .and_then(|idx| self.filter.drivers[idx].command.as_deref())
+            .filter(|_| self.options.skip_internal_diff_if_external_is_configured)
+        {
+            out.operation = prepare_diff::Operation::ExternalCommand {
+                command: command.as_bstr(),
+            };
+            return Ok(out);
+        }
+
+        if matches!(
+            (old.conversion.data, new.conversion.data),
+            (Some(pipeline::Data::Binary { .. }), _) | (_, Some(pipeline::Data::Binary { .. }))
+        ) {
+            return Ok(out);
         }
 
         out.operation = prepare_diff::Operation::InternalDiff {
@@ -774,9 +777,10 @@ impl Platform {
                     rela_path: rela_path.into(),
                 })?;
         let mut buf = self.free_list.pop().unwrap_or_default();
+        let retain_binary = self.options.skip_internal_diff_if_external_is_configured;
         let out = self
             .filter
-            .convert_to_diffable(
+            .convert_to_diffable_inner(
                 &id,
                 mode,
                 rela_path,
@@ -787,11 +791,13 @@ impl Platform {
                 objects,
                 self.filter_mode,
                 &mut buf,
+                retain_binary,
             )
             .or_raise_typed(|| set_resource::Error::ConvertToDiffable {
                 kind,
                 rela_path: rela_path.into(),
             })?;
+        let binary_buffer_is_available = retain_binary && matches!(out.data, Some(pipeline::Data::Binary { .. }));
         let key = storage.clone();
         assert!(
             self.diff_cache

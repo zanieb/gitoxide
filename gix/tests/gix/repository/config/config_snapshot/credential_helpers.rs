@@ -1,4 +1,5 @@
 use crate::remote;
+use gix::bstr::BString;
 use gix_testtools::TestResult;
 
 mod baseline {
@@ -113,7 +114,7 @@ mod baseline {
         let repo = remote::repo("credential-helpers");
         let (cascade, _action, _prompt_options) = repo
             .config_snapshot()
-            .credential_helpers(gix::url::parse(url.into()).expect("valid input URL"))
+            .credential_helpers(gix::url::parse(url).expect("valid input URL"))
             .unwrap();
 
         cascade

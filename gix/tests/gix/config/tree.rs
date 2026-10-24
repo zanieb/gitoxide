@@ -1158,7 +1158,7 @@ mod extensions {
                 "case-insensitive"
             );
             assert_eq!(
-                Extensions::OBJECT_FORMAT.try_into_object_format(bcow("SHA-1"))?,
+                Extensions::OBJECT_FORMAT.try_into_object_format("SHA-1")?,
                 gix_hash::Kind::Sha1,
                 "case-insensitive, allowing dashes"
             );
@@ -1176,7 +1176,7 @@ mod extensions {
                 "case-insensitive"
             );
             assert_eq!(
-                Extensions::OBJECT_FORMAT.try_into_object_format(bcow("SHA-256"))?,
+                Extensions::OBJECT_FORMAT.try_into_object_format("SHA-256")?,
                 gix_hash::Kind::Sha256,
                 "case-insensitive, allowing dashes"
             );

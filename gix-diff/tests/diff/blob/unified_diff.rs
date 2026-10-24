@@ -635,3 +635,50 @@ impl ConsumeHunk for DiffLineKindRecorder {
         self.line_kinds
     }
 }
+
+#[test]
+fn interhunk_context_merges_nearby_hunks() -> crate::Result {
+    let a = "1\n2\n3\n4\n5\n6\n7\n8\n9\n";
+    let b = "1\n2\nthree\n4\n5\n6\nseven\n8\n9\n";
+
+    let interner = gix_diff::blob::InternedInput::new(a, b);
+    let actual = render(
+        Algorithm::Myers,
+        &interner,
+        ConsumeBinaryHunk::new(String::new(), "\n"),
+        ContextSize::symmetrical(1),
+    )?;
+    insta::assert_snapshot!(actual, @r"
+    @@ -2,3 +2,3 @@
+     2
+    -3
+    +three
+     4
+    @@ -6,3 +6,3 @@
+     6
+    -7
+    +seven
+     8
+    ");
+
+    let actual = render(
+        Algorithm::Myers,
+        &interner,
+        ConsumeBinaryHunk::new(String::new(), "\n"),
+        ContextSize::symmetrical(1).with_interhunk_lines(1),
+    )?;
+    insta::assert_snapshot!(actual, @r"
+    @@ -2,7 +2,7 @@
+     2
+    -3
+    +three
+     4
+     5
+     6
+    -7
+    +seven
+     8
+    ");
+
+    Ok(())
+}

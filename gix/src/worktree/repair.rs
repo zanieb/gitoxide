@@ -121,12 +121,12 @@ impl crate::Repository {
                 let worktree_dot_git = gitdir_content.trim();
                 if !worktree_dot_git.is_empty() {
                     let worktree_dot_git_path = PathBuf::from(worktree_dot_git);
-                    if let Some(worktree_path) = worktree_dot_git_path.parent() {
-                        if worktree_path.is_dir() {
-                            // Verify and potentially repair the .git file
-                            if let Some(repair) = self.repair_dot_git_file(worktree_path, &worktree_git_dir, &id)? {
-                                repairs.push(repair);
-                            }
+                    if let Some(worktree_path) = worktree_dot_git_path.parent()
+                        && worktree_path.is_dir()
+                    {
+                        // Verify and potentially repair the .git file
+                        if let Some(repair) = self.repair_dot_git_file(worktree_path, &worktree_git_dir, &id)? {
+                            repairs.push(repair);
                         }
                     }
                 }

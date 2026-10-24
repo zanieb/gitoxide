@@ -29,12 +29,12 @@
 mod boolean;
 /// Color value parsing and the supported color names and attributes.
 pub mod color;
+mod date;
 /// Integer suffix parsing and conversion support.
 pub mod integer;
 /// Path interpolation support.
 pub mod path;
-///
-pub mod permission;
+mod permission;
 
 mod types;
 pub use types::{Boolean, Color, Date, Integer, Path, Permission};

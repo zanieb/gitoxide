@@ -26,6 +26,7 @@ pub fn decode(data: &[u8]) -> Result<(Vec, &[u8])> {
 
     let (rlw, data) = decode::u32(data).ok_or_raise(|| validation("eof while reading run length width"))?;
 
+    validate_words(&buf, rlw)?;
     Ok((
         Vec {
             num_bits,
@@ -36,7 +37,7 @@ pub fn decode(data: &[u8]) -> Result<(Vec, &[u8])> {
     ))
 }
 
-fn validate_words(words: &[u64], rlw: u32) -> Result<(), decode::Error> {
+fn validate_words(words: &[u64], rlw: u32) -> Result<()> {
     if words.is_empty() {
         return if rlw == 0 {
             Ok(())
@@ -69,16 +70,16 @@ fn validate_words(words: &[u64], rlw: u32) -> Result<(), decode::Error> {
     Ok(())
 }
 
-fn validation_error(message: &'static str) -> decode::Error {
+fn validation_error(message: &'static str) -> gix_error::Error {
     use gix_error::ErrorExt;
 
-    gix_error::ValidationError::from(message).raise()
+    gix_error::validation(message).raise()
 }
 
 mod access {
     use gix_error::{ResultExt, validation};
 
-    use super::Vec;
+    use super::{RLW_RUNNING_BITS, Vec, rlw_literal_words};
 
     impl Vec {
         /// Create a bitmap from a sequence of bit values.
@@ -137,27 +138,35 @@ mod access {
             let mut index = 0usize;
             let mut iter = self.bits.iter();
             while let Some(word) = iter.next() {
-                if index >= num_bits {
-                    return Some(());
-                }
-
-                let running_len = usize::try_from(rlw_running_len_bits(word)).ok()?;
-                let run_end = index.checked_add(running_len)?;
                 if rlw_runbit_is_set(word) {
-                    while index < run_end && index < num_bits {
+                    let len = usize::try_from(rlw_running_len_bits(word)).ok()?;
+                    let end = index.checked_add(len)?;
+                    if end > num_bits {
+                        return None;
+                    }
+                    for _ in 0..len {
                         f(index)?;
                         index += 1;
                     }
                 } else {
-                    index = run_end;
+                    let len = usize::try_from(rlw_running_len_bits(word)).ok()?;
+                    let end = index.checked_add(len)?;
+                    if end > num_bits {
+                        return None;
+                    }
+                    index = end;
                 }
 
                 for _ in 0..rlw_literal_words(word) {
-                    if index >= num_bits {
-                        return Some(());
-                    }
                     let word = iter.next()?;
-                    let bits_in_word = num_bits.checked_sub(index)?.min(64);
+                    let remaining = num_bits.checked_sub(index)?;
+                    if remaining == 0 {
+                        return None;
+                    }
+                    let bits_in_word = remaining.min(64);
+                    if bits_in_word < 64 && (word >> bits_in_word) != 0 {
+                        return None;
+                    }
                     for bit_index in 0..bits_in_word {
                         if word & (1 << bit_index) != 0 {
                             f(index)?;
@@ -201,7 +210,7 @@ fn rlw_literal_words(w: &u64) -> u64 {
 }
 
 /// A growable collection of u64 that are seen as stream of individual bits.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Vec {
     num_bits: u32,
     bits: std::vec::Vec<u64>,
@@ -300,40 +309,24 @@ mod tests {
     }
 
     #[test]
-    fn set_bit_iteration_ignores_literal_padding_beyond_declared_bits() {
+    fn set_bit_iteration_rejects_literal_padding_beyond_declared_bits() {
         let bitmap = Vec {
             num_bits: 2,
             bits: vec![1 << 33, u64::MAX],
             rlw: 0,
         };
 
-        let mut set_bits = StdVec::new();
-        bitmap
-            .for_each_set_bit(|index| {
-                set_bits.push(index);
-                Some(())
-            })
-            .unwrap();
-
-        assert_eq!(set_bits, [0, 1]);
+        assert_eq!(bitmap.for_each_set_bit(|_| Some(())), None);
     }
 
     #[test]
-    fn set_bit_iteration_ignores_run_padding_beyond_declared_bits() {
+    fn set_bit_iteration_rejects_run_padding_beyond_declared_bits() {
         let bitmap = Vec {
             num_bits: 3,
             bits: vec![0b11],
             rlw: 0,
         };
 
-        let mut set_bits = StdVec::new();
-        bitmap
-            .for_each_set_bit(|index| {
-                set_bits.push(index);
-                Some(())
-            })
-            .unwrap();
-
-        assert_eq!(set_bits, [0, 1, 2]);
+        assert_eq!(bitmap.for_each_set_bit(|_| Some(())), None);
     }
 }

@@ -1,15 +1,8 @@
-use crate::{Result, bstr::BStr, clone::PrepareFetch};
+use crate::{Result, bstr::BStr, clone::PrepareFetch, remote};
 use gix_error::ResultExt;
 use gix_ref::Category;
 
 use crate::config::tree::Key;
-
-fn assure_compatible_object_hash(local: gix_hash::Kind, remote: gix_hash::Kind) -> Result<(), Error> {
-    if remote != local {
-        return Err(remote::fetch::Error::IncompatibleObjectHash { local, remote }.into());
-    }
-    Ok(())
-}
 
 /// Modification
 impl PrepareFetch {
@@ -359,23 +352,6 @@ impl PrepareFetch {
             },
             fetch_outcome,
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn incompatible_object_hash_is_reported() {
-        let err = super::assure_compatible_object_hash(gix_hash::Kind::Sha1, gix_hash::Kind::Sha256)
-            .expect_err("mismatches are rejected");
-
-        assert!(matches!(
-            err,
-            super::Error::Fetch(crate::remote::fetch::Error::IncompatibleObjectHash {
-                local: gix_hash::Kind::Sha1,
-                remote: gix_hash::Kind::Sha256,
-            })
-        ));
     }
 }
 

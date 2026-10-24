@@ -14,17 +14,17 @@ use gix_transport::client::blocking_io::Transport;
 
 use super::{Error, Outcome, PreparePush};
 
-impl<T> PreparePush<'_, '_, T>
+impl<T> PreparePush<'_, '_, '_, T>
 where
     T: Transport,
 {
     /// Execute the push, sending all necessary objects to the remote and updating refs.
     ///
     /// Returns `Ok(Outcome)` with per-reference status information.
-    #[gix_protocol::maybe_async::maybe_async]
+    #[gix_protocol::bisync::bisync]
     pub async fn send<P>(mut self, progress: P, should_interrupt: &AtomicBool) -> Result<Outcome, Error>
     where
-        P: gix_features::progress::NestedProgress,
+        P: gix_utils::progress::NestedProgress,
         P::SubProgress: 'static,
     {
         let mut con = self.con.take().expect("send() can only be called once");
@@ -148,7 +148,7 @@ where
             if !repo.objects.exists(&empty_tree_id) {
                 repo.objects
                     .write_buf(gix_object::Kind::Tree, &[])
-                    .map_err(Error::PackGeneration)?;
+                    .map_err(|err| Error::PackGeneration(err.into()))?;
             }
         }
 
@@ -366,14 +366,14 @@ fn build_push_commands(
             continue;
         }
 
-        if let Some(expected_oid) = expected_old_id {
-            if remote_old_id != *expected_oid {
-                client_updates.push(gix_protocol::push::response::StatusV1::Ng {
-                    ref_name: update.dst,
-                    reason: "stale info".into(),
-                });
-                continue;
-            }
+        if let Some(expected_oid) = expected_old_id
+            && remote_old_id != *expected_oid
+        {
+            client_updates.push(gix_protocol::push::response::StatusV1::Ng {
+                ref_name: update.dst,
+                reason: "stale info".into(),
+            });
+            continue;
         }
 
         commands.push(PushCommand {
@@ -410,14 +410,14 @@ fn build_push_commands(
             continue;
         }
 
-        if let Some(expected_oid) = expected_old_id {
-            if remote_old_id != *expected_oid {
-                client_updates.push(gix_protocol::push::response::StatusV1::Ng {
-                    ref_name: update.dst,
-                    reason: "stale info".into(),
-                });
-                continue;
-            }
+        if let Some(expected_oid) = expected_old_id
+            && remote_old_id != *expected_oid
+        {
+            client_updates.push(gix_protocol::push::response::StatusV1::Ng {
+                ref_name: update.dst,
+                reason: "stale info".into(),
+            });
+            continue;
         }
 
         commands.push(PushCommand {
@@ -432,16 +432,16 @@ fn build_push_commands(
 
         let remote_old_id = remote_ref_by_name.get(deletion.dst.as_bytes()).and_then(|oid| *oid);
 
-        if let Some(expected_ids) = expected_old_ids {
-            if let Some(expected_oid) = expected_ids.get(&deletion.dst) {
-                let actual = remote_old_id.unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
-                if actual != *expected_oid {
-                    client_updates.push(gix_protocol::push::response::StatusV1::Ng {
-                        ref_name: deletion.dst,
-                        reason: "stale info".into(),
-                    });
-                    continue;
-                }
+        if let Some(expected_ids) = expected_old_ids
+            && let Some(expected_oid) = expected_ids.get(&deletion.dst)
+        {
+            let actual = remote_old_id.unwrap_or_else(|| gix_hash::ObjectId::null(object_hash));
+            if actual != *expected_oid {
+                client_updates.push(gix_protocol::push::response::StatusV1::Ng {
+                    ref_name: deletion.dst,
+                    reason: "stale info".into(),
+                });
+                continue;
             }
         }
 
@@ -462,7 +462,7 @@ fn build_push_commands(
 #[cfg(feature = "revision")]
 fn resolve_push_revspec_source(repo: &crate::Repository, src: &crate::bstr::BStr) -> Result<gix_hash::ObjectId, Error> {
     repo.rev_parse_single(src)
-        .map(|id| id.detach())
+        .map(crate::types::Id::detach)
         .map_err(|e| Error::FindLocalRef {
             name: src.to_owned(),
             source: Box::new(e),
@@ -557,14 +557,14 @@ fn push_source_label(src: &SourceRef<'_>) -> BString {
 
 fn local_refs_for_push(repo: &crate::Repository) -> Result<Vec<LocalRef>, Error> {
     let mut out = Vec::new();
-    if let Ok(head) = repo.head() {
-        if let Some(id) = head.id() {
-            out.push(LocalRef {
-                name: BString::from("HEAD"),
-                target: id.detach(),
-                object: None,
-            });
-        }
+    if let Ok(head) = repo.head()
+        && let Some(id) = head.id()
+    {
+        out.push(LocalRef {
+            name: BString::from("HEAD"),
+            target: id.detach(),
+            object: None,
+        });
     }
 
     let references = repo
@@ -574,7 +574,7 @@ fn local_refs_for_push(repo: &crate::Repository) -> Result<Vec<LocalRef>, Error>
         .all()
         .map_err(|err| Error::ListLocalRefs { source: Box::new(err) })?
     {
-        let reference = reference.map_err(|err| Error::ListLocalRefs { source: err })?;
+        let reference = reference.map_err(|err| Error::ListLocalRefs { source: Box::new(err) })?;
         let raw = reference.detach();
         let target = match raw.target {
             gix_ref::Target::Object(id) => id,
@@ -620,11 +620,11 @@ fn write_pack_for_push(
     known_remote: &[gix_hash::ObjectId],
     object_hash: gix_hash::Kind,
     writer: &mut dyn std::io::Write,
-    progress: &mut dyn gix_features::progress::DynNestedProgress,
+    progress: &mut dyn gix_utils::progress::DynNestedProgress,
     should_interrupt: &AtomicBool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use gix_features::parallel::InOrderIter;
     use gix_pack::data::output;
+    use gix_parallel::InOrderIter;
 
     if new_tips.is_empty() {
         return write_empty_pack(writer, object_hash);
@@ -656,11 +656,7 @@ fn write_pack_for_push(
 
     let (counts, _stats) = output::count::objects(
         odb.clone(),
-        Box::new(
-            object_roots
-                .into_iter()
-                .map(Ok::<_, Box<dyn std::error::Error + Send + Sync>>),
-        ),
+        Box::new(object_roots.into_iter().map(Ok::<_, gix_error::Error>)),
         &counts_progress,
         should_interrupt,
         output::count::objects::Options {
@@ -697,8 +693,9 @@ fn write_pack_for_push(
             allow_thin_pack: true,
             thread_limit: None,
             chunk_size: 10,
+            compression: Default::default(),
         },
-    );
+    )?;
 
     let in_order_entries = InOrderIter::from(entries);
 

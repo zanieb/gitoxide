@@ -4,9 +4,12 @@ use std::path::PathBuf;
 
 use crate::file;
 
-#[expect(
-    dead_code,
-    reason = "callers still initialize file::Store directly while the general store awaits ref-table support"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "callers still initialize file::Store directly while the general store awaits ref-table support"
+    )
 )]
 impl crate::Store {
     /// Create a new store at the given location, typically the `.git/` directory.

@@ -10,6 +10,8 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
+    #[error(transparent)]
+    Path(#[from] gix_error::Error),
     #[error("Failed to create modules directory at '{}'", path.display())]
     CreateModulesDir { path: PathBuf, source: std::io::Error },
     #[error("Failed to move git directory from '{}' to '{}'", from.display(), to.display())]
@@ -124,17 +126,14 @@ fn set_core_worktree(git_dir: &Path, worktree: &Path) -> Result<(), Error> {
         })?;
 
     let rel_worktree = compute_relative_path(git_dir, worktree);
-    let rel_worktree_bstr = gix_path::into_bstr(rel_worktree);
+    let rel_worktree_bstr = gix_path::into_bstr(rel_worktree)?;
 
     let mut section = config
         .section_mut_or_create_new("core", None)
         .expect("'core' is a valid section name");
     // Remove any existing worktree value first
     while section.remove("worktree").is_some() {}
-    section.push(
-        "worktree".try_into().expect("valid key"),
-        Some(crate::bstr::BStr::new(rel_worktree_bstr.as_ref())),
-    );
+    section.push("worktree", Some(rel_worktree_bstr.as_ref()))?;
 
     let mut out = Vec::new();
     config.write_to(&mut out).map_err(|e| Error::Config {

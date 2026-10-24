@@ -96,6 +96,31 @@ mod multiple {
     }
 
     #[test]
+    fn negative_glob_excludes_matching_fetch_sources() -> gix_testtools::TestResult {
+        let target = gix_testtools::object_hash().null();
+        let items = [
+            "refs/heads/main",
+            "refs/heads/feature-deploy",
+            "refs/heads/bugfix",
+            "refs/heads/release-deploy",
+        ]
+        .into_iter()
+        .map(|name| Item {
+            full_ref_name: name.into(),
+            target: &target,
+            object: None,
+        });
+        let specs = ["refs/heads/*:refs/remotes/origin/*", "^refs/heads/*-deploy"]
+            .into_iter()
+            .map(|spec| gix_refspec::parse(spec.into(), Operation::Fetch))
+            .collect::<gix_error::Result<Vec<_>>>()?;
+        let outcome = MatchGroup::from_fetch_specs(specs).match_lhs(items);
+        let sources: Vec<_> = outcome.mappings.iter().map(|mapping| mapping.lhs.to_string()).collect();
+        assert_eq!(sources, ["refs/heads/main", "refs/heads/bugfix"]);
+        Ok(())
+    }
+
+    #[test]
     fn negative_sources_are_matched_literally_in_both_directions() {
         let target = ObjectId::from_hex(b"1111111111111111111111111111111111111111").expect("valid object id");
         let remote_item = Item {
@@ -320,5 +345,243 @@ mod multiple {
             ],
             ["refs/heads/f1:refs/heads/f1"],
         );
+    }
+}
+
+mod push {
+    use bstr::{BString, ByteSlice};
+    use gix_hash::ObjectId;
+    use gix_refspec::{
+        MatchGroup, RefSpec,
+        match_group::{PushDeletion, PushUpdate, SourceRef},
+        parse::Operation,
+    };
+
+    #[test]
+    fn explicit_refs_and_implicit_destinations() {
+        let local = [
+            new_ref("refs/heads/main", "1111111111111111111111111111111111111111"),
+            new_ref("refs/heads/dev", "2222222222222222222222222222222222222222"),
+            new_ref("refs/tags/v1", "3333333333333333333333333333333333333333"),
+        ];
+        let remote = [new_ref("refs/heads/main", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")];
+        let specs = parse_specs([
+            "main",
+            "refs/heads/dev:refs/heads/review/dev",
+            "+refs/tags/v1:refs/tags/v1",
+        ]);
+        let outcome = group(&specs).match_push(items(&local), items(&remote));
+
+        assert_eq!(
+            outcome.updates,
+            [
+                update(0, Some(0), "refs/heads/main", "refs/heads/main", 0, false),
+                update(1, None, "refs/heads/dev", "refs/heads/review/dev", 1, false),
+                update(2, None, "refs/tags/v1", "refs/tags/v1", 2, true),
+            ]
+        );
+        assert!(outcome.deletions.is_empty());
+    }
+
+    #[test]
+    fn glob_updates_and_negative_specs() {
+        let local = [
+            new_ref("refs/heads/main", "1111111111111111111111111111111111111111"),
+            new_ref("refs/heads/feature-deploy", "2222222222222222222222222222222222222222"),
+            new_ref("refs/heads/bugfix", "3333333333333333333333333333333333333333"),
+            new_ref("refs/tags/v1", "4444444444444444444444444444444444444444"),
+        ];
+        let remote = [new_ref("refs/heads/main", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")];
+        let specs = parse_specs(["refs/heads/*:refs/heads/*", "^refs/heads/*-deploy"]);
+        let outcome = group(&specs).match_push(items(&local), items(&remote));
+
+        assert_eq!(
+            outcome.updates,
+            [
+                update(0, Some(0), "refs/heads/main", "refs/heads/main", 0, false),
+                update(2, None, "refs/heads/bugfix", "refs/heads/bugfix", 0, false),
+            ]
+        );
+        assert!(outcome.deletions.is_empty());
+    }
+
+    #[test]
+    fn all_matching_branches_only_updates_existing_remote_branches() {
+        let local = [
+            new_ref("refs/heads/main", "1111111111111111111111111111111111111111"),
+            new_ref("refs/heads/local-only", "2222222222222222222222222222222222222222"),
+            new_ref("refs/tags/v1", "3333333333333333333333333333333333333333"),
+        ];
+        let remote = [
+            new_ref("refs/heads/main", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            new_ref("refs/heads/remote-only", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            new_ref("refs/tags/v1", "cccccccccccccccccccccccccccccccccccccccc"),
+        ];
+        let specs = parse_specs([":"]);
+        let outcome = group(&specs).match_push(items(&local), items(&remote));
+
+        assert_eq!(
+            outcome.updates,
+            [update(0, Some(0), "refs/heads/main", "refs/heads/main", 0, false)]
+        );
+        assert!(outcome.deletions.is_empty());
+    }
+
+    #[test]
+    fn deletes_are_expanded_and_matched_to_remote_refs() {
+        let remote = [
+            new_ref("refs/heads/obsolete", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            new_ref("refs/tags/v1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        ];
+        let specs = parse_specs([":obsolete", ":refs/tags/v1"]);
+        let outcome = group(&specs).match_push(std::iter::empty(), items(&remote));
+
+        assert!(outcome.updates.is_empty());
+        assert_eq!(
+            outcome.deletions,
+            [
+                deletion(Some(0), "refs/heads/obsolete", 0),
+                deletion(Some(1), "refs/tags/v1", 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn negative_specs_filter_deletes_by_destination() {
+        let remote = [
+            new_ref("refs/heads/main", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            new_ref("refs/heads/feature", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        ];
+        let specs = parse_specs([":refs/heads/main", ":refs/heads/feature", "^refs/heads/feature"]);
+        let outcome = group(&specs).match_push(std::iter::empty(), items(&remote));
+
+        assert!(outcome.updates.is_empty());
+        assert_eq!(
+            outcome.deletions,
+            [deletion(Some(0), "refs/heads/main", 0)],
+            "negative push refspecs should exclude matching deletion destinations"
+        );
+    }
+
+    #[test]
+    fn object_ids_can_be_pushed_to_a_named_destination() {
+        let object_id = "1111111111111111111111111111111111111111";
+        let specs = parse_specs([format!("{object_id}:refs/heads/by-id")]);
+        let outcome = group(&specs).match_push(std::iter::empty(), std::iter::empty());
+
+        assert_eq!(
+            outcome.updates,
+            [PushUpdate {
+                local_item_index: None,
+                remote_item_index: None,
+                src: SourceRef::ObjectId(ObjectId::from_hex(object_id.as_bytes()).unwrap()),
+                dst: "refs/heads/by-id".into(),
+                spec_index: 0,
+                allow_non_fast_forward: false,
+            }]
+        );
+        assert!(outcome.deletions.is_empty());
+    }
+
+    #[test]
+    fn duplicate_push_specs_keep_first_mapping() {
+        let local = [new_ref("refs/heads/main", "1111111111111111111111111111111111111111")];
+        let remote = [new_ref("refs/heads/main", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")];
+        let specs = parse_specs(["main", "refs/heads/main:refs/heads/main"]);
+        let outcome = group(&specs).match_push(items(&local), items(&remote));
+
+        assert_eq!(
+            outcome.updates,
+            [update(0, Some(0), "refs/heads/main", "refs/heads/main", 0, false)],
+            "the second refspec maps the same source and destination and should be ignored"
+        );
+        assert!(outcome.deletions.is_empty());
+    }
+
+    #[test]
+    fn duplicate_delete_specs_keep_first_mapping() {
+        let remote = [new_ref(
+            "refs/heads/obsolete",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )];
+        let specs = parse_specs([":obsolete", ":refs/heads/obsolete"]);
+        let outcome = group(&specs).match_push(std::iter::empty(), items(&remote));
+
+        assert!(outcome.updates.is_empty());
+        assert_eq!(
+            outcome.deletions,
+            [deletion(Some(0), "refs/heads/obsolete", 0)],
+            "duplicate deletions should not ask the remote to delete the same ref twice"
+        );
+    }
+
+    fn parse_specs(specs: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<RefSpec> {
+        specs
+            .into_iter()
+            .map(|spec| {
+                gix_refspec::parse(spec.as_ref().into(), Operation::Push)
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    fn group(specs: &[RefSpec]) -> MatchGroup<'_> {
+        MatchGroup::from_push_specs(specs.iter().map(RefSpec::to_ref))
+    }
+
+    fn update(
+        local_item_index: usize,
+        remote_item_index: Option<usize>,
+        src: &str,
+        dst: &str,
+        spec_index: usize,
+        allow_non_fast_forward: bool,
+    ) -> PushUpdate {
+        PushUpdate {
+            local_item_index: Some(local_item_index),
+            remote_item_index,
+            src: SourceRef::FullName(src.as_bytes().as_bstr().to_owned().into()).into_owned(),
+            dst: dst.into(),
+            spec_index,
+            allow_non_fast_forward,
+        }
+    }
+
+    fn deletion(remote_item_index: Option<usize>, dst: &str, spec_index: usize) -> PushDeletion {
+        PushDeletion {
+            remote_item_index,
+            dst: dst.into(),
+            spec_index,
+        }
+    }
+
+    fn items(refs: &[Ref]) -> impl Iterator<Item = gix_refspec::match_group::Item<'_>> {
+        refs.iter().map(Ref::to_item)
+    }
+
+    fn new_ref(name: &str, id_hex: &str) -> Ref {
+        Ref {
+            name: name.into(),
+            target: ObjectId::from_hex(id_hex.as_bytes()).unwrap(),
+            object: None,
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct Ref {
+        name: BString,
+        target: ObjectId,
+        object: Option<ObjectId>,
+    }
+
+    impl Ref {
+        fn to_item(&self) -> gix_refspec::match_group::Item<'_> {
+            gix_refspec::match_group::Item {
+                full_ref_name: self.name.as_ref(),
+                target: &self.target,
+                object: self.object.as_deref(),
+            }
+        }
     }
 }

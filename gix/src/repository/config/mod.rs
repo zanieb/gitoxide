@@ -193,7 +193,7 @@ impl crate::Repository {
     /// or dropped. The in-memory configuration of this repository instance is also updated to reflect the new values.
     ///
     /// Use [`ConfigEditGuard::forget()`](config::ConfigEditGuard::forget()) to release the lock without persisting changes.
-    pub fn config_edit(&mut self) -> Result<config::ConfigEditGuard<'_>, config::edit::Error> {
+    pub fn config_edit(&mut self) -> std::result::Result<config::ConfigEditGuard<'_>, config::edit::Error> {
         let config_path = self
             .config
             .resolved
@@ -202,8 +202,12 @@ impl crate::Repository {
             .as_deref()
             .ok_or(config::edit::Error::NoLocalConfigPath)?
             .to_owned();
-        let lock =
-            gix_lock::File::acquire_to_update_resource(&config_path, gix_lock::acquire::Fail::Immediately, None)?;
+        let lock = gix_lock::File::acquire_to_update_resource(
+            &config_path,
+            self.config.config_lock_timeout()?,
+            None,
+            config::file_mut::shared_repository_permissions(&self.config.resolved, self.filter_config_section())?,
+        )?;
         let config = self.config.resolved.as_ref().clone();
         Ok(config::ConfigEditGuard {
             repo: Some(self),
@@ -299,6 +303,12 @@ impl crate::Repository {
                     .into()
             },
             git_dir: self.current_dir().join(self.git_dir()).into(),
+            git_exec_path: std::env::var_os("GIT_EXEC_PATH")
+                .map(std::path::PathBuf::from)
+                .map(|path| self.options.permissions.env.git_prefix.check(path))
+                .transpose()
+                .map_err(gix_error::ErrorExt::raise)?
+                .flatten(),
             worktree_dir: self.workdir().map(|path| self.current_dir().join(path)),
             no_replace_objects: config::shared::is_replace_refs_enabled(
                 &self.config.resolved,

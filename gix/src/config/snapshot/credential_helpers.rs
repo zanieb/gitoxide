@@ -226,7 +226,7 @@ pub(super) mod function {
         }
     }
 
-    fn path_matches(pattern: &BString, path: &BString) -> bool {
+    fn path_matches(pattern: &crate::bstr::BString, path: &crate::bstr::BString) -> bool {
         let pattern = pattern.as_slice();
         let path = path.as_slice();
         path == pattern || path.starts_with(pattern) && path.get(pattern.len()) == Some(&b'/')

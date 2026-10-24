@@ -23,7 +23,7 @@ fn set_value_then_commit_persists_to_disk() -> crate::Result {
     let repo2 = reopen(dir.path())?;
     let snap = repo2.config_snapshot();
     let value = snap.string("core.abbrev").expect("abbrev should exist");
-    assert_eq!(value.as_ref(), "7", "committed value should persist on disk");
+    assert_eq!(value.as_slice(), b"7", "committed value should persist on disk");
     Ok(())
 }
 
@@ -40,7 +40,7 @@ fn forget_does_not_persist() -> crate::Result {
     let repo2 = reopen(dir.path())?;
     let snap = repo2.config_snapshot();
     let value = snap.string("core.abbrev").expect("abbrev should still exist");
-    assert_ne!(value.as_ref(), "3", "forgotten value should NOT persist on disk");
+    assert_ne!(value.as_slice(), b"3", "forgotten value should NOT persist on disk");
     Ok(())
 }
 
@@ -57,7 +57,7 @@ fn drop_commits_automatically() -> crate::Result {
     let repo2 = reopen(dir.path())?;
     let snap = repo2.config_snapshot();
     let value = snap.string("core.abbrev").expect("abbrev should exist");
-    assert_eq!(value.as_ref(), "5", "drop should auto-commit the value");
+    assert_eq!(value.as_slice(), b"5", "drop should auto-commit the value");
     Ok(())
 }
 
@@ -79,8 +79,8 @@ fn set_subsection_value_persists() -> crate::Result {
         .string("remote.origin.url")
         .expect("remote.origin.url should exist");
     assert_eq!(
-        value.as_ref(),
-        "https://example.com/repo.git",
+        value.as_slice(),
+        b"https://example.com/repo.git",
         "subsection value should persist"
     );
     Ok(())
@@ -109,7 +109,7 @@ fn roundtrip_preserves_existing_values() -> crate::Result {
 
     // The new value should exist
     let custom = snap.string("custom.key").expect("custom.key should exist");
-    assert_eq!(custom.as_ref(), "value");
+    assert_eq!(custom.as_slice(), b"value");
 
     // Pre-existing values should be unchanged
     let email = snap.string("user.email").map(|v| v.to_string());
@@ -153,8 +153,8 @@ fn multiple_values_in_single_session() -> crate::Result {
 
     let repo2 = reopen(dir.path())?;
     let snap = repo2.config_snapshot();
-    assert_eq!(snap.string("core.abbrev").unwrap().as_ref(), "9");
-    assert_eq!(snap.string("core.autocrlf").unwrap().as_ref(), "false");
-    assert_eq!(snap.string("custom.key").unwrap().as_ref(), "hello");
+    assert_eq!(snap.string("core.abbrev").unwrap().as_slice(), b"9");
+    assert_eq!(snap.string("core.autocrlf").unwrap().as_slice(), b"false");
+    assert_eq!(snap.string("custom.key").unwrap().as_slice(), b"hello");
     Ok(())
 }

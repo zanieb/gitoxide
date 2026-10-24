@@ -131,11 +131,10 @@ pub(crate) mod function {
         };
         if let Some(entries) = index.prefixed_entries(pathspec.common_prefix()) {
             stats.entries_after_prune = entries.len();
-            let mut entries = entries.iter().peekable();
             let mut path = prefix.to_owned();
             let prefix_len = path.len();
             let mut buf = Vec::new();
-            while let Some(entry) = entries.next() {
+            for entry in entries {
                 let mut last_match = None;
                 let attrs = cache
                     .as_mut()
@@ -363,7 +362,7 @@ pub(crate) mod function {
         }
 
         if state.wrote_entry {
-            out.write_all(b",\n")?;
+            out.write_all(b",\n").or_error()?;
         } else {
             state.wrote_entry = true;
         }
@@ -386,11 +385,6 @@ pub(crate) mod function {
         )
         .or_error()?;
 
-        if is_last {
-            out.write_all(b"\n").or_error()?;
-        } else {
-            out.write_all(b",\n").or_error()?;
-        }
         Ok(())
     }
 
@@ -474,7 +468,7 @@ mod tests {
         repository::index::entries::{Options, function::entries},
     };
 
-    fn repo_with_two_tracked_files() -> anyhow::Result<(gix::Repository, tempfile::TempDir)> {
+    fn repo_with_two_tracked_files() -> gix_testtools::Result<(gix::Repository, tempfile::TempDir)> {
         let dir = tempfile::TempDir::new()?;
         let repo = gix::init(dir.path())?;
         let a_id = repo.write_blob("a\n")?.detach();
@@ -519,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn json_remains_valid_when_final_index_entry_is_filtered() -> anyhow::Result<()> {
+    fn json_remains_valid_when_final_index_entry_is_filtered() -> gix_testtools::Result<()> {
         let (repo, _keep) = repo_with_two_tracked_files()?;
         let mut out = Vec::new();
         let mut err = Vec::new();

@@ -21,7 +21,7 @@ sha1 = ["gix-hash/sha1"]
 sha256 = ["gix-hash/sha256"]
 
 [dependencies]
-gix-hash = { version = "^0.25.0", path = "../gix-hash" }
+gix-hash = { version = "^0.28.1", path = "../gix-hash" }
 thiserror = "2.0.18"
 bstr = { version = "1.12.0", default-features = false, features = ["std"] }
 crc32fast = "1.5.0"

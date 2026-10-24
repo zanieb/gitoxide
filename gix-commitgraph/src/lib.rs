@@ -31,6 +31,11 @@ pub struct File {
     commit_data_offset: usize,
     /// Read-only memory mapping of the entire commit-graph file, including its checksum trailer.
     data: memmap2::Mmap,
+    bloom_filter_data_range: Option<std::ops::Range<usize>>,
+    bloom_filter_index_range: Option<std::ops::Range<usize>>,
+    bloom_filter_settings: Option<file::bloom::Settings>,
+    generation_data_range: Option<std::ops::Range<usize>>,
+    generation_data_overflow_range: Option<std::ops::Range<usize>>,
     /// Byte range within `data` of the optional EDGE chunk containing additional parent positions.
     extra_edges_list_range: Option<std::ops::Range<usize>>,
     /// Decoded OIDF fanout table: entry `i` counts commit IDs whose first byte is at most `i`.

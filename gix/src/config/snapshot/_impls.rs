@@ -82,7 +82,7 @@ impl Debug for ConfigEditGuard<'_> {
 }
 
 impl Deref for ConfigEditGuard<'_> {
-    type Target = gix_config::File<'static>;
+    type Target = gix_config::File;
 
     fn deref(&self) -> &Self::Target {
         &self.config

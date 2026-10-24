@@ -74,7 +74,41 @@ pub fn file(
     file_path: &BStr,
     options: Options,
 ) -> Result<Outcome> {
+    file_with_progress(
+        odb,
+        start,
+        cache,
+        resource_cache,
+        file_path,
+        options,
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )
+}
+
+/// Blame a file, checking for interruption and optionally counting commits as they are visited.
+#[allow(clippy::too_many_arguments)]
+pub fn file_with_progress(
+    odb: impl gix_object::Find + gix_object::FindHeader,
+    start: Start,
+    cache: Option<gix_commitgraph::Graph>,
+    resource_cache: &mut gix_diff::blob::Platform,
+    file_path: &BStr,
+    options: Options,
+    should_interrupt: &std::sync::atomic::AtomicBool,
+    progress_counter: Option<&std::sync::atomic::AtomicUsize>,
+) -> Result<Outcome> {
     let _span = gix_trace::coarse!("gix_blame::file()", ?file_path, ?start);
+    if should_interrupt.load(std::sync::atomic::Ordering::Relaxed) {
+        gix_error::bail!(gix_error::cancelled("Blame interrupted"));
+    }
+    let start = match (start, options.worktree_blob.as_deref()) {
+        (Start::Commit(first_suspect), Some(contents)) => Start::Contents {
+            first_suspect,
+            contents: contents.into(),
+        },
+        (start, _) => start,
+    };
 
     // Convert ignore_revs to a HashSet for O(1) lookups during traversal.
     let ignore_revs: std::collections::HashSet<ObjectId> = options.ignore_revs.iter().copied().collect();
@@ -127,7 +161,7 @@ pub fn file(
 
     'outer: while let Some(suspect) = queue.pop_value() {
         if should_interrupt.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(Error::Interrupted);
+            gix_error::bail!(gix_error::cancelled("Blame interrupted"));
         }
         stats.commits_traversed += 1;
         if let Some(counter) = progress_counter {
@@ -155,7 +189,7 @@ pub fn file(
         if let Some(since) = options.since
             && commit_time < since.seconds
         {
-            if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect) {
+            if unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, suspect, true) {
                 break 'outer;
             }
 
@@ -192,8 +226,8 @@ pub fn file(
                         source_file_path: current_file_path.clone(),
                         previous_source_file_path: None,
                         commit_id: suspect,
-                        blob_id: entry.unwrap_or(null_blob_id),
-                        previous_blob_id: null_blob_id,
+                        blob_id: entry.unwrap_or(suspect.kind().null()),
+                        previous_blob_id: suspect.kind().null(),
                         parent_index: 0,
                     };
                     blame_path.push(blame_path_entry);
@@ -289,7 +323,7 @@ pub fn file(
         let more_than_one_parent = parent_ids.len() > 1;
         for (index, (parent_id, parent_commit_time)) in parent_ids.iter().enumerate() {
             if should_interrupt.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err(Error::Interrupted);
+                gix_error::bail!(gix_error::cancelled("Blame interrupted"));
             }
             queue.insert(*parent_commit_time, *parent_id);
             let changes_for_file_path = tree_diff_at_file_path(
@@ -332,7 +366,7 @@ pub fn file(
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: id,
-                                previous_blob_id: null_blob_id,
+                                previous_blob_id: suspect.kind().null(),
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
@@ -353,7 +387,7 @@ pub fn file(
                                 previous_source_file_path: None,
                                 commit_id: suspect,
                                 blob_id: entry_id,
-                                previous_blob_id: null_blob_id,
+                                previous_blob_id: suspect.kind().null(),
                                 parent_index: index,
                             };
                             blame_path.push(blame_path_entry);
@@ -810,7 +844,7 @@ fn tree_diff_with_rewrites_at_file_path(
     tree_iter: gix_object::TreeRefIter<'_>,
     rewrites: gix_diff::Rewrites,
 ) -> Result<Option<TreeDiffChange>> {
-    let mut change: Option<gix_diff::tree_with_rewrites::Change> = None;
+    let mut change: Option<TreeDiffChange> = None;
 
     let options: gix_diff::tree_with_rewrites::Options = gix_diff::tree_with_rewrites::Options {
         location: Some(gix_diff::tree::recorder::Location::Path),
@@ -839,7 +873,7 @@ fn tree_diff_with_rewrites_at_file_path(
     stats.trees_diffed_with_rewrites += 1;
 
     match result {
-        Ok(_) | Err(gix_diff::tree::Error::Cancelled) => Ok(change.map(Into::into)),
+        Ok(_) | Err(gix_diff::tree::Error::Cancelled) => Ok(change),
         Err(error) => Err(error.raise()),
     }
 }
@@ -948,74 +982,6 @@ fn changes_for_ignored_suspect(changes: Vec<Change>) -> Vec<Change> {
             other => other,
         })
         .collect()
-}
-
-/// Diff a worktree blob against the HEAD blob using the given diff algorithm and return
-/// the changes as a `Vec<Change>` suitable for use with [`process_changes`].
-///
-/// This is the in-memory equivalent of [`blob_changes`]: it does not need the ODB because
-/// both blobs are already available.
-fn diff_worktree_against_head(
-    worktree_content: &[u8],
-    head_content: &[u8],
-    diff_algorithm: gix_diff::blob::Algorithm,
-) -> Vec<Change> {
-    use std::ops::Range;
-
-    struct ChangeRecorder {
-        last_seen_after_end: u32,
-        hunks: Vec<Change>,
-        total_number_of_lines: u32,
-    }
-
-    impl ChangeRecorder {
-        fn new(total_number_of_lines: u32) -> Self {
-            ChangeRecorder {
-                last_seen_after_end: 0,
-                hunks: Vec::new(),
-                total_number_of_lines,
-            }
-        }
-
-        fn process_change(&mut self, before: Range<u32>, after: Range<u32>) {
-            if after.start > self.last_seen_after_end {
-                self.hunks
-                    .push(Change::Unchanged(self.last_seen_after_end..after.start));
-            }
-
-            match (!before.is_empty(), !after.is_empty()) {
-                (_, true) => {
-                    self.hunks.push(Change::AddedOrReplaced(
-                        after.start..after.end,
-                        before.end - before.start,
-                    ));
-                }
-                (true, false) => {
-                    self.hunks.push(Change::Deleted(after.start, before.end - before.start));
-                }
-                (false, false) => unreachable!("BUG: diff algorithm provided a non-change"),
-            }
-            self.last_seen_after_end = after.end;
-        }
-
-        fn finish(mut self) -> Vec<Change> {
-            if self.total_number_of_lines > self.last_seen_after_end {
-                self.hunks
-                    .push(Change::Unchanged(self.last_seen_after_end..self.total_number_of_lines));
-            }
-            self.hunks
-        }
-    }
-
-    let input =
-        gix_diff::blob::InternedInput::new(tokens_for_diffing(head_content), tokens_for_diffing(worktree_content));
-    let number_of_lines_in_destination = input.after.len();
-    let mut change_recorder = ChangeRecorder::new(number_of_lines_in_destination as u32);
-
-    for hunk in gix_diff::blob::Diff::compute(diff_algorithm, &input).hunks() {
-        change_recorder.process_change(hunk.before, hunk.after);
-    }
-    change_recorder.finish()
 }
 
 fn find_path_entry_in_commit(
@@ -1204,7 +1170,7 @@ fn initial_state(
             let changes = blob_changes_from_data(&first_suspect_blob, &blamed_file_blob, options.diff_algorithm, stats);
             hunks_to_blame = process_changes(hunks_to_blame, changes, null_id, first_suspect);
 
-            unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, null_id);
+            unblamed_to_out_is_done(&mut hunks_to_blame, &mut out, null_id, false);
 
             let first_suspect = hunks_to_blame
                 .iter()
@@ -1219,4 +1185,51 @@ fn initial_state(
             })
         }
     }
+}
+
+fn blame_relevant_rewrite_change(change: gix_diff::tree_with_rewrites::ChangeRef<'_>) -> Option<TreeDiffChange> {
+    use gix_diff::tree_with_rewrites::ChangeRef;
+
+    match change {
+        ChangeRef::Addition { entry_mode, id, .. } if is_blameable_entry_mode(entry_mode) => {
+            Some(TreeDiffChange::Addition { id })
+        }
+        ChangeRef::Deletion { entry_mode, .. } if is_blameable_entry_mode(entry_mode) => Some(TreeDiffChange::Deletion),
+        ChangeRef::Modification {
+            previous_entry_mode,
+            previous_id,
+            entry_mode,
+            id,
+            ..
+        } if is_blameable_entry_mode(entry_mode) => {
+            if is_blameable_entry_mode(previous_entry_mode) {
+                Some(TreeDiffChange::Modification { previous_id, id })
+            } else {
+                Some(TreeDiffChange::Addition { id })
+            }
+        }
+        ChangeRef::Rewrite {
+            source_location,
+            source_entry_mode,
+            source_id,
+            entry_mode,
+            id,
+            ..
+        } if is_blameable_entry_mode(entry_mode) => {
+            if is_blameable_entry_mode(source_entry_mode) {
+                Some(TreeDiffChange::Rewrite {
+                    source_location: source_location.to_owned(),
+                    source_id,
+                    id,
+                })
+            } else {
+                Some(TreeDiffChange::Addition { id })
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_blameable_entry_mode(mode: gix_object::tree::EntryMode) -> bool {
+    mode.is_blob() || mode.is_link()
 }

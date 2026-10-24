@@ -272,4 +272,27 @@ mod loose {
 
         Ok(())
     }
+
+    #[test]
+    fn merge_head_can_be_parsed() -> crate::Result {
+        let (_tmp, store) = store_writable("make_ref_repository.sh")?;
+        let id = hex_to_id("9064ea31fae4dc59a56bdd3a06c0ddc990ee689e");
+        std::fs::write(store.git_dir().join("MERGE_HEAD"), format!("{id}\n"))?;
+
+        assert_eq!(store.find_loose("MERGE_HEAD")?.target.id(), id);
+        Ok(())
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn loose_refs_can_contain_sha256_ids() -> crate::Result {
+        let (_tmp, store) = store_writable("make_ref_repository.sh")?;
+        let store = gix_ref::file::Store::at(store.git_dir().to_owned(), gix_hash::Kind::Sha256);
+        let id = gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?;
+        std::fs::write(store.git_dir().join("refs/heads/sha256"), format!("{id}\n"))?;
+
+        assert_eq!(store.find_loose("sha256")?.target.into_id(), id);
+        assert_eq!(id.kind(), gix_hash::Kind::Sha256);
+        Ok(())
+    }
 }

@@ -3,6 +3,7 @@ use gix_testtools::TestResult;
 use gix_worktree::stack::state::attributes::Source;
 
 use crate::util::named_repo;
+use gix_pathspec::{MagicSignature, Pattern, SearchMode};
 
 #[test]
 fn defaults_are_taken_from_repo_config() -> TestResult {

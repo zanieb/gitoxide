@@ -116,12 +116,9 @@ mod signing {
         let tag = tag_obj.try_into_tag()?;
         let decoded = tag.decode()?;
 
-        assert!(
-            decoded.pgp_signature.is_some(),
-            "signed tag should have a PGP signature"
-        );
+        assert!(decoded.signature.is_some(), "signed tag should have a PGP signature");
 
-        let sig = decoded.pgp_signature.unwrap();
+        let sig = decoded.signature.unwrap();
         assert!(
             sig.starts_with(b"-----BEGIN PGP SIGNATURE-----"),
             "tag signature should start with PGP header"
@@ -332,7 +329,7 @@ mod signing {
         let tag = tag_obj.try_into_tag()?;
         let decoded = tag.decode()?;
 
-        assert!(decoded.pgp_signature.is_some(), "tag should be signed");
+        assert!(decoded.signature.is_some(), "tag should be signed");
         assert_eq!(decoded.name, "v2.0-signed");
         assert_eq!(decoded.message, "tag with tagger");
 
@@ -409,10 +406,7 @@ mod signing {
         let tag = tag_obj.try_into_tag()?;
         let decoded = tag.decode()?;
 
-        assert!(
-            decoded.pgp_signature.is_none(),
-            "unsigned tag should have no PGP signature"
-        );
+        assert!(decoded.signature.is_none(), "unsigned tag should have no PGP signature");
 
         Ok(())
     }
@@ -469,8 +463,8 @@ mod signing {
         let (mut repo, _tmp) = repo_rw()?;
         {
             let mut config = repo.config_snapshot_mut();
-            config.set_raw_value(&"gpg.format", "ssh")?;
-            config.set_raw_value(&"user.signingKey", "~/.ssh/id_ed25519")?;
+            config.set_raw_value("gpg.format", "ssh")?;
+            config.set_raw_value("user.signingKey", "~/.ssh/id_ed25519")?;
             config.commit()?;
         }
 
@@ -494,7 +488,7 @@ mod signing {
         let (mut repo, _tmp) = repo_rw()?;
         {
             let mut config = repo.config_snapshot_mut();
-            config.set_raw_value(&"gpg.format", "x509")?;
+            config.set_raw_value("gpg.format", "x509")?;
             config.commit()?;
         }
 
@@ -513,7 +507,7 @@ mod signing {
         let (mut repo, _tmp) = repo_rw()?;
         {
             let mut config = repo.config_snapshot_mut();
-            config.set_raw_value(&"gpg.format", "openpgp")?;
+            config.set_raw_value("gpg.format", "openpgp")?;
             config.commit()?;
         }
 
@@ -532,7 +526,7 @@ mod signing {
         let (mut repo, _tmp) = repo_rw()?;
         {
             let mut config = repo.config_snapshot_mut();
-            config.set_raw_value(&"gpg.format", "unknown-format")?;
+            config.set_raw_value("gpg.format", "unknown-format")?;
             config.commit()?;
         }
 
@@ -552,9 +546,9 @@ mod signing {
         let (mut repo, _tmp) = repo_rw()?;
         {
             let mut config = repo.config_snapshot_mut();
-            config.set_raw_value(&"gpg.program", "/usr/bin/gpg2")?;
-            config.set_raw_value(&"gpg.ssh.program", "/usr/bin/ssh-keygen")?;
-            config.set_raw_value(&"gpg.x509.program", "/usr/bin/gpgsm")?;
+            config.set_raw_value("gpg.program", "/usr/bin/gpg2")?;
+            config.set_raw_value("gpg.ssh.program", "/usr/bin/ssh-keygen")?;
+            config.set_raw_value("gpg.x509.program", "/usr/bin/gpgsm")?;
             config.commit()?;
         }
 
@@ -610,7 +604,7 @@ mod signing {
         let tag = tag_obj.try_into_tag()?;
         let decoded = tag.decode()?;
 
-        assert!(decoded.pgp_signature.is_some(), "tag should be signed");
+        assert!(decoded.signature.is_some(), "tag should be signed");
         assert_eq!(decoded.target_kind, gix::objs::Kind::Tree);
         assert_eq!(decoded.name, "v-tree-tag");
 

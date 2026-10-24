@@ -1,7 +1,7 @@
 use gix_error::Result;
 use std::path::{Path, PathBuf};
 
-use gix_error::{ResultExt, bail, corruption, message};
+use gix_error::{ErrorExt, ResultExt, bail, corruption, message};
 
 use crate::{
     File,
@@ -138,6 +138,143 @@ impl File {
             })
             .ok()
             .transpose()?;
+
+        let bloom_filter_index_range = chunks
+            .validated_usize_offset_by_id(BLOOM_FILTER_INDEX_CHUNK_ID, |chunk_range| -> Result<_> {
+                let expected_size = usize::try_from(commit_data_count).ok().and_then(|n| n.checked_mul(4)).ok_or_else(|| corruption("Commit-graph chunk length overflows usize").raise())?;
+                if chunk_range.len() != expected_size {
+                    return Err(message!(
+                        "Commit-graph chunk {BLOOM_FILTER_INDEX_CHUNK_ID:?} has invalid size: expected chunk length {expected_size}, got {}",
+                        chunk_range.len()
+                    )
+                    .corrupted_error());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        let bloom_filter_data_range = chunks
+            .validated_usize_offset_by_id(BLOOM_FILTER_DATA_CHUNK_ID, |chunk_range| -> Result<_> {
+                if chunk_range.len() < 12 {
+                    return Err(message!(
+                        "Commit-graph chunk {BLOOM_FILTER_DATA_CHUNK_ID:?} has invalid size: expected at least 12 bytes, got {}",
+                        chunk_range.len()
+                    )
+                    .corrupted_error());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        let bloom_filter_settings = match (&bloom_filter_index_range, &bloom_filter_data_range) {
+            (Some(index_range), Some(data_range)) => {
+                let bloom_data = &data[data_range.clone()];
+                let settings = bloom::Settings {
+                    hash_version: read_u32(&bloom_data[..4]),
+                    num_hashes: read_u32(&bloom_data[4..8]),
+                    bits_per_entry: read_u32(&bloom_data[8..12]),
+                };
+                if !matches!(settings.hash_version, 1 | 2) {
+                    return Err(message!(
+                        "Commit-graph chunk {BLOOM_FILTER_DATA_CHUNK_ID:?} uses unsupported Bloom filter hash version {}; supported versions are 1 and 2",
+                        settings.hash_version
+                    )
+                    .corrupted_error());
+                }
+
+                let filter_data_len = bloom_data.len() - 12;
+                let mut previous_end = 0usize;
+                for raw_end in data[index_range.clone()]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .copied()
+                    .map(u32::from_be_bytes)
+                {
+                    let end = usize::try_from(raw_end).expect("u32 fits usize");
+                    if end < previous_end {
+                        return Err(message!(
+                            "Commit-graph chunk {BLOOM_FILTER_INDEX_CHUNK_ID:?} contains a decreasing Bloom filter offset"
+                        )
+                        .corrupted_error());
+                    }
+                    if end > filter_data_len {
+                        return Err(message!(
+                            "Commit-graph chunk {BLOOM_FILTER_INDEX_CHUNK_ID:?} references Bloom filter byte {end}, but {BLOOM_FILTER_DATA_CHUNK_ID:?} has {filter_data_len} filter bytes"
+                        )
+                        .corrupted_error());
+                    }
+                    previous_end = end;
+                }
+                Some(settings)
+            }
+            (Some(_), None) => None,
+            (None, Some(_)) => {
+                return Err(message!(
+                    "Chunk named {BLOOM_FILTER_DATA_CHUNK_ID:?} requires {BLOOM_FILTER_INDEX_CHUNK_ID:?}"
+                )
+                .corrupted_error());
+            }
+            (None, None) => None,
+        };
+        let bloom_filter_index_range = bloom_filter_settings.and(bloom_filter_index_range);
+        let bloom_filter_data_range = bloom_filter_settings.and(bloom_filter_data_range);
+        let generation_data_range = chunks
+            .validated_usize_offset_by_id(GENERATION_DATA_CHUNK_ID, |chunk_range| -> Result<_> {
+                let expected_size = usize::try_from(commit_data_count).ok().and_then(|n| n.checked_mul(4)).ok_or_else(|| corruption("Commit-graph chunk length overflows usize").raise())?;
+                if chunk_range.len() != expected_size {
+                    return Err(message!(
+                        "Commit-graph chunk {GENERATION_DATA_CHUNK_ID:?} has invalid size: expected chunk length {expected_size}, got {}",
+                        chunk_range.len()
+                    )
+                    .corrupted_error());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        let generation_data_overflow_range = chunks
+            .validated_usize_offset_by_id(GENERATION_DATA_OVERFLOW_CHUNK_ID, |chunk_range| -> Result<_> {
+                if chunk_range.len() % 8 != 0 {
+                    return Err(message!(
+                        "Commit-graph chunk {GENERATION_DATA_OVERFLOW_CHUNK_ID:?} has invalid size: chunk size {} is not a multiple of 8",
+                        chunk_range.len()
+                    )
+                    .corrupted_error());
+                }
+                Ok(chunk_range)
+            })
+            .ok()
+            .transpose()?;
+        if generation_data_overflow_range.is_some() && generation_data_range.is_none() {
+            return Err(message!(
+                "Chunk named {GENERATION_DATA_OVERFLOW_CHUNK_ID:?} requires {GENERATION_DATA_CHUNK_ID:?}"
+            )
+            .corrupted_error());
+        }
+        if let Some(range) = &generation_data_range {
+            let overflow_entries = generation_data_overflow_range
+                .as_ref()
+                .map(|range| range.len() / 8)
+                .unwrap_or_default();
+            for raw_offset in data[range.clone()]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .copied()
+                .map(u32::from_be_bytes)
+            {
+                if raw_offset & GENERATION_DATA_OVERFLOW_MASK != 0 {
+                    let overflow_index = (raw_offset & !GENERATION_DATA_OVERFLOW_MASK) as usize;
+                    if overflow_index >= overflow_entries {
+                        return Err(message!(
+                            "Commit-graph chunk {GENERATION_DATA_CHUNK_ID:?} references corrected-date overflow index {overflow_index}, but {GENERATION_DATA_OVERFLOW_CHUNK_ID:?} has {overflow_entries} entries"
+                        )
+                        .corrupted_error());
+                    }
+                }
+            }
+        }
 
         let trailer = &data[chunks.highest_offset() as usize..];
         if trailer.len() != object_hash.len_in_bytes() {

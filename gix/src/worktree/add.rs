@@ -19,6 +19,8 @@ use crate::config::{
 pub enum Head {
     /// Check out an existing local branch in the default reference namespace.
     Attached(gix_ref::FullName),
+    /// Attach to a local branch that has no commits yet.
+    Unborn(gix_ref::FullName),
     /// Check out a commit with a detached `HEAD`.
     Detached(gix_hash::ObjectId),
 }
@@ -133,18 +135,33 @@ impl crate::Repository {
             .enrich_error(repo.config.resolved.boolean(Worktree::USE_RELATIVE_PATHS))
             .with_leniency(repo.config.lenient_config)?
             .unwrap_or_default();
+        if let Head::Attached(name) | Head::Unborn(name) = &head {
+            if name.category() != Some(gix_ref::Category::LocalBranch) {
+                bail!(Error::NotLocalBranch { name: name.clone() });
+            }
+            let occupied = repo.checked_out_branches_without_namespace()?;
+            if let Some(worktree_dirs) = occupied.get(name) {
+                bail!(Error::CheckedOut {
+                    name: name.clone(),
+                    worktree_dirs: worktree_dirs.clone()
+                });
+            }
+        }
         let (head_target, commit_id, root_tree_id) = match head {
+            Head::Unborn(name) => {
+                let mut source = repo.as_ref().clone();
+                source.clear_namespace();
+                ensure!(
+                    source.try_find_reference(name.as_ref())?.is_none(),
+                    message!("Branch {name} already exists").conflict()
+                );
+                (
+                    gix_ref::Target::Symbolic(name),
+                    None,
+                    gix_hash::ObjectId::empty_tree(repo.object_hash()),
+                )
+            }
             Head::Attached(name) => {
-                if name.category() != Some(gix_ref::Category::LocalBranch) {
-                    bail!(Error::NotLocalBranch { name });
-                }
-                let checked_out = repo.checked_out_branches_without_namespace()?;
-                if let Some(worktree_dirs) = checked_out.get(&name) {
-                    bail!(Error::CheckedOut {
-                        name,
-                        worktree_dirs: worktree_dirs.clone(),
-                    });
-                }
                 let mut source = repo.as_ref().clone();
                 source.clear_namespace();
                 let mut reference = source
@@ -152,7 +169,7 @@ impl crate::Repository {
                     .or_raise(|| message("The local branch could not be found"))?;
                 let commit = reference.peel_to_commit()?;
                 let root_tree_id = commit.tree_id()?.detach();
-                (gix_ref::Target::Symbolic(name), commit.id, root_tree_id)
+                (gix_ref::Target::Symbolic(name), Some(commit.id), root_tree_id)
             }
             Head::Detached(commit_id) => {
                 let root_tree_id = repo
@@ -160,7 +177,7 @@ impl crate::Repository {
                     .or_raise(|| message("The detached target is not an existing commit"))?
                     .tree_id()?
                     .detach();
-                (gix_ref::Target::Object(commit_id), commit_id, root_tree_id)
+                (gix_ref::Target::Object(commit_id), Some(commit_id), root_tree_id)
             }
         };
         ensure!(!should_interrupt.load(Ordering::Relaxed), Error::Interrupted);
@@ -280,16 +297,18 @@ impl crate::Repository {
             .to_thread_local();
         repo.clear_namespace();
         // Like clone, initialize a symbolic HEAD's log without dereferencing or updating its branch.
-        repo.edit_reference(RefEdit::update_with_log(
-            "HEAD".try_into().expect("valid reference name"),
-            commit_id,
-            PreviousValue::Any,
-            LogChange {
-                mode: reflog_mode,
-                ..Default::default()
-            },
-        ))
-        .or_raise(|| message("Could not initialize the linked worktree HEAD and its reflog"))?;
+        if let Some(commit_id) = commit_id {
+            repo.edit_reference(RefEdit::update_with_log(
+                "HEAD".try_into().expect("valid reference name"),
+                commit_id,
+                PreviousValue::Any,
+                LogChange {
+                    mode: reflog_mode,
+                    ..Default::default()
+                },
+            ))
+            .or_raise(|| message("Could not initialize the linked worktree HEAD and its reflog"))?;
+        }
         Ok(PrepareCheckout {
             repo,
             prepared,
@@ -472,3 +491,8 @@ fn copy_worktree_config(source: &Path, destination: &Path) -> Result<()> {
         .or_raise(|| message("Could not write the new worktree configuration"))?;
     Ok(())
 }
+
+#[cfg(feature = "revision")]
+mod options;
+#[cfg(feature = "revision")]
+pub use options::Options;

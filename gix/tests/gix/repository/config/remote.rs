@@ -1,4 +1,5 @@
-use gix::bstr::BString;
+use gix::bstr::{BStr, BString};
+use std::borrow::Cow;
 
 use crate::remote;
 
@@ -50,12 +51,16 @@ fn remote_groups() {
     );
     assert_eq!(
         repo.remote_names_by_group("default").expect("group exists"),
-        remote_names(["origin", "backup"]),
+        vec![Cow::Borrowed(BStr::new("origin")), Cow::Borrowed(BStr::new("backup"))],
         "group values are split by spaces"
     );
     assert_eq!(
         repo.remote_names_by_group("ci").expect("group exists"),
-        remote_names(["mirror", "backup", "origin"]),
+        vec![
+            Cow::Borrowed(BStr::new("mirror")),
+            Cow::Borrowed(BStr::new("backup")),
+            Cow::Borrowed(BStr::new("origin"))
+        ],
         "multiple values are concatenated in configuration order and tabs are separators"
     );
     assert_eq!(

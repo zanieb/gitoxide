@@ -57,6 +57,7 @@ pin-project-lite = { version = "0.2.6", optional = true }
 document-features = { version = "0.2.0", optional = true }
 
 [dev-dependencies]
+proptest = "1"
 gix-testtools = { path = "../tests/tools", default-features = false, features = ["sha1"] }
 insta = "1.46.3"
 gix-odb = { path = "../gix-odb" }

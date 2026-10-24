@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::atomic::AtomicBool};
+use std::sync::atomic::AtomicBool;
 
 use gix_protocol::{
     Handshake,
@@ -8,10 +8,10 @@ use gix_transport::{Protocol, client::Capabilities};
 
 #[cfg(feature = "blocking-client")]
 type Cursor = std::io::Cursor<Vec<u8>>;
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 type Cursor = futures_lite::io::Cursor<Vec<u8>>;
 
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 fn transport<W: futures_io::AsyncWrite + Unpin>(
     response: Vec<u8>,
     out: W,
@@ -57,8 +57,10 @@ fn handshake(capabilities: &[u8]) -> Handshake {
     }
 }
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn command_list_uses_binary_packetlines_and_valid_agent_capability() -> crate::Result {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn command_list_uses_binary_packetlines_and_valid_agent_capability() -> gix_testtools::TestResult {
     let mut transport = transport(b"000eunpack ok\n0017ok refs/heads/main\n0000".to_vec(), Vec::new());
     let old_id = oid("1111111111111111111111111111111111111111");
     let new_id = gix_hash::ObjectId::null(gix_hash::Kind::Sha1);
@@ -67,11 +69,11 @@ async fn command_list_uses_binary_packetlines_and_valid_agent_capability() -> cr
     let outcome = gix_protocol::push(
         std::slice::from_ref(&command),
         |_, _, _| -> Result<bool, std::io::Error> { panic!("delete-only push must not write a pack") },
-        gix_features::progress::Discard,
+        gix_utils::progress::Discard,
         &AtomicBool::default(),
         &handshake(b"\0report-status delete-refs atomic"),
         &mut transport,
-        ("agent", Some(Cow::Borrowed("git/test"))),
+        ("agent", Some("git/test".into())),
         false,
         Options {
             dry_run: false,
@@ -100,8 +102,10 @@ async fn command_list_uses_binary_packetlines_and_valid_agent_capability() -> cr
     Ok(())
 }
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn dry_run_does_not_touch_transport_or_write_pack() -> crate::Result {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn dry_run_does_not_touch_transport_or_write_pack() -> gix_testtools::TestResult {
     let mut transport = transport(Vec::new(), Vec::new());
     let command = Command::new(
         "refs/heads/main",
@@ -112,11 +116,11 @@ async fn dry_run_does_not_touch_transport_or_write_pack() -> crate::Result {
     let outcome = gix_protocol::push(
         std::slice::from_ref(&command),
         |_, _, _| -> Result<bool, std::io::Error> { panic!("dry-run must not write a pack") },
-        gix_features::progress::Discard,
+        gix_utils::progress::Discard,
         &AtomicBool::default(),
         &handshake(b"\0report-status"),
         &mut transport,
-        ("agent", Some(Cow::Borrowed("git/test"))),
+        ("agent", Some("git/test".into())),
         false,
         Options {
             dry_run: true,

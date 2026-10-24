@@ -86,13 +86,11 @@ pub mod write {
         ///
         /// If this leaves the list of shallow commits empty, the file is removed.
         ///
-        /// ### Deviation
-        ///
         pub fn write(
             file: gix_lock::File,
             shallow_commits: Option<nonempty::NonEmpty<gix_hash::ObjectId>>,
             updates: &[Update],
-        ) -> Result<(), Error> {
+        ) -> Result {
             write_with_prune(file, shallow_commits, updates, |_| true)
         }
 
@@ -101,6 +99,7 @@ pub mod write {
             mut file: gix_lock::File,
             shallow_commits: Option<nonempty::NonEmpty<gix_hash::ObjectId>>,
             updates: &[Update],
+            mut keep: impl FnMut(&gix_hash::ObjectId) -> bool,
         ) -> Result {
             let mut shallow_commits = shallow_commits.map(Vec::from).unwrap_or_default();
             for update in updates {
@@ -139,4 +138,4 @@ pub mod write {
         }
     }
 }
-pub use write::function::write;
+pub use write::function::{write, write_with_prune};

@@ -29,6 +29,7 @@ sha1 = ["gix-hash/sha1", "gix-object/sha1"]
 sha256 = ["gix-hash/sha256", "gix-object/sha256"]
 
 [dependencies]
+thiserror = "2.0.18"
 gix-error = { version = "^0.5.2", path = "../gix-error" }
 gix-hash = { version = "^0.28.1", path = "../gix-hash" }
 gix-object = { version = "^0.66.1", path = "../gix-object" }

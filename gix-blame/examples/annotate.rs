@@ -16,14 +16,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let git_dir = worktree_path.join(".git");
     let file_path = file_path.to_string_lossy();
 
-    let refs = gix_ref::file::Store::at(
+    let refs = gix_ref::file::Store::at_opts(
         git_dir.clone(),
+        gix_hash::Kind::Sha1,
         gix_ref::store::init::Options {
             write_reflog: gix_ref::store::WriteReflog::Disable,
             ..Default::default()
         },
     );
-    let objects = gix_odb::at(git_dir.join("objects"))?;
+    let objects = gix_odb::at(git_dir.join("objects"), gix_hash::Kind::Sha1)?;
     let mut head = gix_ref::file::Store::find(&refs, "HEAD")?;
 
     use gix_ref::file::ReferenceExt;
@@ -48,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 old_root: None,
                 new_root: None,
             },
-            gix_filter::Pipeline::new(Default::default(), Default::default()),
+            gix_filter::Pipeline::new(Default::default(), gix_hash::Kind::Sha1, Default::default()),
             vec![],
             gix_diff::blob::pipeline::Options {
                 large_file_threshold_bytes: 0,
@@ -59,14 +60,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         attr_stack,
     );
     let should_interrupt = std::sync::atomic::AtomicBool::new(false);
-    let outcome = gix_blame::file(
+    let outcome = gix_blame::file_with_progress(
         &objects,
-        head_id,
+        gix_blame::Start::Commit(head_id),
         None,
         &mut resource_cache,
         file_path.as_bytes().as_bstr(),
         Default::default(),
         &should_interrupt,
+        None,
     )?;
 
     for (entry, lines) in outcome.entries_with_lines() {

@@ -22,7 +22,9 @@ pub type ModulesSnapshot = gix_fs::SharedFileSnapshot<File>;
 /// The name of the file containing (sub) module information.
 pub(crate) const MODULES_FILE: &str = ".gitmodules";
 
+mod errors;
 mod url;
+pub use errors::init;
 
 ///
 pub mod update;
@@ -37,7 +39,10 @@ pub(crate) mod git_dir_layout;
 
 /// Validate that no component of the submodule path is a symbolic link.
 /// This prevents symlink attacks from untrusted `.gitmodules` files.
-fn validate_submodule_path(sm_path: &std::path::Path, worktree: &std::path::Path) -> Result<(), SymlinkInPathError> {
+fn validate_submodule_path(
+    sm_path: &std::path::Path,
+    worktree: &std::path::Path,
+) -> std::result::Result<(), SymlinkInPathError> {
     // Only check for symlinks in the submodule path components *within* the worktree,
     // not in the worktree's own parent directories. System-level symlinks (e.g. /var -> /private/var
     // on macOS) are outside our control and must be allowed.
@@ -301,21 +306,6 @@ impl Submodule<'_> {
     /// The returned directory might not exist yet.
     pub fn git_dir(&self) -> Result<PathBuf> {
         git_dir_from_name(self.state.repo.git_dir(), self.validated_name()?)
-    }
-
-    fn validated_git_dir(&self) -> Result<PathBuf, crate::bstr::BString> {
-        let name_path = gix_path::from_bstr(self.name());
-        let mut has_component = false;
-        for component in name_path.components() {
-            match component {
-                std::path::Component::Normal(_) => has_component = true,
-                _ => return Err(self.name().to_owned()),
-            }
-        }
-        if !has_component {
-            return Err(self.name().to_owned());
-        }
-        Ok(self.state.repo.common_dir().join("modules").join(name_path))
     }
 
     /// Return the path to the location at which the workdir would be checked out.

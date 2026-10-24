@@ -41,12 +41,10 @@ impl Submodule<'_> {
         options: &super::update::Options,
     ) -> Result<Option<super::update::Outcome>, super::update::Error>
     where
-        P: gix_features::progress::NestedProgress + 'static,
-        P::SubProgress: gix_features::progress::NestedProgress + 'static,
+        P: gix_utils::progress::NestedProgress + 'static,
+        P::SubProgress: gix_utils::progress::NestedProgress + 'static,
     {
-        let target_git_dir = self
-            .validated_git_dir()
-            .map_err(|name| super::update::Error::InvalidName { name })?;
+        let target_git_dir = self.git_dir()?;
 
         // Step 1: Optionally init
         if options.init {
@@ -107,7 +105,7 @@ impl Submodule<'_> {
         // Validate submodule path for symlink attacks before clone/checkout.
         if let Some(worktree) = self.state.repo.workdir() {
             let path_bstr = self.path()?;
-            let sm_path = gix_path::from_bstr(path_bstr.as_ref());
+            let sm_path = gix_path::from_bstr(path_bstr)?;
             super::validate_submodule_path(&sm_path, worktree)?;
         }
 
@@ -120,7 +118,7 @@ impl Submodule<'_> {
         // .git/config from a different machine), fall back to resolving the .gitmodules
         // relative URL against the worktree.
         let resolved_url = {
-            let url_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(raw_url.path.as_ref()));
+            let url_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(raw_url.path.as_ref()))?;
             let cwd = self.state.repo.options.current_dir_or_empty();
             let worktree = self.state.repo.workdir().unwrap_or_else(|| self.state.repo.git_dir());
 
@@ -136,7 +134,7 @@ impl Submodule<'_> {
                             .map(std::borrow::ToOwned::to_owned)
                     })
                     .and_then(|base_url| {
-                        let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref()));
+                        let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref())).ok()?;
                         let candidate = base_path.join(&url_path);
                         gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS)
                             .ok()
@@ -152,7 +150,7 @@ impl Submodule<'_> {
                 // Absolute file URL that doesn't exist (stale path from another machine).
                 // Fall back to the .gitmodules relative URL resolved against the worktree.
                 let fallback = self.gitmodules_url().and_then(|gm_url| {
-                    let gm_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(gm_url.path.as_ref()));
+                    let gm_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(gm_url.path.as_ref())).ok()?;
                     if gm_path.is_relative() {
                         let candidate = worktree.join(&gm_path);
                         gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS)
@@ -188,17 +186,15 @@ impl Submodule<'_> {
 
             let (mut checkout_prep, _fetch_outcome) = prep.fetch_then_checkout(&mut progress, should_interrupt)?;
             let (_repo, _checkout_outcome) =
-                checkout_prep.main_worktree(gix_features::progress::Discard, should_interrupt)?;
+                checkout_prep.main_worktree(gix_utils::progress::Discard, should_interrupt)?;
 
             // Move the cloned .git/ directory into the superproject's modules directory
             // and replace it with a .git file, matching modern git's submodule layout.
             super::git_dir_layout::connect_work_tree_and_git_dir(&work_dir, &target_git_dir)?;
 
             // Re-open the repo from the new layout location.
-            let mut repo =
-                crate::open_opts(&target_git_dir, self.state.repo.options.clone()).map_err(super::open::Error::from)?;
-            repo.set_workdir(Some(work_dir.clone()))
-                .map_err(super::open::Error::from)?;
+            let mut repo = crate::open_opts(&target_git_dir, self.state.repo.options.clone())?;
+            repo.set_workdir(Some(work_dir.clone()))?;
 
             (repo, true)
         } else {
@@ -253,17 +249,16 @@ impl Submodule<'_> {
         let checkout_outcome = match &effective_strategy {
             gix_submodule::config::Update::Checkout => {
                 // Skip checkout if HEAD already matches the target commit.
-                if !freshly_cloned {
-                    if let Ok(head_id) = sm_repo.head_id() {
-                        if head_id.detach() == target_commit {
-                            return Ok(Some(super::update::Outcome {
-                                strategy: effective_strategy,
-                                target_commit,
-                                freshly_cloned: false,
-                                checkout: None,
-                            }));
-                        }
-                    }
+                if !freshly_cloned
+                    && let Ok(head_id) = sm_repo.head_id()
+                    && head_id.detach() == target_commit
+                {
+                    return Ok(Some(super::update::Outcome {
+                        strategy: effective_strategy,
+                        target_commit,
+                        freshly_cloned: false,
+                        checkout: None,
+                    }));
                 }
                 Some(checkout_to_commit(&sm_repo, target_commit, should_interrupt)?)
             }
@@ -280,23 +275,23 @@ impl Submodule<'_> {
         };
 
         // Step 7: Recursive update
-        if options.recursive {
-            if let Some(submodules) = sm_repo.submodules()? {
-                let sub_opts = super::update::Options {
-                    init: options.init,
-                    recursive: true,
-                };
-                for sm in submodules {
-                    // With --init, update all submodules (git implicitly activates them).
-                    // Without --init, only update active (initialized) ones.
-                    let should_update = options.init || sm.is_active().unwrap_or(false);
-                    if should_update {
-                        sm.update_submodule(gix_features::progress::Discard, should_interrupt, &sub_opts)
-                            .map_err(|source| super::update::Error::RecursiveUpdate {
-                                name: sm.name().to_owned(),
-                                source: Box::new(source),
-                            })?;
-                    }
+        if options.recursive
+            && let Some(submodules) = sm_repo.submodules()?
+        {
+            let sub_opts = super::update::Options {
+                init: options.init,
+                recursive: true,
+            };
+            for sm in submodules {
+                // With --init, update all submodules (git implicitly activates them).
+                // Without --init, only update active (initialized) ones.
+                let should_update = options.init || sm.is_active().unwrap_or(false);
+                if should_update {
+                    sm.update_submodule(gix_utils::progress::Discard, should_interrupt, &sub_opts)
+                        .map_err(|source| super::update::Error::RecursiveUpdate {
+                            name: sm.name().to_owned(),
+                            source: Box::new(source),
+                        })?;
                 }
             }
         }
@@ -329,7 +324,10 @@ fn ancestry(
         return Ok(Ancestry::Same);
     }
 
-    let base = repo.merge_base(head, target)?.detach();
+    let Some(base) = repo.merge_base(head, target)? else {
+        return Ok(Ancestry::Diverged);
+    };
+    let base = base.detach();
     Ok(if base == target {
         Ancestry::HeadContainsTarget
     } else if base == head {
@@ -567,7 +565,7 @@ fn run_custom_update_command(
     command: &crate::bstr::BString,
     target_commit: gix_hash::ObjectId,
 ) -> Result<(), super::update::Error> {
-    let command_path = gix_path::from_bstring(command.clone());
+    let command_path = gix_path::from_bstring(command.clone())?;
     let mut cmd: std::process::Command = gix_command::prepare(command_path.into_os_string())
         .command_may_be_shell_script()
         .with_context(repo.command_context()?)
@@ -575,7 +573,7 @@ fn run_custom_update_command(
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .arg(target_commit.to_string())
-        .into();
+        .try_into()?;
 
     if let Some(workdir) = repo.workdir() {
         cmd.current_dir(workdir);
@@ -651,7 +649,7 @@ fn ensure_checkout_would_not_overwrite_local_changes(
             if worktree_entry_differs_from_index(repo, workdir, &current_index, entry)? {
                 return Err(super::update::Error::CheckoutWouldOverwrite { path });
             }
-        } else if workdir.join(gix_path::from_bstr(path_bstr)).symlink_metadata().is_ok() {
+        } else if workdir.join(gix_path::from_bstr(path_bstr)?).symlink_metadata().is_ok() {
             return Err(super::update::Error::CheckoutWouldOverwrite { path });
         }
     }
@@ -699,7 +697,9 @@ fn index_entries_differ(lhs: Option<&gix_index::Entry>, rhs: Option<&gix_index::
 }
 
 fn path_escapes_worktree(path: &crate::bstr::BStr) -> bool {
-    let os_path = gix_path::from_bstr(path);
+    let Ok(os_path) = gix_path::from_bstr(path) else {
+        return true;
+    };
     os_path.components().any(|component| {
         matches!(
             component,
@@ -722,7 +722,7 @@ fn worktree_entry_differs_from_index(
     }
 
     let path = entry.path(index);
-    let file_path = workdir.join(gix_path::from_bstr(path));
+    let file_path = workdir.join(gix_path::from_bstr(path)?);
     let Some(entry_data) = worktree_entry_data(&file_path).map_err(|source| super::update::Error::ReadWorktree {
         path: path.to_owned(),
         source,
@@ -754,7 +754,10 @@ fn worktree_entry_data(path: &std::path::Path) -> std::io::Result<Option<Worktre
         return Ok(None);
     };
     let content = if mode == gix_index::entry::Mode::SYMLINK {
-        gix_path::into_bstr(std::fs::read_link(path)?).into_owned().into()
+        gix_path::into_bstr(std::fs::read_link(path)?)
+            .map_err(std::io::Error::other)?
+            .into_owned()
+            .into()
     } else {
         std::fs::read(path)?
     };
@@ -854,8 +857,8 @@ fn checkout_commit_tree(
             .clone()
             .into_arc()
             .map_err(super::update::Error::OpenArcOdb)?,
-        &gix_features::progress::Discard,
-        &gix_features::progress::Discard,
+        &gix_utils::progress::Discard,
+        &gix_utils::progress::Discard,
         should_interrupt,
         opts,
     )?;

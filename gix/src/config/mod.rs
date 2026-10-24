@@ -57,7 +57,7 @@ pub struct ConfigEditGuard<'repo> {
     /// The owning repository.
     pub(crate) repo: Option<&'repo mut Repository>,
     /// The in-memory configuration being edited.
-    pub(crate) config: gix_config::File<'static>,
+    pub(crate) config: gix_config::File,
     /// The lock file for atomic writes.
     pub(crate) lock: Option<gix_lock::File>,
 }
@@ -279,5 +279,28 @@ pub(crate) mod shared {
         Core::USE_REPLACE_REFS
             .enrich_error(config.boolean_filter("core.useReplaceRefs", &mut filter_config_section))
             .with_leniency(lenient)
+    }
+}
+
+///
+pub mod edit {
+    /// The error produced when calling [`Repository::config_edit()`](crate::Repository::config_edit()).
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error("The local configuration file path could not be determined")]
+        NoLocalConfigPath,
+        #[error("Failed to acquire lock on configuration file")]
+        AcquireLock(#[from] gix_error::Error),
+    }
+
+    /// The error produced when calling [`ConfigEditGuard::commit()`](super::ConfigEditGuard::commit()).
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum CommitError {
+        #[error("Failed to write configuration to lock file")]
+        Write(#[from] std::io::Error),
+        #[error("Failed to apply configuration to repository")]
+        Config(#[from] gix_error::Error),
     }
 }

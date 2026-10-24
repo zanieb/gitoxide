@@ -26,14 +26,16 @@ pub struct Options {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
+    #[error(transparent)]
+    Operation(#[from] gix_error::Error),
     #[error("cannot cherry-pick in a bare repository")]
     BareRepository,
     #[error(transparent)]
-    FindHead(#[from] crate::reference::head_id::Error),
+    FindHead(gix_error::Error),
     #[error(transparent)]
-    FindObject(#[from] crate::object::find::existing::Error),
+    FindObject(gix_error::Error),
     #[error(transparent)]
-    DecodeCommit(#[from] gix_object::decode::Error),
+    DecodeCommit(gix_error::Error),
     #[error("commit {id} has no parent (cannot cherry-pick a root commit)")]
     NoParent { id: ObjectId },
     #[error("commit {id} is a merge but no -m option was provided")]
@@ -47,9 +49,9 @@ pub enum Error {
         num_parents: usize,
     },
     #[error(transparent)]
-    MergeTree(#[from] crate::repository::merge_trees::Error),
+    MergeTree(gix_error::Error),
     #[error(transparent)]
-    TreeMergeOptions(#[from] crate::repository::tree_merge_options::Error),
+    TreeMergeOptions(gix_error::Error),
     #[error("cherry-pick or revert resulted in conflicts")]
     Conflict,
     #[error("cherry-pick or revert of commit {id} is empty")]
@@ -57,31 +59,31 @@ pub enum Error {
     #[error("index contains uncommitted changes")]
     DirtyIndex,
     #[error(transparent)]
-    WriteObject(#[from] crate::object::write::Error),
+    WriteObject(gix_error::Error),
     #[error(transparent)]
     WriteIndexTree(#[from] gix_index::write_tree::Error),
     #[error(transparent)]
-    EditReference(#[from] crate::reference::edit::Error),
+    EditReference(gix_error::Error),
     #[error("committer identity is not configured")]
     CommitterMissing,
     #[error(transparent)]
-    ParseTime(#[from] crate::config::time::Error),
+    ParseTime(gix_error::Error),
     #[error(transparent)]
-    OpenIndex(#[from] crate::worktree::open_index::Error),
+    OpenIndex(gix_error::Error),
     #[error(transparent)]
-    IndexFromTree(#[from] crate::repository::index_from_tree::Error),
+    IndexFromTree(gix_error::Error),
     #[error(transparent)]
-    WriteIndex(#[from] gix_index::file::write::Error),
+    WriteIndex(gix_error::Error),
     #[error(transparent)]
-    CheckoutOptions(#[from] crate::config::checkout_options::Error),
+    CheckoutOptions(gix_error::Error),
     #[error(transparent)]
-    Checkout(#[from] gix_worktree_state::checkout::Error),
+    Checkout(gix_error::Error),
     #[error("failed to convert object database to Arc for thread-safe access")]
     ObjectsToArc(#[from] std::io::Error),
     #[error(transparent)]
-    WriteTree(#[from] crate::object::tree::editor::write::Error),
+    WriteTree(gix_error::Error),
     #[error(transparent)]
-    FindHeadExisting(#[from] crate::reference::find::existing::Error),
+    FindHeadExisting(gix_error::Error),
 }
 
 /// The outcome of a cherry-pick or revert operation.
@@ -96,6 +98,7 @@ pub struct Outcome {
 impl From<super::worktree_ops::CheckoutError> for Error {
     fn from(err: super::worktree_ops::CheckoutError) -> Self {
         match err {
+            super::worktree_ops::CheckoutError::Operation(e) => Self::Operation(e),
             super::worktree_ops::CheckoutError::CheckoutOptions(e) => Error::CheckoutOptions(e),
             super::worktree_ops::CheckoutError::Checkout(e) => Error::Checkout(e),
             super::worktree_ops::CheckoutError::ObjectsToArc(e) => Error::ObjectsToArc(e),
@@ -106,6 +109,7 @@ impl From<super::worktree_ops::CheckoutError> for Error {
 impl From<super::worktree_ops::UpdateHeadError> for Error {
     fn from(err: super::worktree_ops::UpdateHeadError) -> Self {
         match err {
+            super::worktree_ops::UpdateHeadError::Operation(e) => Self::Operation(e),
             super::worktree_ops::UpdateHeadError::FindHead(e) => Error::FindHeadExisting(e),
             super::worktree_ops::UpdateHeadError::EditReference(e) => Error::EditReference(e),
         }
@@ -144,7 +148,7 @@ impl Repository {
             let parent_tree_id = self
                 .find_object(parent_id)?
                 .try_into_commit()
-                .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: parent_id }))?
+                .map_err(Error::FindObject)?
                 .tree_id()?
                 .detach();
             return Ok(parent_tree_id);
@@ -158,7 +162,7 @@ impl Repository {
         let parent_tree_id = self
             .find_object(parent_id)?
             .try_into_commit()
-            .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: parent_id }))?
+            .map_err(Error::FindObject)?
             .tree_id()?
             .detach();
         Ok(parent_tree_id)
@@ -196,7 +200,7 @@ impl Repository {
         let pick_commit = self
             .find_object(pick_id)?
             .try_into_commit()
-            .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: pick_id }))?;
+            .map_err(Error::FindObject)?;
         let parent_ids: Vec<_> = pick_commit.parent_ids().map(super::super::types::Id::detach).collect();
 
         // Resolve ancestor tree (handles root, merge, and normal commits).
@@ -207,7 +211,7 @@ impl Repository {
         let head_tree_id = self
             .find_object(head_id)?
             .try_into_commit()
-            .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: head_id.detach() }))?
+            .map_err(Error::FindObject)?
             .tree_id()?
             .detach();
         if !options.no_commit {
@@ -325,7 +329,7 @@ impl Repository {
         let revert_commit = self
             .find_object(revert_id)?
             .try_into_commit()
-            .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: revert_id }))?;
+            .map_err(Error::FindObject)?;
         let parent_ids: Vec<_> = revert_commit
             .parent_ids()
             .map(super::super::types::Id::detach)
@@ -341,7 +345,7 @@ impl Repository {
         let head_tree_id = self
             .find_object(head_id)?
             .try_into_commit()
-            .map_err(|_| Error::FindObject(crate::object::find::existing::Error::NotFound { oid: head_id.detach() }))?
+            .map_err(Error::FindObject)?
             .tree_id()?
             .detach();
         if !options.no_commit {

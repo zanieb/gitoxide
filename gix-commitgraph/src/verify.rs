@@ -78,11 +78,7 @@ impl Graph {
 
             let file_stats = file.traverse(|commit| {
                 if !seen_ids.insert(commit.id().to_owned()) {
-                    return Err(message!(
-                        "Commit {} appears more than once in the commit-graph chain",
-                        commit.id()
-                    )
-                    .raise_erased());
+                    bail!("Commit {id} appears more than once in the commit-graph chain".corrupted(), id = commit.id());
                 }
 
                 let mut max_parent_generation = 0u32;

@@ -229,10 +229,7 @@ impl crate::Repository {
     ///
     /// Return `None` if the object wasn't found. The well-known empty tree is treated like [`Repository::try_find_object()`]
     /// and is always available for the repository's object hash.
-    pub fn try_find_object_verified(
-        &self,
-        id: impl Into<ObjectId>,
-    ) -> Result<Option<Object<'_>>, object::verify::Error> {
+    pub fn try_find_object_verified(&self, id: impl Into<ObjectId>) -> Result<Option<Object<'_>>> {
         let id = id.into();
         if id == ObjectId::empty_tree(self.object_hash()) {
             return Ok(Some(Object {
@@ -244,7 +241,7 @@ impl crate::Repository {
         }
 
         let mut buf = self.free_buf();
-        match self.objects.try_find(&id, &mut buf).map_err(object::find::Error)? {
+        match self.objects.try_find(&id, &mut buf)? {
             Some(obj) => {
                 obj.verify_checksum(&id)?;
                 let kind = obj.kind;
@@ -268,6 +265,16 @@ impl crate::Repository {
         self.write_object_inner(&buf, object.kind())
     }
 
+    /// Write an object after checking the existence and kinds of the objects it references.
+    /// Gitlinks point into separate repositories and are excluded from this check.
+    pub fn write_object_checked(&self, object: impl gix_object::WriteTo) -> Result<Id<'_>> {
+        let mut buf = self.empty_reusable_buffer();
+        object.write_to(buf.deref_mut()).or_error()?;
+        let kind = object.kind();
+        self.validate_object_references(kind, &buf)?;
+        self.write_object_inner(&buf, kind)
+    }
+
     fn write_object_inner(&self, buf: &[u8], kind: gix_object::Kind) -> Result<Id<'_>> {
         let oid = gix_object::compute_hash(self.object_hash(), kind, buf)?;
         if self.objects.exists_without_refresh(&oid) {
@@ -279,7 +286,7 @@ impl crate::Repository {
             .map(|oid| oid.attach(self))
     }
 
-    fn validate_object_references(&self, kind: gix_object::Kind, buf: &[u8]) -> Result<(), object::write::Error> {
+    fn validate_object_references(&self, kind: gix_object::Kind, buf: &[u8]) -> Result<()> {
         let object = self.decode_object_for_reference_validation(kind, buf)?;
         match object {
             ObjectRef::Blob(_) => {}
@@ -311,13 +318,13 @@ impl crate::Repository {
         object_kind: gix_object::Kind,
         referenced_kind: gix_object::Kind,
         id: ObjectId,
-    ) -> Result<(), object::write::Error> {
+    ) -> Result<()> {
         if id.kind() != self.object_hash() {
-            return Err(object::write::Error(Box::new(MissingObjectReference {
+            return Err(gix_error::ErrorExt::raise(MissingObjectReference {
                 object_kind,
                 referenced_kind,
                 id,
-            })));
+            }));
         }
 
         let known_empty = match referenced_kind {
@@ -329,22 +336,19 @@ impl crate::Repository {
             return Ok(());
         }
 
-        match self
-            .try_find_header(id)
-            .map_err(|err| object::write::Error(Box::new(err)))?
-        {
+        match self.try_find_header(id)? {
             Some(header) if header.kind() == referenced_kind => Ok(()),
-            Some(header) => Err(object::write::Error(Box::new(WrongObjectReferenceKind {
+            Some(header) => Err(gix_error::ErrorExt::raise(WrongObjectReferenceKind {
                 object_kind,
                 referenced_kind,
                 actual_kind: header.kind(),
                 id,
-            }))),
-            None => Err(object::write::Error(Box::new(MissingObjectReference {
+            })),
+            None => Err(gix_error::ErrorExt::raise(MissingObjectReference {
                 object_kind,
                 referenced_kind,
                 id,
-            }))),
+            })),
         }
     }
 
@@ -352,17 +356,17 @@ impl crate::Repository {
         &self,
         kind: gix_object::Kind,
         buf: &'a [u8],
-    ) -> Result<ObjectRef<'a>, object::write::Error> {
-        let decode = |object_hash| gix_object::Data::new_with_hash(kind, buf, object_hash).decode();
+    ) -> Result<ObjectRef<'a>> {
+        let decode = |object_hash| gix_object::Data::new(buf, kind, object_hash).decode();
         match decode(self.object_hash()) {
             Ok(object) => Ok(object),
             Err(primary_err) => {
-                if let Some(alternate_hash) = alternate_object_hash(self.object_hash()) {
-                    if let Ok(object) = decode(alternate_hash) {
-                        return Ok(object);
-                    }
+                if let Some(alternate_hash) = alternate_object_hash(self.object_hash())
+                    && let Ok(object) = decode(alternate_hash)
+                {
+                    return Ok(object);
                 }
-                Err(object::write::Error(Box::new(primary_err)))
+                Err(primary_err)
             }
         }
     }

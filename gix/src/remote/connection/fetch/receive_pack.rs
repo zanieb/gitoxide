@@ -127,7 +127,10 @@ where
             .then(|| prepare_dry_run_shallow_file(repo))
             .transpose()?;
         let fetch_options = gix_protocol::fetch::Options {
-            shallow_file: repo.shallow_file()?,
+            shallow_file: match &dry_run_shallow_file {
+                Some((path, _handle)) => path.clone(),
+                None => repo.shallow_file()?,
+            },
             shallow: &self.shallow,
             tags: con.remote.fetch_tags,
             reject_shallow_remote: Clone::REJECT_SHALLOW
@@ -272,26 +275,28 @@ where
 
 fn prepare_dry_run_shallow_file(
     repo: &crate::Repository,
-) -> Result<(PathBuf, gix_tempfile::Handle<gix_tempfile::handle::Writable>), Error> {
+) -> Result<(PathBuf, gix_tempfile::Handle<gix_tempfile::handle::Writable>)> {
     let mut tempfile = gix_tempfile::new(
         repo.git_dir(),
         gix_tempfile::ContainingDirectory::Exists,
         gix_tempfile::AutoRemove::Tempfile,
     )
-    .map_err(Error::DryRunShallowFile)?;
+    .or_raise(|| message("Could not prepare the shallow file for a dry run"))?;
 
-    match std::fs::File::open(repo.shallow_file()) {
+    match std::fs::File::open(repo.shallow_file()?) {
         Ok(mut source) => {
-            std::io::copy(&mut source, &mut tempfile).map_err(Error::DryRunShallowFile)?;
-            std::io::Write::flush(&mut tempfile).map_err(Error::DryRunShallowFile)?;
+            std::io::copy(&mut source, &mut tempfile)
+                .or_raise(|| message("Could not prepare the shallow file for a dry run"))?;
+            std::io::Write::flush(&mut tempfile)
+                .or_raise(|| message("Could not prepare the shallow file for a dry run"))?;
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => return Err(Error::DryRunShallowFile(err)),
+        Err(err) => return Err(err).or_raise(|| message("Could not copy the shallow file for a dry run")),
     }
 
     let path = tempfile
         .with_mut(|file| file.path().to_owned())
-        .map_err(Error::DryRunShallowFile)?;
+        .or_raise(|| message("Could not prepare the shallow file for a dry run"))?;
     Ok((path, tempfile))
 }
 

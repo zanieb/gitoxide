@@ -7,6 +7,7 @@ use crate::{
     Progress, remote,
     remote::{Connection, Direction, fetch::RefMap, ref_map},
 };
+use gix_error::ResultExt;
 
 mod error;
 pub use error::Error;
@@ -36,20 +37,11 @@ pub mod prepare {
         #[error("Cannot perform a meaningful push operation without any configured ref-specs")]
         MissingRefSpecs,
         #[error(transparent)]
-        RefMap(#[from] crate::remote::ref_map::Error),
-    }
-
-    impl gix_protocol::transport::IsSpuriousError for Error {
-        fn is_spurious(&self) -> bool {
-            match self {
-                Error::RefMap(err) => err.is_spurious(),
-                _ => false,
-            }
-        }
+        RefMap(#[from] gix_error::Error),
     }
 }
 
-impl<'remote, 'repo, T> Connection<'remote, 'repo, T>
+impl<'auth, 'remote, 'repo, T> Connection<'auth, 'remote, 'repo, T>
 where
     T: Transport,
 {
@@ -64,12 +56,12 @@ where
     /// The `options` are used to configure the ref-map, which determines which references
     /// will be considered for the push. By default, the remote's push refspecs are used.
     #[allow(clippy::result_large_err)]
-    #[gix_protocol::maybe_async::maybe_async]
+    #[gix_protocol::bisync::bisync]
     pub async fn prepare_push(
         mut self,
         progress: impl Progress,
         options: ref_map::Options,
-    ) -> Result<PreparePush<'remote, 'repo, T>, prepare::Error> {
+    ) -> Result<PreparePush<'auth, 'remote, 'repo, T>, prepare::Error> {
         if self.remote.refspecs(remote::Direction::Push).is_empty() && options.extra_refspecs.is_empty() {
             return Err(prepare::Error::MissingRefSpecs);
         }
@@ -84,7 +76,7 @@ where
     }
 
     #[allow(clippy::result_large_err)]
-    #[gix_protocol::maybe_async::maybe_async]
+    #[gix_protocol::bisync::bisync]
     async fn ref_map_for_push(
         &mut self,
         mut progress: impl Progress,
@@ -93,7 +85,7 @@ where
             handshake_parameters,
             extra_refspecs,
         }: ref_map::Options,
-    ) -> Result<RefMap, ref_map::Error> {
+    ) -> crate::Result<RefMap> {
         let _span = gix_trace::coarse!("remote::Connection::ref_map_for_push()");
         let mut credentials_storage;
         let url = self.transport.inner.to_url();
@@ -113,10 +105,7 @@ where
         if self.transport_options.is_none() {
             self.transport_options = repo
                 .transport_options(url.as_ref(), self.remote.name().map(crate::remote::Name::as_bstr))
-                .map_err(|err| ref_map::Error::GatherTransportConfig {
-                    source: err,
-                    url: url.into_owned(),
-                })?;
+                .or_raise(|| gix_error::message!("Could not configure transport for {url}"))?;
         }
         if let Some(config) = self.transport_options.as_ref() {
             self.transport.inner.configure(&**config)?;
@@ -157,11 +146,11 @@ where
 }
 
 /// A structure to hold the result of the handshake with the remote and configure the upcoming push operation.
-pub struct PreparePush<'remote, 'repo, T>
+pub struct PreparePush<'auth, 'remote, 'repo, T>
 where
     T: Transport,
 {
-    con: Option<Connection<'remote, 'repo, T>>,
+    con: Option<Connection<'auth, 'remote, 'repo, T>>,
     ref_map: RefMap,
     dry_run: bool,
     atomic: bool,
@@ -172,7 +161,7 @@ where
     pub(crate) expected_old_ids: Option<std::collections::HashMap<crate::bstr::BString, gix_hash::ObjectId>>,
 }
 
-impl<T> PreparePush<'_, '_, T>
+impl<T> PreparePush<'_, '_, '_, T>
 where
     T: Transport,
 {
@@ -183,7 +172,7 @@ where
 }
 
 /// Builder
-impl<T> PreparePush<'_, '_, T>
+impl<T> PreparePush<'_, '_, '_, T>
 where
     T: Transport,
 {

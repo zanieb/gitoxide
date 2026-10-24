@@ -49,7 +49,7 @@ impl File {
             .flatten()
             .filter_map(|s| s.header().subsection_name().map(|n| (n, s)))
         {
-            let values = ["url", "fetchRecurseSubmodules", "ignore", "update", "branch"]
+            let values = ["url", "fetchRecurseSubmodules", "ignore", "update", "branch", "shallow"]
                 .map(|field| (field, section.value(field)));
             if values.iter().all(|(_, value)| value.is_none()) {
                 continue;

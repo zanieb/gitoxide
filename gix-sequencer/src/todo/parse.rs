@@ -17,7 +17,7 @@ pub enum Error {
     InvalidCommit {
         hash: String,
         line_number: usize,
-        source: gix_hash::prefix::from_hex::Error,
+        source: gix_error::Error,
     },
     #[error("Commit hash '{hash}' on line {line_number} is longer than {hash_kind:?} object ids")]
     CommitHashTooLong {

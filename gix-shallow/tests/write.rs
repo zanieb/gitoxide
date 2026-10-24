@@ -27,7 +27,7 @@ fn write_with_prune_removes_missing_objects_and_duplicates() -> Result<(), Box<d
         head: existing,
         tail: vec![missing, existing],
     };
-    let lock = gix_lock::File::acquire_to_update_resource(&path, gix_lock::acquire::Fail::Immediately, None)?;
+    let lock = gix_lock::File::acquire_to_update_resource(&path, gix_lock::acquire::Fail::Immediately, None, 0)?;
 
     gix_shallow::write_with_prune(
         lock,

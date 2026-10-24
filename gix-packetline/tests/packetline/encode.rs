@@ -116,7 +116,7 @@ mod error {
 mod proptests {
     #[cfg(all(feature = "async-io", not(feature = "blocking-io")))]
     use gix_packetline::async_io::encode::data_to_write;
-    #[cfg(all(feature = "blocking-io", not(feature = "async-io")))]
+    #[cfg(feature = "blocking-io")]
     use gix_packetline::blocking_io::encode::data_to_write;
     use proptest::prelude::*;
 

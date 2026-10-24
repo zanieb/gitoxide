@@ -1,15 +1,19 @@
 //! A library for performing object database integrity and connectivity checks
 #![deny(unsafe_code, missing_docs)]
 
-use gix_error::Result;
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    fmt,
+    io::Write,
+    path::Path,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 use gix_hash::ObjectId;
 use gix_hashtable::{HashMap, HashSet};
 use gix_object::{
     Data, Exists, Find, FindExt, Kind, ObjectRef,
     bstr::{BStr, BString},
-    find::{existing, existing_object},
     tree::{EntryKind, EntryMode, EntryRef},
 };
 
@@ -63,9 +67,9 @@ impl Options<'_> {
 #[derive(Debug)]
 pub enum Error {
     /// The object database failed to provide a required object.
-    Find(existing_object::Error),
+    Find(gix_error::Error),
     /// An object was found, but its content does not match its object id.
-    Checksum(gix_object::data::verify::Error),
+    Checksum(gix_error::Error),
     /// Strict mode rejected a group-writable tree entry.
     StrictMode {
         /// The tree containing the offending entry.
@@ -104,8 +108,8 @@ pub enum Error {
     Interrupted,
 }
 
-impl From<existing_object::Error> for Error {
-    fn from(err: existing_object::Error) -> Self {
+impl From<gix_error::Error> for Error {
+    fn from(err: gix_error::Error) -> Self {
         Error::Find(err)
     }
 }
@@ -202,11 +206,30 @@ where
     ///
     /// Walk the parents, trees, and blobs referenced by the commit and verify they exist in the ODB.
     /// Any objects previously encountered by this instance will be skipped silently.
-    /// Any referenced blobs that are not present in the ODB will result in a call to the  `missing_cb`.
-    /// Missing commits or trees will cause an error to be returned.
-    ///     - TODO: consider how to handle a missing commit (invoke `missing_cb`, or possibly return a Result?)
-    pub fn check_commit(&mut self, oid: &ObjectId) -> Result {
-        // Attempt to insert the commit ID in the set, and if already present, return immediately
+    /// Any referenced blobs or parent commits that are not present in the ODB will result in a call to the `missing_cb`.
+    /// Missing root commits, malformed objects, or referenced objects with the wrong kind cause an error to be returned.
+    pub fn check_commit(&mut self, oid: &ObjectId) -> Result<(), gix_error::Error> {
+        match self.check_commit_with_options(oid, Options::default()) {
+            Ok(()) => Ok(()),
+            Err(Error::Find(err)) => Err(err),
+            Err(Error::Checksum(_)) => unreachable!("hash verification needs to be configured"),
+            Err(Error::StrictMode { .. }) => unreachable!("strict mode needs to be configured"),
+            Err(
+                Error::DuplicateTreeEntry { .. } | Error::TreeNotSorted { .. } | Error::InvalidTreeEntryMode { .. },
+            ) => unreachable!("tree entry validation needs to be configured"),
+            Err(Error::Interrupted) => unreachable!("interruptions need a configured interrupt flag"),
+        }
+    }
+
+    /// Run the connectivity check on the provided commit `oid`, using `options`.
+    ///
+    /// This is like [`Connectivity::check_commit`], but can report progress and be interrupted.
+    pub fn check_commit_with_options(&mut self, oid: &ObjectId, options: Options<'_>) -> Result<(), Error> {
+        self.check_commit_at(oid, options, root_path("commit", oid))
+    }
+
+    fn check_commit_at(&mut self, oid: &ObjectId, options: Options<'_>, path: BString) -> Result<(), Error> {
+        // Previously reached objects don't need traversal again, but they must still match this use-site's kind.
         if !insert_seen_at(&mut self.seen, &mut self.reachable_paths, *oid, options, path.clone())? {
             if !is_skipped_object(oid, options) {
                 find_existing_object(&self.db, oid, &mut self.buf, Kind::Commit, options)?;
@@ -245,7 +268,7 @@ where
     ///
     /// Tags may point to any object kind, including another tag. Missing objects
     /// referenced by the tag are reported through the missing-object callback.
-    pub fn check_tag(&mut self, oid: &ObjectId) -> Result<(), existing_object::Error> {
+    pub fn check_tag(&mut self, oid: &ObjectId) -> Result<(), gix_error::Error> {
         match self.check_tag_with_options(oid, Options::default()) {
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
@@ -290,7 +313,7 @@ where
     }
 
     /// Run the connectivity check on the provided object `oid`, detecting its kind from the object database.
-    pub fn check_object(&mut self, oid: &ObjectId) -> Result<(), existing_object::Error> {
+    pub fn check_object(&mut self, oid: &ObjectId) -> Result<(), gix_error::Error> {
         match self.check_object_with_options(oid, Options::default()) {
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
@@ -383,7 +406,7 @@ where
     pub fn check_reflog_entries(
         &mut self,
         entries: impl IntoIterator<Item = (ObjectId, ObjectId)>,
-    ) -> Result<(), existing_object::Error> {
+    ) -> Result<(), gix_error::Error> {
         match self.check_reflog_entries_with_options(entries, Options::default()) {
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
@@ -422,7 +445,7 @@ where
     pub fn check_index_entries(
         &mut self,
         entries: impl IntoIterator<Item = (ObjectId, EntryKind)>,
-    ) -> Result<(), existing_object::Error> {
+    ) -> Result<(), gix_error::Error> {
         match self.check_index_entries_with_options(entries, Options::default()) {
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
@@ -455,7 +478,7 @@ where
     pub fn check_index_tree_cache(
         &mut self,
         tree_ids: impl IntoIterator<Item = ObjectId>,
-    ) -> Result<(), existing_object::Error> {
+    ) -> Result<(), gix_error::Error> {
         match self.check_index_tree_cache_with_options(tree_ids, Options::default()) {
             Ok(()) => Ok(()),
             Err(Error::Find(err)) => Err(err),
@@ -690,9 +713,8 @@ where
     let mut written = 0;
     for oid in object_ids {
         let object = objects
-            .try_find(oid, &mut buf)
-            .map_err(existing::Error::Find)?
-            .ok_or_else(|| existing::Error::NotFound { oid: *oid })?;
+            .try_find(oid, &mut buf)?
+            .ok_or_else(|| gix_error::message!("Object {oid} was not found").not_found_error())?;
         let dir = git_dir
             .join("lost-found")
             .join(if object.kind == Kind::Commit { "commit" } else { "other" });
@@ -721,7 +743,7 @@ pub mod lost_found {
     #[derive(Debug)]
     pub enum Error {
         /// The object database failed to provide a dangling object.
-        Find(gix_object::find::existing::Error),
+        Find(gix_error::Error),
         /// A directory in the `lost-found` hierarchy could not be created.
         CreateDirectory {
             /// The underlying IO error.
@@ -745,8 +767,8 @@ pub mod lost_found {
         },
     }
 
-    impl From<gix_object::find::existing::Error> for Error {
-        fn from(err: gix_object::find::existing::Error) -> Self {
+    impl From<gix_error::Error> for Error {
+        fn from(err: gix_error::Error) -> Self {
             Error::Find(err)
         }
     }
@@ -880,10 +902,9 @@ where
     T: Find,
 {
     find_optional_object(db, oid, buf, expected, options)?.ok_or_else(|| {
-        existing_object::Error::NotFound {
-            oid: oid.as_ref().to_owned(),
-        }
-        .into()
+        gix_error::message!("Object {oid} was not found")
+            .not_found_error()
+            .into()
     })
 }
 
@@ -897,10 +918,9 @@ where
     T: Find,
 {
     find_optional_any_object(db, oid, buf, options)?.ok_or_else(|| {
-        existing_object::Error::NotFound {
-            oid: oid.as_ref().to_owned(),
-        }
-        .into()
+        gix_error::message!("Object {oid} was not found")
+            .not_found_error()
+            .into()
     })
 }
 
@@ -914,13 +934,13 @@ where
     T: Find,
 {
     if *oid == ObjectId::empty_tree(oid.kind()) {
-        return Ok(Some(Data::new_with_hash(Kind::Tree, &[], oid.kind())));
+        return Ok(Some(Data::new(&[], Kind::Tree, oid.kind())));
     }
     if *oid == ObjectId::empty_blob(oid.kind()) {
-        return Ok(Some(Data::new_with_hash(Kind::Blob, &[], oid.kind())));
+        return Ok(Some(Data::new(&[], Kind::Blob, oid.kind())));
     }
 
-    let Some(object) = db.try_find(oid, buf).map_err(existing_object::Error::Find)? else {
+    let Some(object) = db.try_find(oid, buf).map_err(Error::Find)? else {
         return Ok(None);
     };
     if options.verify_hashes {
@@ -945,32 +965,29 @@ where
         Kind::Commit | Kind::Tag => None,
     };
     if expected_empty_id.as_ref().is_some_and(|empty_id| empty_id == oid) {
-        return Ok(Some(Data::new_with_hash(expected, &[], oid.kind())));
+        return Ok(Some(Data::new(&[], expected, oid.kind())));
     }
 
-    let Some(object) = db.try_find(oid, buf).map_err(existing_object::Error::Find)? else {
+    let Some(object) = db.try_find(oid, buf).map_err(Error::Find)? else {
         return Ok(None);
     };
     if options.verify_hashes {
         object.verify_checksum(oid).map_err(Error::Checksum)?;
     }
     if object.kind != expected {
-        return Err(existing_object::Error::ObjectKind {
-            oid: oid.as_ref().to_owned(),
-            actual: object.kind,
-            expected,
-        }
-        .into());
+        return Err(
+            gix_error::message!("Expected {expected} at {oid}, found {actual}", actual = object.kind)
+                .corrupted_error()
+                .into(),
+        );
     }
     Ok(Some(object))
 }
 
 fn decode_object<'a>(object: Data<'a>, oid: &ObjectId) -> Result<ObjectRef<'a>, Error> {
-    object.decode_with_hash(oid.kind()).map_err(|source| {
-        existing_object::Error::Decode {
-            oid: oid.as_ref().to_owned(),
-            source,
-        }
-        .into()
-    })
+    use gix_error::ResultExt;
+    object
+        .decode()
+        .or_raise(|| gix_error::message!("Failed to decode object {oid}").corrupted())
+        .map_err(Error::Find)
 }

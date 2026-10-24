@@ -70,7 +70,7 @@ pub(super) mod function {
                     byte_offset_to_next_entry,
                     object_hash,
                 } => {
-                    let mut iter = TreeRefIter::from_bytes_with_hash(&buf[byte_offset_to_next_entry..], object_hash);
+                    let mut iter = TreeRefIter::from_bytes(&buf[byte_offset_to_next_entry..], object_hash);
                     delegate.pop_back_tracked_path_and_set_current();
                     while let Some(entry) = iter.next() {
                         let entry = entry.or_raise(|| corruption("A tree could not be decoded during traversal"))?;

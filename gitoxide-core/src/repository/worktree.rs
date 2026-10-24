@@ -14,11 +14,14 @@ pub struct AddOptions {
     pub new_branch: Option<BString>,
     pub commit_ish: Option<BString>,
     pub detach: bool,
+    pub reset_branch: Option<BString>,
+    pub lock: bool,
+    pub no_checkout: bool,
     pub format: OutputFormat,
 }
 
 pub fn add<P>(
-    mut repo: gix::Repository,
+    repo: gix::Repository,
     destination: &Path,
     out: &mut dyn std::io::Write,
     progress: P,
@@ -29,62 +32,25 @@ where
     P: NestedProgress,
     P::SubProgress: NestedProgress + 'static,
 {
-    use gix::{refs::transaction::PreviousValue, worktree::add::Head};
-
     if options.format != OutputFormat::Human {
         bail!(gix::error::unsupported("JSON output isn't implemented yet"));
     }
-    repo.clear_namespace();
-    let branch = if let Some(name) = &options.new_branch {
-        Some(local_branch_name(name.as_bstr())?)
-    } else if options.detach {
-        None
-    } else if let Some(spec) = &options.commit_ish {
-        local_branch_name(spec.as_bstr()).ok()
-    } else {
-        Some(local_branch_name(gix::path::os_str_into_bstr(
-            destination
-                .file_name()
-                .ok_or_raise(|| gix::error::validation("The destination needs a directory name"))?,
-        )?)?)
-    };
-    let head = match branch {
-        Some(name) if options.new_branch.is_none() && repo.try_find_reference(name.as_ref())?.is_some() => {
-            Head::Attached(name)
-        }
-        branch => {
-            let start_point = options
-                .commit_ish
-                .as_ref()
-                .map_or(b"HEAD".as_bstr(), |spec| spec.as_bstr());
-            let commit_id = repo.rev_parse_single(start_point)?.object()?.peel_to_commit()?.id;
-            match branch.filter(|_| options.new_branch.is_some() || options.commit_ish.is_none()) {
-                Some(name) => {
-                    let mut reflog_message: BString = "branch: Created from ".into();
-                    reflog_message.extend_from_slice(start_point);
-                    // Git also retains this branch if subsequent worktree setup fails.
-                    repo.reference(name.clone(), commit_id, PreviousValue::MustNotExist, reflog_message)?;
-                    Head::Attached(name)
-                }
-                None => Head::Detached(commit_id),
-            }
-        }
-    };
-    let (created, outcome) = repo.add_worktree(destination, head, progress, should_interrupt)?;
-    if let Some(error) = outcome.errors.into_iter().next() {
-        return Err(error.error).or_raise(|| message!("Worktree checkout failed at {:?}", error.path));
-    }
-    if let Some(collision) = outcome.collisions.into_iter().next() {
-        return Err(std::io::Error::from(collision.error_kind))
-            .or_raise(|| message!("Worktree checkout collided at {:?}", collision.path).conflict());
-    }
-    if !outcome.delayed_paths_unprocessed.is_empty() || !outcome.delayed_paths_unknown.is_empty() {
-        bail!(
-            "Checkout filters left unprocessed paths {:?} and returned unexpected paths {:?}",
-            outcome.delayed_paths_unprocessed,
-            outcome.delayed_paths_unknown
-        );
-    }
+    let created = repo
+        .worktree_add_with_progress(
+            destination,
+            gix::worktree::add::Options {
+                new_branch: options.new_branch.as_ref().map(|name| name.as_bstr()),
+                reset_branch: options.reset_branch.as_ref().map(|name| name.as_bstr()),
+                start_point: options.commit_ish.as_ref().map(|name| name.as_bstr()),
+                detach: options.detach,
+                lock: options.lock,
+                no_checkout: options.no_checkout,
+                ..Default::default()
+            },
+            progress,
+            should_interrupt,
+        )?
+        .into_repo()?;
     let info = create_worktree_info(
         &created,
         gix::path::realpath(
@@ -95,16 +61,6 @@ where
     )?;
     info.write(out, UnicodeWidthStr::width(info.base.as_str())).or_error()?;
     Ok(())
-}
-
-fn local_branch_name(name: &BStr) -> Result<gix::refs::FullName> {
-    if name.starts_with(b"-") {
-        bail!(gix::error::validation("Branch names must not start with '-'"));
-    }
-    let mut full_name: BString = "refs/heads/".into();
-    full_name.extend_from_slice(name);
-    gix::validate::reference::branch_name(full_name.as_bstr()).or_error()?;
-    gix::refs::FullName::try_from(full_name).or_error()
 }
 
 pub fn remove<P>(repo: gix::Repository, worktree: &Path, force: u8, progress: P, format: OutputFormat) -> Result<()>
@@ -212,4 +168,140 @@ fn create_inaccessible_worktree_info(repo: &gix::Repository, base: std::path::Pa
         head: repo.object_hash().null().attach(repo).shorten_or_id().to_string(),
         branch: "<unknown>".to_string(),
     }
+}
+
+/// Options for locking a worktree.
+pub struct LockOptions {
+    /// An optional reason for locking.
+    pub reason: Option<String>,
+}
+
+/// Lock a worktree by its id.
+pub fn lock(
+    repo: gix::Repository,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+    id: &BStr,
+    opts: LockOptions,
+) -> Result<()> {
+    use gix::bstr::ByteSlice;
+
+    let reason_bytes;
+    let options = gix::worktree::lock::Options {
+        reason: match &opts.reason {
+            Some(r) => {
+                reason_bytes = r.as_bytes();
+                Some(reason_bytes.as_bstr())
+            }
+            None => None,
+        },
+    };
+
+    repo.worktree_lock(id, options).or_error()?;
+
+    if let Some(reason) = &opts.reason {
+        writeln!(err, "Locked worktree '{id}' with reason: {reason}").or_error()?;
+    } else {
+        writeln!(err, "Locked worktree '{id}'").or_error()?;
+    }
+    let _ = out;
+    Ok(())
+}
+
+/// Unlock a worktree by its id.
+pub fn unlock(
+    repo: gix::Repository,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+    id: &BStr,
+) -> Result<()> {
+    repo.worktree_unlock(id).or_error()?;
+
+    writeln!(err, "Unlocked worktree '{id}'").or_error()?;
+    let _ = out;
+    Ok(())
+}
+
+/// Options for pruning worktrees.
+pub struct PruneOptions {
+    /// Only report what would be pruned, don't actually delete.
+    pub dry_run: bool,
+}
+
+/// Prune stale worktree entries.
+pub fn prune(
+    repo: gix::Repository,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+    opts: PruneOptions,
+) -> Result<()> {
+    let options = gix::worktree::prune::Options { dry_run: opts.dry_run };
+
+    let pruned = repo.worktree_prune(options).or_error()?;
+
+    if pruned.is_empty() {
+        writeln!(err, "Nothing to prune").or_error()?;
+    } else {
+        for entry in &pruned {
+            if opts.dry_run {
+                writeln!(out, "Would prune '{}': {}", entry.id, entry.reason).or_error()?;
+            } else {
+                writeln!(out, "Pruned '{}': {}", entry.id, entry.reason).or_error()?;
+            }
+        }
+        if opts.dry_run {
+            writeln!(err, "Would prune {} worktree(s)", pruned.len()).or_error()?;
+        } else {
+            writeln!(err, "Pruned {} worktree(s)", pruned.len()).or_error()?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Options for moving a worktree.
+pub struct MoveOptions {
+    /// Force level for moving:
+    /// - 0: Fail if locked
+    /// - 2: Allow moving locked worktrees
+    pub force: u8,
+}
+
+/// Move a worktree to a new location.
+pub fn move_worktree(
+    repo: gix::Repository,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+    id: &BStr,
+    new_path: std::path::PathBuf,
+    opts: MoveOptions,
+) -> Result<()> {
+    let options = gix::worktree::r#move::Options { force: opts.force };
+
+    repo.worktree_move_opts(id, &new_path, options).or_error()?;
+
+    writeln!(err, "Moved worktree '{}' to '{}'", id, new_path.display()).or_error()?;
+    let _ = out;
+    Ok(())
+}
+
+/// Repair worktree links.
+pub fn repair(
+    repo: gix::Repository,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+    paths: Vec<std::path::PathBuf>,
+) -> Result<()> {
+    let repairs = repo.worktree_repair(&paths).or_error()?;
+
+    if repairs.is_empty() {
+        writeln!(err, "Nothing to repair").or_error()?;
+    } else {
+        for repair in &repairs {
+            writeln!(out, "Repaired '{}': {}", repair.id, repair.kind).or_error()?;
+        }
+        writeln!(err, "Repaired {} worktree(s)", repairs.len()).or_error()?;
+    }
+
+    Ok(())
 }

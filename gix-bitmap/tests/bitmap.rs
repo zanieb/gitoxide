@@ -9,17 +9,17 @@ mod fuzzed {
     }
 
     #[test]
-    fn runaway_run_length_is_rejected() -> gix_testtools::TestResult {
-        let (bitmap, rest) = gix_bitmap::ewah::decode(include_bytes!(
+    fn runaway_run_length_is_rejected() {
+        let err = gix_bitmap::ewah::decode(include_bytes!(
             "../fuzz/artifacts/ewah/slow-unit-ac817962d1a6c123d4d1f73860f5b779423ed171"
-        ))?;
+        ))
+        .unwrap_err();
 
         assert!(
             err.to_string()
                 .contains("running length word offset outside word buffer"),
             "{err}"
         );
-        Ok(())
     }
 
     #[test]
@@ -39,12 +39,9 @@ mod fuzzed {
 
         assert!(rest.is_empty(), "fixture should be fully consumed");
         assert_eq!(
-            bitmap.for_each_set_bit(|idx| {
-                actual.push(idx);
-                Some(())
-            }),
-            Some(()),
-            "set bits outside the declared bit length must be ignored"
+            bitmap.for_each_set_bit(|_| Some(())),
+            None,
+            "set bits outside the declared bit length must be rejected"
         );
         Ok(())
     }

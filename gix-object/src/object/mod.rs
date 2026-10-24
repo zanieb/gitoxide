@@ -207,20 +207,11 @@ impl<'a> ObjectRef<'a> {
     /// Deserialize an object of `kind` from the given `data`, using `object_hash`.
     pub fn from_bytes(data: &'a [u8], kind: Kind, hash_kind: gix_hash::Kind) -> Result<ObjectRef<'a>> {
         Ok(match kind {
-            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes_with_hash(data, object_hash)?),
+            Kind::Tree => ObjectRef::Tree(TreeRef::from_bytes(data, hash_kind)?),
             Kind::Blob => ObjectRef::Blob(BlobRef { data }),
-            Kind::Commit => ObjectRef::Commit(CommitRef::from_bytes(data, object_hash)?),
-            Kind::Tag => ObjectRef::Tag(TagRef::from_bytes(data, object_hash)?),
+            Kind::Commit => ObjectRef::Commit(CommitRef::from_bytes(data, hash_kind)?),
+            Kind::Tag => ObjectRef::Tag(TagRef::from_bytes(data, hash_kind)?),
         })
-    }
-
-    /// Deserialize an object of `kind` from the given `data`, using `object_hash` for embedded object ids.
-    pub fn from_bytes_with_hash(
-        kind: Kind,
-        data: &'a [u8],
-        object_hash: gix_hash::Kind,
-    ) -> Result<ObjectRef<'a>, crate::decode::Error> {
-        Self::from_bytes(data, kind, object_hash)
     }
 
     /// Convert the immutable object into a mutable version, consuming the source in the process.

@@ -96,13 +96,15 @@ pub fn update(
     _progress: impl gix::NestedProgress + 'static,
     format: OutputFormat,
     options: UpdateOptions,
-) -> anyhow::Result<()> {
+) -> Result<()> {
+    use gix::bstr::ByteSlice;
+
     if format != OutputFormat::Human {
         bail!("Only human output is supported for now")
     }
 
     let Some(submodules) = repo.submodules()? else {
-        writeln!(out, "No submodules configured")?;
+        writeln!(out, "No submodules configured").or_error()?;
         return Ok(());
     };
 
@@ -112,7 +114,7 @@ pub fn update(
 
     for sm in submodules {
         let name = sm.name().to_owned();
-        let path = sm.path()?.into_owned();
+        let path = sm.path()?;
         match sm.update_submodule(gix::progress::Discard, &should_interrupt, &update_opts) {
             Ok(Some(outcome)) => {
                 let action = if outcome.freshly_cloned {
@@ -120,13 +122,13 @@ pub fn update(
                 } else {
                     "checked out"
                 };
-                writeln!(out, "Submodule path '{path}': {action} '{}'", outcome.target_commit)?;
+                writeln!(out, "Submodule path '{path}': {action} '{}'", outcome.target_commit).or_error()?;
             }
             Ok(None) => {
                 // Submodule was skipped (not initialized, no index entry, etc.)
             }
             Err(err) => {
-                writeln!(out, "warning: failed to update submodule '{name}': {err}")?;
+                writeln!(out, "warning: failed to update submodule '{name}': {err}").or_error()?;
                 failures.push(name.to_str_lossy().into_owned());
             }
         }

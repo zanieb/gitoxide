@@ -40,12 +40,3 @@ pub enum Error {
     #[error("Could not generate pack data for push")]
     PackGeneration(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
-
-impl gix_protocol::transport::IsSpuriousError for Error {
-    fn is_spurious(&self) -> bool {
-        match self {
-            Error::Protocol(err) => err.is_spurious(),
-            _ => false,
-        }
-    }
-}

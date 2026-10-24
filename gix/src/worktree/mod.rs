@@ -149,10 +149,6 @@ impl crate::Worktree<'_> {
 pub mod proxy;
 
 ///
-#[cfg(all(feature = "worktree-mutation", feature = "status"))]
-pub mod remove;
-
-///
 pub mod lock;
 
 ///
@@ -164,10 +160,6 @@ pub mod r#move;
 
 /// Repair worktree links.
 pub mod repair;
-
-///
-#[cfg(all(feature = "worktree-mutation", feature = "revision"))]
-pub mod add;
 
 ///
 #[cfg(feature = "index")]

@@ -28,8 +28,19 @@ impl<'repo> Pathspec<'repo> {
         let defaults = repo.pathspec_defaults_inherit_ignore_case(inherit_ignore_case)?;
         let patterns = patterns
             .into_iter()
-            .map(move |p| parse(p.as_ref(), defaults))
+            .map(move |p| p.try_into_pathspec(defaults))
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        Self::from_patterns(repo, empty_patterns_match_prefix, patterns, make_attributes)
+    }
+
+    /// Build a pathspec from parsed patterns without applying parsing defaults.
+    pub fn from_patterns(
+        repo: &'repo Repository,
+        empty_patterns_match_prefix: bool,
+        patterns: impl IntoIterator<Item = gix_pathspec::Pattern>,
+        make_attributes: impl FnOnce() -> Result<gix_worktree::Stack>,
+    ) -> Result<Self> {
+        let patterns: Vec<_> = patterns.into_iter().collect();
         let needs_cache = patterns.iter().any(|p| !p.attributes.is_empty());
         let prefix = if patterns.is_empty() && !empty_patterns_match_prefix {
             None

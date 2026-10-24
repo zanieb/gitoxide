@@ -12,6 +12,8 @@ pub struct Options<'a> {
 #[allow(missing_docs)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Lookup(#[from] gix_error::Error),
     #[error("Worktree '{id}' was not found")]
     NotFound { id: BString },
     #[error("Cannot lock the main worktree")]
@@ -27,6 +29,8 @@ pub enum Error {
 #[allow(missing_docs)]
 #[non_exhaustive]
 pub enum UnlockError {
+    #[error(transparent)]
+    Lookup(#[from] gix_error::Error),
     #[error("Worktree '{id}' was not found")]
     NotFound { id: BString },
     #[error("Cannot unlock the main worktree")]
@@ -50,7 +54,7 @@ impl crate::Repository {
 
         // Find the worktree by id
         let proxy = self
-            .worktree_proxy_by_id(id)
+            .worktree_proxy_by_id(id)?
             .ok_or_else(|| Error::NotFound { id: id.to_owned() })?;
 
         // Verify this is not the main worktree (main worktree has no entry in worktrees/)
@@ -82,7 +86,7 @@ impl crate::Repository {
 
         // Find the worktree by id
         let proxy = self
-            .worktree_proxy_by_id(id)
+            .worktree_proxy_by_id(id)?
             .ok_or_else(|| UnlockError::NotFound { id: id.to_owned() })?;
 
         // Verify this is not the main worktree

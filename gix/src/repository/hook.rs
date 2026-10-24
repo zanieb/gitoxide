@@ -20,7 +20,6 @@ impl Repository {
             let home = crate::config::cache::access::home_dir(self.options.permissions.env);
             let ctx = crate::config::cache::interpolate_context(install_dir.as_deref(), home.as_deref());
             let resolved = path.interpolate(ctx)?;
-            let resolved = resolved.into_owned();
             if resolved.is_relative() {
                 if let Some(workdir) = self.workdir() {
                     return Ok(workdir.join(resolved));
@@ -48,10 +47,10 @@ impl Repository {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(metadata) = path.metadata() {
-                if metadata.permissions().mode() & 0o111 == 0 {
-                    return Ok(None);
-                }
+            if let Ok(metadata) = path.metadata()
+                && metadata.permissions().mode() & 0o111 == 0
+            {
+                return Ok(None);
             }
         }
 
@@ -104,7 +103,7 @@ impl Repository {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .args(args.iter().copied())
-            .into();
+            .try_into()?;
 
         // Git runs hooks with the working directory set to the worktree root (or the git
         // directory for bare repositories).  Match this behavior so that hooks relying on

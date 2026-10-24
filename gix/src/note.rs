@@ -4,6 +4,7 @@ use std::borrow::Cow;
 
 /// Low-level operations on Git notes trees.
 pub use gix_note as plumbing;
+pub use plumbing::{DEFAULT_REF, Entry, find_note, list_notes, path_from_target, target_from_path};
 
 use gix_error::{OptionExt, ResultExt, message};
 

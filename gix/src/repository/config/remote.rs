@@ -1,8 +1,10 @@
+use crate::bstr::BStr;
 use crate::{
     bstr::{BString, ByteSlice},
     config::tree::{Remote, Section},
     remote,
 };
+use std::{borrow::Cow, collections::BTreeSet};
 
 /// Query configuration related to remotes.
 impl crate::Repository {
@@ -38,14 +40,14 @@ impl crate::Repository {
     ///
     /// The group names are configuration key names and thus always valid UTF-8.
     #[doc(alias = "remotes.<group>")]
-    pub fn remote_group_names(&self) -> BTreeSet<&str> {
+    pub fn remote_group_names(&self) -> BTreeSet<String> {
         self.config
             .resolved
             .sections_by_name("remotes")
             .map(|it| {
                 let filter = self.filter_config_section();
                 it.filter(move |s| filter(s.meta()))
-                    .flat_map(|section| section.body().value_names().map(std::convert::AsRef::as_ref))
+                    .flat_map(|section| section.value_names().collect::<Vec<_>>())
                     .collect()
             })
             .unwrap_or_default()
@@ -65,7 +67,7 @@ impl crate::Repository {
                     .into_iter()
                     .flat_map(|value| {
                         value
-                            .as_ref()
+                            .as_slice()
                             .split(|b| matches!(*b, b' ' | b'\t' | b'\n'))
                             .filter(|name| !name.is_empty())
                             .map(|name| Cow::Owned(name.as_bstr().to_owned()))

@@ -182,3 +182,11 @@ fn artifact_paths(target: &str) -> Vec<PathBuf> {
     paths.sort();
     paths
 }
+
+#[test]
+fn malformed_untracked_cache_extension_does_not_panic() {
+    let (_state, _checksum) = decode_fuzzed(include_bytes!(
+        "../../fuzz/artifacts/index_file/crash-b3dc19d67c36fbc5fc4b4f5729df92911dd3a7d5"
+    ))
+    .expect("fuzzed input should decode without panicking");
+}

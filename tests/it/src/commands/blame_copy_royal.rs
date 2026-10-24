@@ -75,7 +75,6 @@ pub(super) mod function {
             &mut resource_cache,
             file.as_bstr(),
             options,
-            &std::sync::atomic::AtomicBool::new(false),
         )?;
 
         let blame_infos = outcome

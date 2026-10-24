@@ -253,6 +253,9 @@ pub fn main() -> Result<()> {
             }
             worktree::SubCommands::Add {
                 branch,
+                reset_branch,
+                lock,
+                no_checkout,
                 detach,
                 path,
                 commit_ish,
@@ -265,6 +268,9 @@ pub fn main() -> Result<()> {
                     &should_interrupt,
                     core::repository::worktree::AddOptions {
                         new_branch: branch,
+                        reset_branch,
+                        lock,
+                        no_checkout,
                         commit_ish,
                         detach,
                         format,
@@ -274,6 +280,49 @@ pub fn main() -> Result<()> {
             worktree::SubCommands::Remove { force, worktree } => {
                 prepare_and_run("worktree-remove", verbose, None, move |progress, _out, _err| {
                     core::repository::worktree::remove(repository(Mode::Lenient)?, &worktree, force, progress, format)
+                })
+            }
+            worktree::SubCommands::Lock { id, reason } => {
+                prepare_and_run("worktree-lock", verbose, None, move |_progress, out, err| {
+                    core::repository::worktree::lock(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        id.as_ref(),
+                        core::repository::worktree::LockOptions { reason },
+                    )
+                })
+            }
+            worktree::SubCommands::Unlock { id } => {
+                prepare_and_run("worktree-unlock", verbose, None, move |_progress, out, err| {
+                    core::repository::worktree::unlock(repository(Mode::Lenient)?, out, err, id.as_ref())
+                })
+            }
+            worktree::SubCommands::Prune { dry_run } => {
+                prepare_and_run("worktree-prune", verbose, None, move |_progress, out, err| {
+                    core::repository::worktree::prune(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        core::repository::worktree::PruneOptions { dry_run },
+                    )
+                })
+            }
+            worktree::SubCommands::Move { id, new_path, force } => {
+                prepare_and_run("worktree-move", verbose, None, move |_progress, out, err| {
+                    core::repository::worktree::move_worktree(
+                        repository(Mode::Lenient)?,
+                        out,
+                        err,
+                        id.as_ref(),
+                        new_path,
+                        core::repository::worktree::MoveOptions { force },
+                    )
+                })
+            }
+            worktree::SubCommands::Repair { paths } => {
+                prepare_and_run("worktree-repair", verbose, None, move |_progress, out, err| {
+                    core::repository::worktree::repair(repository(Mode::Lenient)?, out, err, paths)
                 })
             }
         },
@@ -408,6 +457,18 @@ pub fn main() -> Result<()> {
                         out,
                         format,
                         dirty_suffix.map(|suffix| suffix.unwrap_or_else(|| "dirty".to_string())),
+                    )
+                })
+            }
+            #[cfg(feature = "gitoxide-core-blocking-client")]
+            crate::plumbing::options::submodule::Subcommands::Update { init, recursive } => {
+                prepare_and_run("submodule-update", verbose, None, move |progress, out, _err| {
+                    core::repository::submodule::update(
+                        repository(Mode::Lenient)?,
+                        out,
+                        progress,
+                        format,
+                        core::repository::submodule::UpdateOptions { init, recursive },
                     )
                 })
             }
@@ -1318,22 +1379,14 @@ pub fn main() -> Result<()> {
             index::Subcommands::Add {
                 force_ignored,
                 pathspec,
-            } => prepare_and_run(
-                "index-add",
-                trace,
-                verbose,
-                progress,
-                progress_keep_open,
-                None,
-                move |_progress, out, _err| {
-                    core::repository::index::add(
-                        repository(Mode::Lenient)?,
-                        pathspec,
-                        out,
-                        core::repository::index::AddOptions { force_ignored },
-                    )
-                },
-            ),
+            } => prepare_and_run("index-add", verbose, None, move |_progress, out, _err| {
+                core::repository::index::add(
+                    repository(Mode::Lenient)?,
+                    pathspec,
+                    out,
+                    core::repository::index::AddOptions { force_ignored },
+                )
+            }),
             index::Subcommands::Entries {
                 format: entry_format,
                 no_attributes,
@@ -1394,6 +1447,7 @@ pub fn main() -> Result<()> {
                     since,
                     rewrites: Some(gix::diff::Rewrites::default()),
                     debug_track_path: false,
+                    ..Default::default()
                 },
                 out,
                 statistics.then_some(err),

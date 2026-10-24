@@ -27,7 +27,7 @@ pub enum Error {
     #[error("failed to parse object id from hex: {source}")]
     ObjectId {
         #[source]
-        source: gix_hash::decode::Error,
+        source: gix_error::Error,
     },
     #[error("unsupported bundle object format capability: {format:?}")]
     UnsupportedObjectFormat {

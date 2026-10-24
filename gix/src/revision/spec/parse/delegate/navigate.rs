@@ -131,7 +131,6 @@ impl delegate::Navigate for Delegate<'_> {
                         .ok_or_raise_erased(|| {
                             message!(
                                 "Could not find path {path:?} in tree {tree} of parent object {object}",
-                                path = path.as_ref(),
                                 object = obj.attach(repo).shorten_or_id(),
                                 tree = tree_id.attach(repo).shorten_or_id(),
                             )
@@ -143,7 +142,7 @@ impl delegate::Navigate for Delegate<'_> {
                         Ok((replace, mode)) => {
                             if !path.is_empty() {
                                 // Technically this is letting the last one win, but so be it.
-                                self.paths[self.idx] = Some((path.as_ref().to_owned(), mode));
+                                self.paths[self.idx] = Some((path.to_owned(), mode));
                             }
                             replacements.push((*obj, replace));
                         }
@@ -321,7 +320,7 @@ impl delegate::Navigate for Delegate<'_> {
                 }
 
                 self.paths[self.idx] = Some((
-                    path.as_ref().to_owned(),
+                    path.to_owned(),
                     entry
                         .mode
                         .to_tree_entry_mode()
@@ -340,7 +339,6 @@ impl delegate::Navigate for Delegate<'_> {
                 };
                 Err(message!(
                     "Path {path:?} did not exist in index at stage {desired_stage}{stage_hint}{exists}",
-                    path = path.as_ref(),
                     exists = if exists {
                         ". It exists on disk"
                     } else {

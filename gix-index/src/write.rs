@@ -68,19 +68,7 @@ pub struct Options {
     /// This value is typically controlled by `index.skipHash` and is respected when the index is written
     /// via [`File::write()`](crate::File::write()) and [`File::write_to()`](crate::File::write_to()).
     pub skip_hash: bool,
-    /// If `true`, the tree cache extension will be removed before writing to avoid writing a potentially stale
-    /// tree cache that doesn't match the current state of entries.
-    ///
-    /// Gitoxide does not yet support updating the tree cache extension after modifying entries, so writing
-    /// a stale tree cache can lead to index corruption where external git clients see incorrect status
-    /// information or create commits with unexpected contents.
-    ///
-    /// If `true`, skip writing the tree cache extension, which may be stale.
-    ///
-    /// Defaults to `false` because `write_tree_to()` updates the tree cache,
-    /// so it is generally up-to-date after normal operations.
-    /// Set to `true` only if you have reason to believe the tree cache is stale
-    /// and you want to omit it rather than write incorrect data.
+    /// Omit the tree cache when changes to the index entries have invalidated its contents.
     pub skip_stale_tree_cache: bool,
 }
 
@@ -118,9 +106,37 @@ impl State {
 
         let offset_to_entries =
             header(&mut write, version, num_entries - removed_entries).map_err(gix_hash::io::from_std_io)?;
-        let offset_to_extensions = entries(&mut write, self, offset_to_entries).map_err(gix_hash::io::from_std_io)?;
+        let offset_to_extensions =
+            entries(&mut write, self, version, offset_to_entries).map_err(gix_hash::io::from_std_io)?;
+        let effective_extensions = if skip_stale_tree_cache {
+            match extensions {
+                Extensions::All => Extensions::Given {
+                    tree_cache: false,
+                    resolve_undo: true,
+                    fs_monitor: true,
+                    untracked: true,
+                    end_of_index_entry: true,
+                },
+                Extensions::Given {
+                    resolve_undo,
+                    fs_monitor,
+                    untracked,
+                    end_of_index_entry,
+                    ..
+                } => Extensions::Given {
+                    tree_cache: false,
+                    resolve_undo,
+                    fs_monitor,
+                    untracked,
+                    end_of_index_entry,
+                },
+                Extensions::None => Extensions::None,
+            }
+        } else {
+            extensions
+        };
         let (extension_toc, out) = self
-            .write_extensions(write, offset_to_extensions, extensions)
+            .write_extensions(write, offset_to_extensions, effective_extensions)
             .map_err(gix_hash::io::from_std_io)?;
 
         if num_entries > 0
@@ -238,8 +254,10 @@ fn header<T: std::io::Write>(
 fn entries<T: std::io::Write>(
     out: &mut CountBytes<T>,
     state: &State,
+    version: Version,
     header_size: u32,
 ) -> std::result::Result<u32, std::io::Error> {
+    let mut previous_path = None;
     for entry in state.entries() {
         if entry.flags.contains(entry::Flags::REMOVE) {
             continue;

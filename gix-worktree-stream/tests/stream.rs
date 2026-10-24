@@ -61,8 +61,8 @@ mod from_tree {
 
     use gix_attributes::glob::pattern::Case;
     use gix_error::ErrorExt;
-    use gix_hash::oid;
-    use gix_object::{Data, bstr::ByteSlice, tree::EntryKind};
+    use gix_hash::{ObjectId, oid};
+    use gix_object::{Data, Kind, bstr::ByteSlice, tree::EntryKind};
     use gix_worktree::stack::state::attributes::Source;
     use std::sync::LazyLock;
 
@@ -130,11 +130,11 @@ mod from_tree {
     }
 
     impl gix_object::Find for MemoryDb {
-        fn try_find<'a>(&self, id: &oid, buffer: &'a mut Vec<u8>) -> Result<Option<Data<'a>>, gix_object::find::Error> {
+        fn try_find<'a>(&self, id: &oid, buffer: &'a mut Vec<u8>) -> Result<Option<Data<'a>>> {
             Ok(self.objects.get(id).map(|(kind, data)| {
                 buffer.clear();
                 buffer.extend_from_slice(data);
-                Data::new_with_hash(*kind, buffer, id.kind())
+                Data::new(buffer, *kind, id.kind())
             }))
         }
     }
@@ -158,7 +158,7 @@ mod from_tree {
         let mut stream = gix_worktree_stream::from_tree(
             tree_id,
             db,
-            gix_filter::Pipeline::new(Default::default(), Default::default()),
+            gix_filter::Pipeline::new(Default::default(), tree_id.kind(), Default::default()),
             |_, _, _| Ok::<_, Infallible>(()),
         );
 
@@ -189,10 +189,12 @@ mod from_tree {
         tree.extend_from_slice(submodule_id.as_bytes());
         let (root, db) = MemoryDb::with_tree(object_hash, tree);
 
-        let mut stream =
-            gix_worktree_stream::from_tree(root, db, mutating_pipeline(false), |_, _, _| -> Result<_, Infallible> {
-                Ok(())
-            });
+        let mut stream = gix_worktree_stream::from_tree(
+            root,
+            db,
+            mutating_pipeline(false),
+            |_, _, _| -> std::result::Result<_, Infallible> { Ok(()) },
+        );
 
         let mut entry = stream
             .next_entry()

@@ -249,32 +249,7 @@ mod ext {
         make_obj_lookup!(find_commit, ObjectRef::Commit, Kind::Commit, CommitRef<'a>);
         make_obj_lookup!(find_tag, ObjectRef::Tag, Kind::Tag, TagRef<'a>);
         make_iter_lookup!(find_commit_iter, Kind::Commit, CommitRefIter<'a>, try_into_commit_iter);
-
-        /// Like [`find(…)`][Self::find()], but flattens the `Result<Option<_>>` into a single `Result` making a non-existing object an error
-        /// while returning a tree iterator.
-        fn find_tree_iter<'a>(
-            &self,
-            id: &gix_hash::oid,
-            buffer: &'a mut Vec<u8>,
-        ) -> Result<TreeRefIter<'a>, find::existing_iter::Error> {
-            if id == gix_hash::ObjectId::empty_tree(id.kind()) {
-                return Ok(TreeRefIter::from_bytes_with_hash(&[], id.kind()));
-            }
-            self.try_find(id, buffer)
-                .map_err(find::existing_iter::Error::Find)?
-                .ok_or_else(|| find::existing_iter::Error::NotFound {
-                    oid: id.as_ref().to_owned(),
-                })
-                .and_then(|o| {
-                    o.try_into_tree_iter_with_hash(id.kind())
-                        .ok_or_else(|| find::existing_iter::Error::ObjectKind {
-                            oid: id.as_ref().to_owned(),
-                            actual: o.kind,
-                            expected: Kind::Tree,
-                        })
-                })
-        }
-
+        make_iter_lookup!(find_tree_iter, Kind::Tree, TreeRefIter<'a>, try_into_tree_iter);
         make_iter_lookup!(find_tag_iter, Kind::Tag, TagRefIter<'a>, try_into_tag_iter);
     }
 

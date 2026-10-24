@@ -56,7 +56,7 @@ impl Repository {
             None => &default_interrupt,
         };
 
-        let outcome = gix_blame::file(
+        let outcome = gix_blame::file_with_progress(
             &self.objects,
             Start::Commit(suspect.into()),
             cache,
@@ -64,6 +64,7 @@ impl Repository {
             file_path,
             options,
             interrupt_flag,
+            None,
         )?;
 
         Ok(outcome)

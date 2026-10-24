@@ -67,7 +67,7 @@ fn with_options() -> TestResult {
 fn shallow_boundary_is_reported_without_missing_parent_error() -> crate::Result {
     let shallow_base = gix_testtools::scripted_fixture_read_only("make_shallow_repo.sh")?;
     let repo = gix::open_opts(shallow_base.join("shallow"), crate::restricted())?;
-    assert!(repo.is_shallow(), "fixture should be a shallow clone");
+    assert!(repo.is_shallow()?, "fixture should be a shallow clone");
 
     let suspect = repo.head_id()?;
     let outcome = repo.blame_file("a".into(), suspect, Default::default())?;
@@ -137,7 +137,7 @@ fn shallow_file_boundary_is_honored_even_if_parent_object_exists() -> crate::Res
     );
 
     let repo = gix::open_opts(worktree, crate::restricted())?;
-    assert!(repo.is_shallow(), "fixture should be explicitly shallow");
+    assert!(repo.is_shallow()?, "fixture should be explicitly shallow");
 
     let suspect = repo.head_id()?;
     let outcome = repo.blame_file("a".into(), suspect, Default::default())?;
@@ -158,8 +158,8 @@ fn shallow_file_boundary_is_honored_even_if_parent_object_exists() -> crate::Res
     Ok(())
 }
 
-fn run_git(dir: &Path, args: &[&str]) -> crate::Result<String> {
-    let output = Command::new("git").args(args).current_dir(dir).output()?;
+fn run_git(dir: &std::path::Path, args: &[&str]) -> crate::Result<String> {
+    let output = std::process::Command::new("git").args(args).current_dir(dir).output()?;
     assert!(
         output.status.success(),
         "git {} failed\nstdout: {}\nstderr: {}",

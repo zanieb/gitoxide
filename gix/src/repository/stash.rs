@@ -29,7 +29,9 @@ fn validate_save_path_within_worktree(path: &[u8]) -> Result<(), SaveError> {
 fn path_has_worktree_escape_component(path: &[u8]) -> bool {
     use std::path::Component;
 
-    let os_path = gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(path));
+    let Ok(os_path) = gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(path)) else {
+        return true;
+    };
     os_path.components().any(|component| {
         matches!(
             component,
@@ -62,7 +64,7 @@ pub struct StashEntry<'repo> {
 #[allow(missing_docs)]
 pub enum ListError {
     #[error(transparent)]
-    FindReference(#[from] crate::reference::find::Error),
+    FindReference(#[from] gix_error::Error),
     #[error("Could not iterate reflog")]
     ReflogIter(#[from] std::io::Error),
 }
@@ -100,6 +102,8 @@ pub struct StashApplyOptions {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum SaveError {
+    #[error(transparent)]
+    Operation(#[from] gix_error::Error),
     #[error("Nothing to stash: the working tree is clean")]
     NothingToStash,
     #[error("Cannot stash in a bare repository")]
@@ -107,35 +111,35 @@ pub enum SaveError {
     #[error("No HEAD commit to base stash on (unborn branch)")]
     NoHeadCommit,
     #[error(transparent)]
-    FindHead(#[from] crate::reference::head_id::Error),
+    FindHead(gix_error::Error),
     #[error(transparent)]
-    FindObject(#[from] crate::object::find::existing::Error),
+    FindObject(gix_error::Error),
     #[error(transparent)]
-    DecodeCommit(#[from] gix_object::decode::Error),
+    DecodeCommit(gix_error::Error),
     #[error(transparent)]
-    OpenIndex(#[from] crate::worktree::open_index::Error),
+    OpenIndex(gix_error::Error),
     #[error("Failed to write tree from index")]
     WriteTree(#[from] gix_index::write_tree::Error),
     #[error(transparent)]
-    WriteObject(#[from] crate::object::write::Error),
+    WriteObject(gix_error::Error),
     #[error(transparent)]
-    EditReference(#[from] crate::reference::edit::Error),
+    EditReference(gix_error::Error),
     #[error("Committer identity is not configured")]
     CommitterMissing,
     #[error(transparent)]
-    ParseTime(#[from] crate::config::time::Error),
+    ParseTime(gix_error::Error),
     #[error(transparent)]
-    FindHeadExisting(#[from] crate::reference::find::existing::Error),
+    FindHeadExisting(gix_error::Error),
     #[error("Failed to reset index/worktree after saving stash")]
     Reset(#[from] super::reset::Error),
     #[error("Failed to read worktree file")]
     ReadWorktreeFile(std::io::Error),
     #[error(transparent)]
-    IndexFromTree(#[from] crate::repository::index_from_tree::Error),
+    IndexFromTree(gix_error::Error),
     #[error(transparent)]
-    HashObject(#[from] gix_hash::hasher::Error),
+    HashObject(gix_error::Error),
     #[error("Failed to write index")]
-    WriteIndex(#[from] gix_index::file::write::Error),
+    WriteIndex(gix_error::Error),
     #[error("Failed to remove untracked file from worktree")]
     RemoveFile(std::io::Error),
     #[error("Path traversal rejected: entry path '{path}' escapes the worktree")]
@@ -146,6 +150,8 @@ pub enum SaveError {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum ApplyError {
+    #[error(transparent)]
+    Operation(#[from] gix_error::Error),
     #[error("No stash entries found")]
     NoStash,
     #[error("Stash index {index} is out of range (only {count} entries)")]
@@ -153,27 +159,27 @@ pub enum ApplyError {
     #[error(transparent)]
     List(#[from] ListError),
     #[error(transparent)]
-    FindObject(#[from] crate::object::find::existing::Error),
+    FindObject(gix_error::Error),
     #[error(transparent)]
-    DecodeCommit(#[from] gix_object::decode::Error),
+    DecodeCommit(gix_error::Error),
     #[error(transparent)]
-    OpenIndex(#[from] crate::worktree::open_index::Error),
+    OpenIndex(gix_error::Error),
     #[error(transparent)]
-    IndexFromTree(#[from] crate::repository::index_from_tree::Error),
+    IndexFromTree(gix_error::Error),
     #[error(transparent)]
-    WriteIndex(#[from] gix_index::file::write::Error),
+    WriteIndex(gix_error::Error),
     #[error("Cannot apply stash in a bare repository")]
     BareRepository,
     #[error("Your local changes to the following files would be overwritten by stash apply: {paths}")]
     Conflict { paths: BString },
     #[error(transparent)]
-    CheckoutOptions(#[from] crate::config::checkout_options::Error),
+    CheckoutOptions(gix_error::Error),
     #[error(transparent)]
-    Checkout(#[from] gix_worktree_state::checkout::Error),
+    Checkout(gix_error::Error),
     #[error("Failed to convert object database to Arc for thread-safe access")]
     ObjectsToArc(#[from] std::io::Error),
     #[error(transparent)]
-    HashObject(#[from] gix_hash::hasher::Error),
+    HashObject(gix_error::Error),
     #[error("Path traversal rejected: entry path '{path}' contains '..' components")]
     PathTraversal { path: BString },
 }
@@ -192,6 +198,8 @@ pub enum PopError {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum DropError {
+    #[error(transparent)]
+    Operation(#[from] gix_error::Error),
     #[error("No stash entries found")]
     NoStash,
     #[error("Stash index {index} is out of range (only {count} entries)")]
@@ -199,11 +207,11 @@ pub enum DropError {
     #[error(transparent)]
     List(#[from] ListError),
     #[error(transparent)]
-    EditReference(#[from] crate::reference::edit::Error),
+    EditReference(gix_error::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("Could not acquire lock for reflog or ref update")]
-    LockAcquire(#[from] gix_lock::acquire::Error),
+    LockAcquire(gix_error::Error),
     #[error("Could not commit lock file")]
     LockCommit(String),
     #[error("Could not parse refs/stash reflog")]
@@ -213,6 +221,7 @@ pub enum DropError {
 impl From<super::worktree_ops::CheckoutError> for ApplyError {
     fn from(err: super::worktree_ops::CheckoutError) -> Self {
         match err {
+            super::worktree_ops::CheckoutError::Operation(e) => Self::Operation(e),
             super::worktree_ops::CheckoutError::CheckoutOptions(e) => ApplyError::CheckoutOptions(e),
             super::worktree_ops::CheckoutError::Checkout(e) => ApplyError::Checkout(e),
             super::worktree_ops::CheckoutError::ObjectsToArc(e) => ApplyError::ObjectsToArc(e),
@@ -223,6 +232,7 @@ impl From<super::worktree_ops::CheckoutError> for ApplyError {
 impl From<super::worktree_ops::CheckoutError> for SaveError {
     fn from(err: super::worktree_ops::CheckoutError) -> Self {
         match err {
+            super::worktree_ops::CheckoutError::Operation(e) => Self::Operation(e),
             super::worktree_ops::CheckoutError::CheckoutOptions(e) => {
                 SaveError::Reset(super::reset::Error::CheckoutOptions(e))
             }
@@ -484,7 +494,7 @@ impl Repository {
             for (path, _, _) in &untracked_files {
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
-                )));
+                ))?);
                 if file_path.symlink_metadata().is_ok() {
                     std::fs::remove_file(&file_path).map_err(SaveError::RemoveFile)?;
                     if let Some(parent) = file_path.parent() {
@@ -697,35 +707,33 @@ impl Repository {
             let path_bstr = path.as_bstr();
             if let Some(current_entry) = current_index.entry_by_path_and_stage(path_bstr, unconflicted) {
                 // Check index-level conflict: current index differs from stash parent.
-                if let Some(parent_entry) = parent_index.entry_by_path_and_stage(path_bstr, unconflicted) {
-                    if current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode {
-                        conflicts.push(BString::from(path.as_slice()));
-                        continue;
-                    }
+                if let Some(parent_entry) = parent_index.entry_by_path_and_stage(path_bstr, unconflicted)
+                    && (current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode)
+                {
+                    conflicts.push(BString::from(path.as_slice()));
+                    continue;
                 }
 
                 // Check worktree-level conflict: file on disk differs from current index.
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
-                )));
-                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path) {
-                    if let Ok(worktree_oid) =
+                ))?);
+                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path)
+                    && let Ok(worktree_oid) =
                         gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &entry_data.content)
-                    {
-                        if worktree_oid != current_entry.id || entry_data.mode != current_entry.mode {
-                            if let Some(merged) = self.try_auto_merge_stash_worktree_file(
-                                path,
-                                parent_index
-                                    .entry_by_path_and_stage(path_bstr, unconflicted)
-                                    .map(|e| e.id),
-                                *stash_id,
-                                &entry_data.content,
-                            )? {
-                                merged_worktree_files.push((path.clone(), merged));
-                            } else {
-                                conflicts.push(BString::from(path.as_slice()));
-                            }
-                        }
+                    && (worktree_oid != current_entry.id || entry_data.mode != current_entry.mode)
+                {
+                    if let Some(merged) = self.try_auto_merge_stash_worktree_file(
+                        path,
+                        parent_index
+                            .entry_by_path_and_stage(path_bstr, unconflicted)
+                            .map(|e| e.id),
+                        *stash_id,
+                        &entry_data.content,
+                    )? {
+                        merged_worktree_files.push((path.clone(), merged));
+                    } else {
+                        conflicts.push(BString::from(path.as_slice()));
                     }
                 }
             } else {
@@ -734,15 +742,13 @@ impl Repository {
                 // unless the worktree content matches what the stash would write.
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
-                )));
-                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path) {
-                    if let Ok(worktree_oid) =
+                ))?);
+                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path)
+                    && let Ok(worktree_oid) =
                         gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &entry_data.content)
-                    {
-                        if worktree_oid != *stash_id || entry_data.mode != *mode {
-                            conflicts.push(BString::from(path.as_slice()));
-                        }
-                    }
+                    && (worktree_oid != *stash_id || entry_data.mode != *mode)
+                {
+                    conflicts.push(BString::from(path.as_slice()));
                 }
             }
         }
@@ -750,25 +756,23 @@ impl Repository {
             use crate::bstr::ByteSlice;
             let path_bstr = path.as_bstr();
             if let Some(current_entry) = current_index.entry_by_path_and_stage(path_bstr, unconflicted) {
-                if let Some(parent_entry) = parent_index.entry_by_path_and_stage(path_bstr, unconflicted) {
-                    if current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode {
-                        conflicts.push(BString::from(path.as_slice()));
-                        continue;
-                    }
+                if let Some(parent_entry) = parent_index.entry_by_path_and_stage(path_bstr, unconflicted)
+                    && (current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode)
+                {
+                    conflicts.push(BString::from(path.as_slice()));
+                    continue;
                 }
 
                 // Check worktree-level conflict for deleted paths too.
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
-                )));
-                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path) {
-                    if let Ok(worktree_oid) =
+                ))?);
+                if let Ok(Some(entry_data)) = worktree_entry_data(&file_path)
+                    && let Ok(worktree_oid) =
                         gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, &entry_data.content)
-                    {
-                        if worktree_oid != current_entry.id || entry_data.mode != current_entry.mode {
-                            conflicts.push(BString::from(path.as_slice()));
-                        }
-                    }
+                    && (worktree_oid != current_entry.id || entry_data.mode != current_entry.mode)
+                {
+                    conflicts.push(BString::from(path.as_slice()));
                 }
             }
         }
@@ -801,10 +805,9 @@ impl Repository {
                 if let (Some(current_entry), Some(parent_entry)) = (
                     current_index.entry_by_path_and_stage(path_bstr, unconflicted),
                     parent_index.entry_by_path_and_stage(path_bstr, unconflicted),
-                ) {
-                    if current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode {
-                        conflicts.push(BString::from(path.as_slice()));
-                    }
+                ) && (current_entry.id != parent_entry.id || current_entry.mode != parent_entry.mode)
+                {
+                    conflicts.push(BString::from(path.as_slice()));
                 }
             }
         }
@@ -814,10 +817,9 @@ impl Repository {
         for (path, blob_id, mode) in &untracked_files {
             if let Some(matches_stashed_entry) =
                 self.untracked_worktree_entry_matches(&workdir, path, *blob_id, *mode)?
+                && !matches_stashed_entry
             {
-                if !matches_stashed_entry {
-                    conflicts.push(BString::from(path.as_slice()));
-                }
+                conflicts.push(BString::from(path.as_slice()));
             }
         }
 
@@ -862,7 +864,7 @@ impl Repository {
             validate_path_within_worktree(path)?;
             let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                 path.as_slice(),
-            )));
+            ))?);
             if let Some(parent) = file_path.parent() {
                 std::fs::create_dir_all(parent).map_err(ApplyError::ObjectsToArc)?;
             }
@@ -881,7 +883,7 @@ impl Repository {
             validate_path_within_worktree(path)?;
             let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                 path.as_slice(),
-            )));
+            ))?);
             // Create parent directories if needed.
             if let Some(parent) = file_path.parent() {
                 std::fs::create_dir_all(parent).map_err(ApplyError::ObjectsToArc)?;
@@ -893,7 +895,7 @@ impl Repository {
                     gix_fs::symlink::remove(&file_path).map_err(ApplyError::ObjectsToArc)?;
                 }
                 gix_fs::symlink::create(
-                    gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(blob_data)).as_ref(),
+                    gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(blob_data))?.as_ref(),
                     &file_path,
                 )
                 .map_err(ApplyError::ObjectsToArc)?;
@@ -1015,8 +1017,15 @@ impl Repository {
             // remove an arbitrary reflog entry yet. The visible ref target was
             // updated through edit_reference() above.
             use std::io::Write;
-            let mut reflog_lock =
-                gix_lock::File::acquire_to_update_resource(&reflog_path, gix_lock::acquire::Fail::Immediately, None)?;
+            let mut reflog_lock = gix_lock::File::acquire_to_update_resource(
+                &reflog_path,
+                gix_lock::acquire::Fail::Immediately,
+                None,
+                crate::config::file_mut::shared_repository_permissions(
+                    &self.config.resolved,
+                    self.filter_config_section(),
+                )?,
+            )?;
             reflog_lock.write_all(&new_content)?;
             reflog_lock
                 .commit()
@@ -1158,7 +1167,7 @@ impl Repository {
             let path = entry.path();
             let relative = path.strip_prefix(root).unwrap_or(&path);
             let relative_bytes: Vec<u8> =
-                gix_path::to_unix_separators_on_windows(gix_path::into_bstr(relative.to_owned()))
+                gix_path::to_unix_separators_on_windows(gix_path::into_bstr(relative.to_owned())?)
                     .into_owned()
                     .into();
 
@@ -1178,12 +1187,11 @@ impl Repository {
                     None
                 };
                 if let Ok(platform) = stack.at_path(
-                    gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(relative_bytes.as_slice())),
+                    gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(relative_bytes.as_slice()))?,
                     mode,
-                ) {
-                    if platform.is_excluded() {
-                        skip_flags[i] = true;
-                    }
+                ) && platform.is_excluded()
+                {
+                    skip_flags[i] = true;
                 }
             }
             relative_paths.push(relative_bytes);
@@ -1210,7 +1218,7 @@ impl Repository {
                 // Write blob to ODB immediately to avoid holding file contents in memory.
                 let (content, mode) = if file_type.is_symlink() {
                     (
-                        gix_path::into_bstr(std::fs::read_link(&path).map_err(SaveError::ReadWorktreeFile)?)
+                        gix_path::into_bstr(std::fs::read_link(&path).map_err(SaveError::ReadWorktreeFile)?)?
                             .into_owned()
                             .into(),
                         gix_index::entry::Mode::SYMLINK,
@@ -1296,7 +1304,7 @@ impl Repository {
         blob_id: ObjectId,
         mode: gix_index::entry::Mode,
     ) -> Result<Option<bool>, ApplyError> {
-        let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(path)));
+        let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(path))?);
         let meta = match file_path.symlink_metadata() {
             Ok(meta) => meta,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1307,7 +1315,7 @@ impl Repository {
             if !meta.file_type().is_symlink() {
                 return Ok(Some(false));
             }
-            gix_path::into_bstr(std::fs::read_link(&file_path).map_err(ApplyError::ObjectsToArc)?)
+            gix_path::into_bstr(std::fs::read_link(&file_path).map_err(ApplyError::ObjectsToArc)?)?
                 .into_owned()
                 .into()
         } else {
@@ -1358,7 +1366,7 @@ impl Repository {
             }
 
             let path = entry.path(index);
-            let file_path = workdir.join(gix_path::from_bstr(path));
+            let file_path = workdir.join(gix_path::from_bstr(path)?);
 
             // Use stat-based change detection: compare filesystem metadata against the
             // index entry's stored stat. Only read the file if stat indicates a change.
@@ -1433,7 +1441,7 @@ impl Repository {
                 }
                 let file_path = workdir.join(gix_path::from_bstr(<&[u8] as Into<&crate::bstr::BStr>>::into(
                     path.as_slice(),
-                )));
+                ))?);
                 let Some(entry_data) = worktree_entry_data(&file_path).map_err(SaveError::ReadWorktreeFile)? else {
                     continue;
                 };
@@ -1527,7 +1535,10 @@ fn worktree_entry_data_with_mode(
     mode: gix_index::entry::Mode,
 ) -> std::io::Result<Option<WorktreeEntryData>> {
     let content = if mode == gix_index::entry::Mode::SYMLINK {
-        gix_path::into_bstr(std::fs::read_link(path)?).into_owned().into()
+        gix_path::into_bstr(std::fs::read_link(path)?)
+            .map_err(std::io::Error::other)?
+            .into_owned()
+            .into()
     } else {
         std::fs::read(path)?
     };

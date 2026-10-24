@@ -1,5 +1,6 @@
 use gix::{
     Result,
+    bstr::BString,
     error::{ResultExt, bail, message},
 };
 use std::{ffi::OsString, path::PathBuf};
@@ -99,3 +100,33 @@ pub fn from_list(
 
 pub mod entries;
 pub use entries::function::entries;
+
+#[derive(Default)]
+pub struct AddOptions {
+    pub force_ignored: bool,
+}
+
+pub fn add(
+    repo: gix::Repository,
+    pathspecs: Vec<BString>,
+    mut out: impl std::io::Write,
+    opts: AddOptions,
+) -> Result<()> {
+    let outcome = repo
+        .add_to_index(
+            pathspecs,
+            gix::repository::add_to_index::Options {
+                force_ignored: opts.force_ignored,
+            },
+        )
+        .or_error()?;
+    writeln!(
+        out,
+        "added: {}, removed: {}, ignored: {}",
+        outcome.added_entries,
+        outcome.removed_entries,
+        outcome.ignored_entries.len()
+    )
+    .or_error()?;
+    Ok(())
+}

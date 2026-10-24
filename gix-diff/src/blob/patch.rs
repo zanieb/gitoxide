@@ -329,10 +329,11 @@ impl ConsumeHunk for PatchHunkWriter<'_> {
         write_hunk_range(self.out, after_start, header.after_hunk_len, '+')?;
         write!(self.out, " @@")?;
 
-        if self.find_function_names && header.before_hunk_start > 1 {
-            if let Some(name) = find_function_line(&self.old_lines, header.before_hunk_start) {
-                write!(self.out, " {name}")?;
-            }
+        if self.find_function_names
+            && header.before_hunk_start > 1
+            && let Some(name) = find_function_line(&self.old_lines, header.before_hunk_start)
+        {
+            write!(self.out, " {name}")?;
         }
         writeln!(self.out)?;
 

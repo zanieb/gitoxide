@@ -32,6 +32,28 @@ impl Display for Color {
     }
 }
 
+impl Color {
+    /// Return the ANSI terminal escape sequence represented by this color value.
+    ///
+    /// If the value does not map to any terminal code, such as `normal`, an empty string is returned.
+    pub fn to_ansi_sequence(&self) -> String {
+        let mut codes = Vec::new();
+        self.attributes.push_ansi_codes(&mut codes);
+        if let Some(fg) = self.foreground {
+            fg.push_ansi_codes(false, &mut codes);
+        }
+        if let Some(bg) = self.background {
+            bg.push_ansi_codes(true, &mut codes);
+        }
+
+        if codes.is_empty() {
+            String::new()
+        } else {
+            format!("\x1b[{}m", codes.join(";"))
+        }
+    }
+}
+
 fn color_err(input: impl Into<BString>) -> Message {
     validation("Colors are specific color values and their attributes, like 'brightred', or 'blue'")
         .with_input(gix_error::MetadataValue::Bytes(input.into().into()))
@@ -304,10 +326,6 @@ impl FromStr for Name {
 
         if s.eq_ignore_ascii_case("default") {
             return Ok(Self::Default);
-        }
-
-        if bright {
-            return Err(color_err(s));
         }
 
         if let Ok(v) = u8::from_str(s) {

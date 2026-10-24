@@ -2,7 +2,7 @@ use gix_error::Result;
 use gix_error::{Message, ResultExt, message};
 
 use std::{
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -117,29 +117,32 @@ impl file::Store {
         name: Name,
         lock_fail_mode: gix_lock::acquire::Fail,
         mut should_keep: impl FnMut(log::LineRef<'_>) -> bool,
-    ) -> Result<usize, expire::Error>
+    ) -> Result<usize>
     where
         Name: TryInto<&'a FullNameRef, Error = E>,
-        crate::name::Error: From<E>,
+        std::result::Result<&'a FullNameRef, E>: ResultExt<Success = &'a FullNameRef>,
     {
         let name: &FullNameRef = name
             .try_into()
-            .map_err(|err| expire::Error::RefnameValidation(err.into()))?;
-        let (reflog_base, relative_name) = self.reflog_base_and_relative_path(name);
+            .or_raise(|| message("The reflog name or path is not a valid ref name"))?;
+        let (reflog_base, relative_name) = self.reflog_base_and_relative_path(name)?;
         let path = reflog_base.join(relative_name.as_ref());
         if path.is_dir() {
             return Ok(0);
         }
 
-        let mut lock = gix_lock::File::acquire_to_update_resource(&path, lock_fail_mode, Some(reflog_base.clone()))?;
+        let mut lock = gix_lock::File::acquire_to_update_resource(&path, lock_fail_mode, Some(reflog_base), 0)?;
 
         let mut buf = Vec::new();
         match std::fs::File::open(&path) {
-            Ok(mut file) => file.read_to_end(&mut buf).map(|_| ())?,
+            Ok(mut file) => file
+                .read_to_end(&mut buf)
+                .map(|_| ())
+                .or_raise(|| read_reflog_error(path.clone()))?,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
             #[cfg(windows)]
             Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied && path.is_dir() => return Ok(0),
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(err).or_raise(|| read_reflog_error(path)),
         }
 
         let mut retained = Vec::with_capacity(buf.len());
@@ -147,7 +150,7 @@ impl file::Store {
         for line in log::iter::forward(&buf) {
             let line = line?;
             if should_keep(line) {
-                line.to_owned().write_to(&mut retained)?;
+                line.to_owned().write_to(&mut retained).or_error()?;
             } else {
                 removed += 1;
             }
@@ -157,27 +160,11 @@ impl file::Store {
             return Ok(0);
         }
 
-        lock.write_all(&retained)?;
+        lock.write_all(&retained)
+            .or_raise(|| message("Failed to write retained reflog entries"))?;
         lock.commit()
             .map(|_| removed)
-            .map_err(|err| expire::Error::Io(err.error))
-    }
-}
-
-/// Expiration support for reflogs.
-pub mod expire {
-    /// The error returned by [`crate::file::Store::reflog_expire()`].
-    #[derive(Debug, thiserror::Error)]
-    #[allow(missing_docs)]
-    pub enum Error {
-        #[error("The reflog name or path is not a valid ref name")]
-        RefnameValidation(#[from] crate::name::Error),
-        #[error("The lock for the reflog could not be obtained")]
-        LockAcquire(#[from] gix_lock::acquire::Error),
-        #[error("The reflog could not be read or rewritten")]
-        Io(#[from] std::io::Error),
-        #[error("A reflog line could not be decoded")]
-        Decode(#[from] crate::store_impl::file::log::iter::decode::Error),
+            .or_raise(|| message("Failed to commit reflog changes"))
     }
 }
 

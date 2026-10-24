@@ -12,9 +12,11 @@
 #[allow(missing_docs)]
 pub enum CheckoutError {
     #[error(transparent)]
-    CheckoutOptions(#[from] crate::config::checkout_options::Error),
+    Operation(#[from] gix_error::Error),
     #[error(transparent)]
-    Checkout(#[from] gix_worktree_state::checkout::Error),
+    CheckoutOptions(gix_error::Error),
+    #[error(transparent)]
+    Checkout(gix_error::Error),
     #[error("Failed to convert object database to Arc for thread-safe access")]
     ObjectsToArc(#[from] std::io::Error),
 }
@@ -25,9 +27,11 @@ pub enum CheckoutError {
 #[allow(missing_docs)]
 pub enum UpdateHeadError {
     #[error(transparent)]
-    FindHead(#[from] crate::reference::find::existing::Error),
+    Operation(#[from] gix_error::Error),
     #[error(transparent)]
-    EditReference(#[from] crate::reference::edit::Error),
+    FindHead(gix_error::Error),
+    #[error(transparent)]
+    EditReference(gix_error::Error),
 }
 
 impl crate::Repository {
@@ -50,8 +54,8 @@ impl crate::Repository {
 
         let objects = self.objects.clone().into_arc().map_err(CheckoutError::ObjectsToArc)?;
         let should_interrupt = AtomicBool::new(false);
-        let files = gix_features::progress::Discard;
-        let bytes = gix_features::progress::Discard;
+        let files = gix_utils::progress::Discard;
+        let bytes = gix_utils::progress::Discard;
 
         gix_worktree_state::checkout(index, workdir, objects, &files, &bytes, &should_interrupt, opts)
             .map_err(CheckoutError::Checkout)?;
@@ -140,7 +144,9 @@ impl crate::Repository {
                 continue;
             }
 
-            let os_path = gix_path::from_bstr(path);
+            let Ok(os_path) = gix_path::from_bstr(path) else {
+                continue;
+            };
             if check_path_traversal
                 && os_path.components().any(|c| {
                     matches!(

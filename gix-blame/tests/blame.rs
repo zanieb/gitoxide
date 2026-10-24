@@ -237,7 +237,7 @@ impl Fixture {
         contents: Vec<u8>,
         options: gix_blame::Options,
     ) -> Result<gix_blame::Outcome> {
-        gix_blame::file(
+        gix_blame::file_with_progress(
             &self.odb,
             gix_blame::Start::Contents {
                 first_suspect: self.suspect,
@@ -248,6 +248,7 @@ impl Fixture {
             source_file_name,
             options,
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )
     }
 }
@@ -281,7 +282,6 @@ macro_rules! mktest {
                     oldest_commit: None,
                     shallow_commits: Vec::new(),
                 },
-                &std::sync::atomic::AtomicBool::new(false),
             )?
             .entries;
 
@@ -358,7 +358,7 @@ fn diff_algorithm_parity() {
 
         let source_file_name: gix_object::bstr::BString = format!("{case}.txt").into();
 
-        let lines_blamed = gix_blame::file(
+        let lines_blamed = gix_blame::file_with_progress(
             &odb,
             gix_blame::Start::Commit(suspect),
             None,
@@ -376,6 +376,7 @@ fn diff_algorithm_parity() {
                 shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )
         .unwrap()
         .entries;
@@ -400,7 +401,7 @@ fn file_that_was_added_in_two_branches() -> gix_testtools::TestResult {
     } = Fixture::for_worktree_path(worktree_path.to_path_buf())?;
 
     let source_file_name = "file-with-two-roots.txt";
-    let lines_blamed = gix_blame::file(
+    let lines_blamed = gix_blame::file_with_progress(
         &odb,
         gix_blame::Start::Commit(suspect),
         None,
@@ -408,6 +409,7 @@ fn file_that_was_added_in_two_branches() -> gix_testtools::TestResult {
         source_file_name.into(),
         gix_blame::Options::default(),
         &std::sync::atomic::AtomicBool::new(false),
+        None,
     )?
     .entries;
 
@@ -431,7 +433,7 @@ fn since() -> gix_testtools::TestResult {
 
     let source_file_name: gix_object::bstr::BString = "simple.txt".into();
 
-    let lines_blamed = gix_blame::file(
+    let lines_blamed = gix_blame::file_with_progress(
         &odb,
         gix_blame::Start::Commit(suspect),
         None,
@@ -449,6 +451,7 @@ fn since() -> gix_testtools::TestResult {
             shallow_commits: Vec::new(),
         },
         &std::sync::atomic::AtomicBool::new(false),
+        None,
     )?
     .entries;
 
@@ -476,7 +479,7 @@ mod blame_ranges {
 
         let source_file_name: gix_object::bstr::BString = "simple.txt".into();
 
-        let lines_blamed = gix_blame::file(
+        let lines_blamed = gix_blame::file_with_progress(
             &odb,
             gix_blame::Start::Commit(suspect),
             None,
@@ -494,6 +497,7 @@ mod blame_ranges {
                 shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )?
         .entries;
 
@@ -524,7 +528,7 @@ mod blame_ranges {
 
         let source_file_name: gix_object::bstr::BString = "simple.txt".into();
 
-        let lines_blamed = gix_blame::file(
+        let lines_blamed = gix_blame::file_with_progress(
             &odb,
             gix_blame::Start::Commit(suspect),
             None,
@@ -542,6 +546,7 @@ mod blame_ranges {
                 shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )?
         .entries;
 
@@ -570,7 +575,7 @@ mod blame_ranges {
 
         let source_file_name: gix_object::bstr::BString = "simple.txt".into();
 
-        let lines_blamed = gix_blame::file(
+        let lines_blamed = gix_blame::file_with_progress(
             &odb,
             gix_blame::Start::Commit(suspect),
             None,
@@ -588,6 +593,7 @@ mod blame_ranges {
                 shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )?
         .entries;
 
@@ -621,7 +627,7 @@ mod rename_tracking {
         } = Fixture::for_worktree_path(worktree_path.to_path_buf())?;
 
         let source_file_name = "after-rename.txt";
-        let lines_blamed = gix_blame::file(
+        let lines_blamed = gix_blame::file_with_progress(
             &odb,
             gix_blame::Start::Commit(suspect),
             None,
@@ -639,6 +645,7 @@ mod rename_tracking {
                 shallow_commits: Vec::new(),
             },
             &std::sync::atomic::AtomicBool::new(false),
+            None,
         )?
         .entries;
 
@@ -710,6 +717,7 @@ mod untracked_changes {
                     since: None,
                     rewrites: Some(gix_diff::Rewrites::default()),
                     debug_track_path: false,
+                    ..Default::default()
                 },
             )?
             .entries;
@@ -742,6 +750,7 @@ mod untracked_changes {
                     since: None,
                     rewrites: Some(gix_diff::Rewrites::default()),
                     debug_track_path: false,
+                    ..Default::default()
                 },
             )?
             .entries;
@@ -774,6 +783,7 @@ mod untracked_changes {
                     since: None,
                     rewrites: Some(gix_diff::Rewrites::default()),
                     debug_track_path: false,
+                    ..Default::default()
                 },
             )?
             .entries;
@@ -807,6 +817,7 @@ mod symlinks {
                     since: None,
                     rewrites: Some(gix_diff::Rewrites::default()),
                     debug_track_path: false,
+                    ..Default::default()
                 },
             )?
             .entries;
@@ -849,4 +860,501 @@ mod symlinks {
 
 fn fixture_path() -> gix_testtools::Result<PathBuf> {
     gix_testtools::scripted_fixture_read_only("make_blame_repo.sh")
+}
+
+#[test]
+fn ignore_revs() -> gix_testtools::Result {
+    let Fixture {
+        odb,
+        mut resource_cache,
+        suspect,
+    } = Fixture::new()?;
+
+    let source_file_name: gix_object::bstr::BString = "simple.txt".into();
+
+    // First, do a normal blame to find out which commits are responsible for each line.
+    let normal_result = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    // simple.txt has 4 lines, each added in a different commit (c1, c2, c3, c4).
+    assert_eq!(normal_result.entries.len(), 4);
+    let commit_for_line3 = normal_result.entries[2].commit_id;
+
+    // Now blame again, ignoring the commit that introduced line 3.
+    // Since line 3 was *added* (not just modified) by c3, it can't be mapped to
+    // the parent (which doesn't have it). The current implementation "pins" such lines
+    // to the commit that introduced them, matching C Git's fallback behavior when no
+    // fuzzy line match is found.
+    let ignored_result = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: vec![commit_for_line3],
+            worktree_blob: None,
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    // Even with --ignore-rev, all 4 lines should still be accounted for.
+    let total_lines: u32 = ignored_result.entries.iter().map(|e| e.len.get()).sum();
+    assert_eq!(total_lines, 4, "all 4 lines should be covered by blame entries");
+
+    // Lines that were *not* changed by the ignored commit (lines 1, 2, 4) should
+    // have the same attribution as the normal blame.
+    let line1_normal = normal_result
+        .entries
+        .iter()
+        .find(|e| e.start_in_blamed_file == 0)
+        .unwrap();
+    let line1_ignored = ignored_result
+        .entries
+        .iter()
+        .find(|e| e.start_in_blamed_file == 0)
+        .unwrap();
+    assert_eq!(
+        line1_normal.commit_id, line1_ignored.commit_id,
+        "line 1 attribution should be unchanged when ignoring a different commit"
+    );
+
+    // Line 3 is pinned to the ignored commit since it was an addition with no
+    // corresponding line in the parent.
+    let line3_entry = ignored_result
+        .entries
+        .iter()
+        .find(|e| {
+            let range = e.range_in_blamed_file();
+            range.contains(&2)
+        })
+        .expect("there should be an entry covering line 3 (0-indexed: 2)");
+    assert_eq!(
+        line3_entry.commit_id, commit_for_line3,
+        "added lines should be pinned to the ignored commit (C Git fallback behavior)"
+    );
+
+    Ok(())
+}
+
+/// Test that `file_with_progress` increments the progress counter for each commit traversed.
+#[test]
+fn progress_reporting() -> gix_testtools::Result {
+    let Fixture {
+        odb,
+        mut resource_cache,
+        suspect,
+    } = Fixture::new()?;
+
+    let source_file_name: gix_object::bstr::BString = "simple.txt".into();
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+
+    let outcome = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        Some(&counter),
+    )?;
+
+    let progress_count = counter.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        progress_count > 0,
+        "progress counter should have been incremented at least once"
+    );
+    assert_eq!(
+        progress_count, outcome.statistics.commits_traversed,
+        "progress counter should match the number of commits traversed"
+    );
+
+    Ok(())
+}
+
+/// Test that providing a worktree_blob that differs from HEAD attributes changed lines
+/// to the null ObjectId (uncommitted changes), while unchanged lines are still attributed
+/// to the original commits.
+#[test]
+fn worktree_changes_attributes_modified_lines_to_null_commit() -> gix_testtools::Result {
+    let Fixture {
+        odb,
+        mut resource_cache,
+        suspect,
+    } = Fixture::new()?;
+
+    let source_file_name: gix_object::bstr::BString = "simple.txt".into();
+
+    // First, get the normal blame to understand the baseline.
+    let normal_outcome = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    // The normal blame should have 4 entries (lines), all with real commit ids.
+    assert_eq!(normal_outcome.entries.len(), 4);
+    let null_oid = ObjectId::null(gix_hash::Kind::Sha1);
+    for entry in &normal_outcome.entries {
+        assert_ne!(
+            entry.commit_id, null_oid,
+            "normal blame should not have null commit ids"
+        );
+    }
+
+    // Now create a modified worktree blob. The original blob is in normal_outcome.blob.
+    // We modify the first line by prepending "MODIFIED: " to it.
+    let original_blob = &normal_outcome.blob;
+    let mut worktree_blob = Vec::new();
+    let mut first_line = true;
+    for line in original_blob.split_inclusive(|&b| b == b'\n') {
+        if first_line {
+            worktree_blob.extend_from_slice(b"MODIFIED: ");
+            worktree_blob.extend_from_slice(line);
+            first_line = false;
+        } else {
+            worktree_blob.extend_from_slice(line);
+        }
+    }
+
+    let worktree_outcome = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: Some(worktree_blob),
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    // The first line should now be attributed to the null commit (uncommitted changes).
+    let first_entry = worktree_outcome
+        .entries
+        .iter()
+        .find(|e| e.start_in_blamed_file == 0)
+        .expect("there should be an entry starting at line 0");
+    assert_eq!(
+        first_entry.commit_id, null_oid,
+        "modified first line should be attributed to the null commit (uncommitted changes)"
+    );
+
+    // Lines that were not modified should still have real commit ids.
+    for entry in &worktree_outcome.entries {
+        if entry.start_in_blamed_file > 0 {
+            assert_ne!(
+                entry.commit_id, null_oid,
+                "unchanged lines should still be attributed to real commits"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Test that providing a worktree_blob identical to HEAD produces the same results as
+/// not providing one.
+#[test]
+fn worktree_blob_identical_to_head_is_no_op() -> gix_testtools::Result {
+    let Fixture {
+        odb,
+        mut resource_cache,
+        suspect,
+    } = Fixture::new()?;
+
+    let source_file_name: gix_object::bstr::BString = "simple.txt".into();
+
+    let normal_outcome = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    // Pass the HEAD blob as the worktree blob -- should produce identical results.
+    let worktree_outcome = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: Some(normal_outcome.blob.clone()),
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    assert_eq!(
+        normal_outcome.entries, worktree_outcome.entries,
+        "passing the HEAD blob as worktree_blob should produce identical blame entries"
+    );
+
+    Ok(())
+}
+
+/// Test that setting `should_interrupt` to `true` before calling `file()` causes it
+/// to return `Error::Interrupted` immediately.
+#[test]
+fn interrupted_immediately_when_should_interrupt_is_set() -> gix_testtools::Result {
+    let Fixture {
+        odb,
+        mut resource_cache,
+        suspect,
+    } = Fixture::new()?;
+
+    let source_file_name: gix_object::bstr::BString = "simple.txt".into();
+
+    let result = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options::default(),
+        &std::sync::atomic::AtomicBool::new(true),
+        None,
+    );
+
+    assert!(
+        result.is_err(),
+        "blame should fail when should_interrupt is already set"
+    );
+    assert!(
+        result.expect_err("interrupted").is_cancelled(),
+        "error should be Error::Interrupted"
+    );
+
+    Ok(())
+}
+
+/// Root commit entries should have `boundary: true` since the blame traversal
+/// stopped there (no further parents to traverse).
+#[test]
+fn boundary_marks_root_commit_entries() -> gix_testtools::Result {
+    let Fixture {
+        odb,
+        mut resource_cache,
+        suspect,
+    } = Fixture::new()?;
+
+    let source_file_name: gix_object::bstr::BString = "simple.txt".into();
+
+    let outcome = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    // simple.txt has 4 lines, each from a different commit. The first line
+    // was introduced by the root commit, which should be a boundary.
+    assert_eq!(outcome.entries.len(), 4);
+
+    // The root commit entry (the last one in traversal order, line 1) should be boundary.
+    let root_entry = outcome
+        .entries
+        .iter()
+        .find(|e| e.boundary)
+        .expect("there should be at least one boundary entry (root commit)");
+
+    // The root commit introduces line 1 (0-indexed: start_in_blamed_file == 0)
+    assert_eq!(
+        root_entry.start_in_blamed_file, 0,
+        "root commit entry should be for line 1"
+    );
+
+    // Non-root entries should not be boundary
+    let non_boundary_count = outcome.entries.iter().filter(|e| !e.boundary).count();
+    assert_eq!(non_boundary_count, 3, "3 entries should not be boundary");
+
+    Ok(())
+}
+
+/// Test that `oldest_commit` stops traversal at the specified commit and marks
+/// remaining entries as boundary.
+#[test]
+fn oldest_commit_stops_traversal() -> gix_testtools::Result {
+    let Fixture {
+        odb,
+        mut resource_cache,
+        suspect,
+    } = Fixture::new()?;
+
+    let source_file_name: gix_object::bstr::BString = "simple.txt".into();
+
+    // First, do a normal blame to find commit IDs.
+    let normal = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: None,
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    assert_eq!(normal.entries.len(), 4);
+
+    // Use the commit that introduced line 2 (index 1) as oldest_commit.
+    // This means we stop before going further back, so line 1 (from the root)
+    // should be attributed to the commit that introduced line 2, as a boundary.
+    let commit_for_line2 = normal.entries[1].commit_id;
+
+    let outcome = gix_blame::file_with_progress(
+        &odb,
+        gix_blame::Start::Commit(suspect),
+        None,
+        &mut resource_cache,
+        source_file_name.as_ref(),
+        gix_blame::Options {
+            diff_algorithm: gix_diff::blob::Algorithm::Histogram,
+            ranges: BlameRanges::default(),
+            since: None,
+            rewrites: Some(gix_diff::Rewrites::default()),
+            debug_track_path: false,
+            ignore_revs: Vec::new(),
+            worktree_blob: None,
+            oldest_commit: Some(commit_for_line2),
+            shallow_commits: Vec::new(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+        None,
+    )?;
+
+    // All 4 lines should still be covered.
+    let total_lines: u32 = outcome.entries.iter().map(|e| e.len.get()).sum();
+    assert_eq!(total_lines, 4, "all 4 lines should be covered");
+
+    // Lines 2-4 should still be attributed to their original commits (not boundary).
+    // Line 1 should be attributed as boundary (traversal stopped before reaching the root).
+    let boundary_entries: Vec<_> = outcome.entries.iter().filter(|e| e.boundary).collect();
+    assert!(
+        !boundary_entries.is_empty(),
+        "there should be at least one boundary entry when oldest_commit is set"
+    );
+
+    // Lines that were introduced AFTER the oldest_commit should not be boundary.
+    for entry in &outcome.entries {
+        if entry.commit_id != commit_for_line2 && !entry.boundary {
+            // These entries are from commits between HEAD and oldest_commit's parent,
+            // so they should have real attributions.
+            assert_ne!(
+                entry.commit_id,
+                ObjectId::null(gix_hash::Kind::Sha1),
+                "non-boundary entries should have real commit ids"
+            );
+        }
+    }
+
+    Ok(())
 }

@@ -626,10 +626,9 @@ fn add_entry_different_stages_coexist() {
 
 #[test]
 fn add_entry_invalidates_tree_extension() {
-    let worktree_dir =
-        gix_testtools::scripted_fixture_read_only_standalone("make_index/v2_more_files.sh").expect("fixture works");
+    let worktree_dir = gix_testtools::scripted_fixture_read_only("make_index/v2_more_files.sh").expect("fixture works");
     let git_dir = worktree_dir.join(".git");
-    let odb = gix_odb::at(git_dir.join("objects")).expect("odb");
+    let odb = gix_odb::at(git_dir.join("objects"), gix_testtools::object_hash()).expect("odb");
     let head_tree_hex = std::fs::read_to_string(worktree_dir.join("head.tree")).expect("head.tree exists");
     let tree_id: gix_hash::ObjectId = head_tree_hex.trim().parse().expect("valid hash");
 

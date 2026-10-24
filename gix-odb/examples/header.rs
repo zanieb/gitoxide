@@ -12,8 +12,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
 
-    let odb = gix_odb::at(objects_dir)?;
     let id = gix_hash::ObjectId::from_hex(id.to_string_lossy().as_bytes())?;
+    let odb = gix_odb::at(objects_dir, id.kind())?;
     let header = odb.header(id)?;
 
     println!("{} {}", header.kind(), header.size());

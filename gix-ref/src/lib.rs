@@ -94,9 +94,12 @@ pub mod store {
 
     /// A thread-local handle for interacting with a [`Store`][crate::Store] to find and iterate references.
     #[derive(Clone)]
-    #[expect(
-        dead_code,
-        reason = "the general reference-store handle is scaffolding for planned ref-table support"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the general reference-store handle is scaffolding for planned ref-table support"
+        )
     )]
     pub(crate) struct Handle {
         /// A way to access shared state with the requirement that interior mutability doesn't leak or is incorporated into error types
@@ -104,9 +107,12 @@ pub mod store {
         state: handle::State,
     }
 
-    #[expect(
-        dead_code,
-        reason = "the general reference-store state is scaffolding for planned ref-table support"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the general reference-store state is scaffolding for planned ref-table support"
+        )
     )]
     pub(crate) enum State {
         Loose { store: file::Store },
@@ -124,9 +130,12 @@ pub mod store {
 
 /// The git reference store.
 /// TODO: Figure out if handles are needed at all, which depends on the ref-table implementation.
-#[expect(
-    dead_code,
-    reason = "callers still use file::Store directly while this general store awaits ref-table support"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "callers still use file::Store directly while this general store awaits ref-table support"
+    )
 )]
 pub(crate) struct Store {
     inner: store::State,

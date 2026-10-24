@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("full name: {name}");
     println!("short name: {}", name.shorten());
-    println!("path: {}", name.to_path().display());
+    println!("path: {}", name.to_path()?.display());
 
     match name.category_and_short_name() {
         Some((category, short_name)) => {

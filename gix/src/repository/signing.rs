@@ -74,8 +74,8 @@ impl Sign for GpgSign {
         use std::io::Write;
         use std::process::{Command, Stdio};
 
-        let program = gix_path::from_bstring(self.program.clone());
-        let signing_key = gix_path::from_bstring(self.signing_key.clone());
+        let program = gix_path::from_bstring(self.program.clone())?;
+        let signing_key = gix_path::from_bstring(self.signing_key.clone())?;
 
         let mut child = Command::new(program.as_os_str())
             .args(["--status-fd=2", "-bsau"])
@@ -167,11 +167,11 @@ impl Sign for SshSign {
             key_file_path = key_file.with_mut(|f| f.path().to_owned())?;
             _key_file_guard = Some(key_file);
         } else {
-            key_file_path = gix_path::from_bstring(self.signing_key.clone());
+            key_file_path = gix_path::from_bstring(self.signing_key.clone())?;
             _key_file_guard = None;
         }
 
-        let program = gix_path::from_bstring(self.program.clone());
+        let program = gix_path::from_bstring(self.program.clone())?;
         let mut cmd = Command::new(program.as_os_str());
         cmd.args(["-Y", "sign", "-n", "git", "-f"]);
         cmd.arg(&key_file_path);
@@ -202,6 +202,8 @@ impl Sign for SshSign {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
+    #[error(transparent)]
+    Operation(#[from] gix_error::Error),
     #[error("no signing key configured (set user.signingKey in git config)")]
     NoSigningKey,
     #[error("unknown signing format in gpg.format: {value:?}")]
@@ -209,13 +211,13 @@ pub enum Error {
     #[error("signing failed: {0}")]
     Sign(Box<dyn std::error::Error + Send + Sync>),
     #[error(transparent)]
-    WriteObject(#[from] crate::object::write::Error),
+    WriteObject(gix_error::Error),
     #[error(transparent)]
-    ReferenceEdit(#[from] crate::reference::edit::Error),
+    ReferenceEdit(gix_error::Error),
     #[error(transparent)]
     ReferenceNameValidation(#[from] gix_ref::name::Error),
     #[error(transparent)]
-    ParseTime(#[from] crate::config::time::Error),
+    ParseTime(gix_error::Error),
     #[error("committer identity is not configured")]
     CommitterMissing,
     #[error("author identity is not configured")]
@@ -232,26 +234,25 @@ impl crate::Repository {
     pub fn signing_config(&self) -> Result<SigningConfig, Error> {
         let config = &self.config.resolved;
 
-        let key = config.string("user.signingKey").map(std::borrow::Cow::into_owned);
+        let key = config.string("user.signingKey");
 
         let format = match config.string("gpg.format") {
             Some(v) => match &**v {
                 b"openpgp" => SigningFormat::Gpg,
                 b"x509" => SigningFormat::X509,
                 b"ssh" => SigningFormat::Ssh,
-                _ => return Err(Error::UnknownSigningFormat { value: v.into_owned() }),
+                _ => return Err(Error::UnknownSigningFormat { value: v }),
             },
             None => SigningFormat::default(),
         };
 
         let gpg_program = config
             .string("gpg.program")
-            .or_else(|| config.string("gpg.openpgp.program"))
-            .map(std::borrow::Cow::into_owned);
+            .or_else(|| config.string("gpg.openpgp.program"));
 
-        let ssh_program = config.string("gpg.ssh.program").map(std::borrow::Cow::into_owned);
+        let ssh_program = config.string("gpg.ssh.program");
 
-        let x509_program = config.string("gpg.x509.program").map(std::borrow::Cow::into_owned);
+        let x509_program = config.string("gpg.x509.program");
 
         Ok(SigningConfig {
             key,
@@ -401,7 +402,7 @@ impl crate::Repository {
                 .transpose()
                 .map_err(|err| Error::Sign(Box::new(err)))?,
             message: message.as_ref().into(),
-            pgp_signature: None,
+            signature: None,
         };
 
         // Serialize the unsigned tag
@@ -415,7 +416,7 @@ impl crate::Repository {
 
         // Create the tag with the signature
         let signed_tag = gix_object::Tag {
-            pgp_signature: Some(signature),
+            signature: Some(signature),
             ..unsigned_tag
         };
 

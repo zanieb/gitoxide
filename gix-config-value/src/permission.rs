@@ -1,25 +1,21 @@
 use std::{borrow::Cow, fmt::Display};
 
-use bstr::{BStr, BString};
+use bstr::BStr;
+use gix_error::{Error, ErrorExt, ResultExt, validation};
 
-use crate::{Boolean, Error, Permission};
+use crate::{Boolean, Permission};
 
 const PERM_UMASK: i64 = 0;
 const OLD_PERM_GROUP: i64 = 1;
 const OLD_PERM_EVERYBODY: i64 = 2;
 
-fn permission_err(input: impl Into<BString>) -> Error {
-    Error::new(
-        "Permissions need to be 'umask', 'group', 'all', 'world', 'everybody', a boolean, or an octal file mode",
-        input,
-    )
+fn permission_err(input: &BStr) -> gix_error::Message {
+    validation("Permissions need to be 'umask', 'group', 'all', 'world', 'everybody', a boolean, or an octal file mode")
+        .with_input(input)
 }
 
-fn invalid_mode_err(input: impl Into<BString>) -> Error {
-    Error::new(
-        "Permission file modes must grant the owner read and write permissions",
-        input,
-    )
+fn invalid_mode_err(input: &BStr) -> gix_error::Message {
+    validation("Permission file modes must grant the owner read and write permissions").with_input(input)
 }
 
 impl Permission {
@@ -56,7 +52,7 @@ impl TryFrom<&BStr> for Permission {
             return Ok(Self::Everybody);
         }
 
-        let value_str = std::str::from_utf8(value).map_err(|err| permission_err(value).with_err(err))?;
+        let value_str = std::str::from_utf8(value).or_raise(|| permission_err(value))?;
         if let Some(permission) = parse_octal(value_str, value)? {
             return Ok(permission);
         }
@@ -105,7 +101,7 @@ fn parse_octal(value: &str, input: &BStr) -> Result<Option<Permission>, Error> {
             .map(|digit| acc.saturating_mul(8).saturating_add(digit as i64))
     }) else {
         if digits.starts_with('0') && digits.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(permission_err(input));
+            return Err(permission_err(input).raise());
         }
         return Ok(None);
     };
@@ -116,7 +112,7 @@ fn parse_octal(value: &str, input: &BStr) -> Result<Option<Permission>, Error> {
         OLD_PERM_EVERYBODY => Permission::Everybody,
         value => {
             if !(0..=0o777).contains(&value) || (value & 0o600) != 0o600 {
-                return Err(invalid_mode_err(input));
+                return Err(invalid_mode_err(input).raise());
             }
             Permission::Mode((value & 0o666) as u16)
         }

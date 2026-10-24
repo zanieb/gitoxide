@@ -8,7 +8,7 @@ use gix_hash::{ObjectId, oid};
 use gix_object::{
     Find, FindExt, Tree, Write,
     bstr::{BStr, BString, ByteSlice},
-    tree::{Editor, Entry, EntryKind, EntryMode},
+    tree::{Editor, Entry as TreeObjectEntry, EntryKind, EntryMode},
 };
 
 /// The result of changing one note mapping.
@@ -636,13 +636,13 @@ fn write_note_entries(notes: &[TreeEntry], level: usize, objects: &impl Write) -
 
         if is_leaf {
             debug_assert_eq!(end, start + 1, "a notes path cannot be both a tree and a blob");
-            entries.push(Entry {
+            entries.push(TreeObjectEntry {
                 mode: notes[start].mode,
                 filename: name.into(),
                 oid: notes[start].object_id,
             });
         } else {
-            entries.push(Entry {
+            entries.push(TreeObjectEntry {
                 mode: EntryKind::Tree.into(),
                 filename: name.into(),
                 oid: write_note_entries(&notes[start..end], level + 1, objects)?,
@@ -691,3 +691,8 @@ fn note_path<'a>(id: &oid, fanout: usize, out: &'a mut [u8]) -> &'a BStr {
     pos += remainder.hex_to_buf(&mut out[pos..]).len();
     BStr::new(&out[..pos])
 }
+
+mod mapping;
+pub use mapping::{
+    DEFAULT_REF, Entry, Error, FindError, ListError, find_note, list_notes, path_from_target, target_from_path,
+};

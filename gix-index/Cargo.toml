@@ -30,6 +30,7 @@ sha256 = ["gix-hash/sha256"]
 serde = ["dep:serde", "smallvec/serde", "gix-hash/serde"]
 
 [dependencies]
+thiserror = "2.0.18"
 gix-trace = { version = "^0.3.1", path = "../gix-trace" }
 gix-parallel = { version = "^0.50.1", path = "../gix-parallel" }
 gix-hash = { version = "^0.28.1", path = "../gix-hash" }

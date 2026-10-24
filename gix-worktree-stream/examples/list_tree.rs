@@ -12,9 +12,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
 
-    let objects = gix_odb::at(objects_dir)?.into_arc()?;
     let tree_id = gix_hash::ObjectId::from_hex(tree_id.to_string_lossy().as_bytes())?;
-    let pipeline = gix_filter::Pipeline::new(Default::default(), Default::default());
+    let objects = gix_odb::at(objects_dir, tree_id.kind())?.into_arc()?;
+    let pipeline = gix_filter::Pipeline::new(Default::default(), tree_id.kind(), Default::default());
     let mut stream = gix_worktree_stream::from_tree(
         tree_id,
         objects,
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         |_, _, _| -> Result<(), std::convert::Infallible> { Ok(()) },
     );
 
-    while let Some(mut entry) = stream.next_entry().map_err(gix_error::Exn::into_error)? {
+    while let Some(mut entry) = stream.next_entry()? {
         let mut out = Vec::new();
         entry.read_to_end(&mut out)?;
         println!(

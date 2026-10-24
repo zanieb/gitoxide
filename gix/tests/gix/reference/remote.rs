@@ -154,3 +154,20 @@ fn fetchspec(spec: &str) -> gix_refspec::RefSpec {
         .unwrap()
         .to_owned()
 }
+
+#[test]
+fn branch_merge_becomes_fetch_refspec_without_remote_fetch_specs() -> crate::Result {
+    let repo = remote::repo("branch-merge-no-fetch");
+    let branch = repo.head_ref()?.expect("attached");
+    let remote = branch
+        .remote(gix::remote::Direction::Fetch)
+        .transpose()?
+        .expect("configured");
+
+    assert_eq!(
+        remote.refspecs(gix::remote::Direction::Fetch),
+        &[fetchspec("refs/heads/main")],
+        "branch.main.merge provides the source ref that C Git fetches into FETCH_HEAD"
+    );
+    Ok(())
+}

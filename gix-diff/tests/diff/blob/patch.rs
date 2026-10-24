@@ -125,7 +125,7 @@ fn file_for_scenario(scenario: &str) -> &str {
 }
 
 fn fixture_dir() -> std::path::PathBuf {
-    gix_testtools::scripted_fixture_read_only_standalone("make_diff_comparison_repo.sh").expect("valid fixture")
+    gix_testtools::scripted_fixture_read_only("make_diff_comparison_repo.sh").expect("valid fixture")
 }
 
 /// Generate a gix patch and compare it against C Git's output (with normalized index lines).

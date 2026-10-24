@@ -34,7 +34,20 @@ impl<'repo> Reference<'repo> {
     ///
     /// See also [`Repository::branch_remote()`](crate::Repository::branch_remote()) for more details.
     pub fn remote(&self, direction: remote::Direction) -> Option<Result<crate::Remote<'repo>>> {
-        self.repo.branch_remote(self.name().shorten(), direction)
+        let name = self.remote_name(direction)?;
+        let found = self.repo.try_find_remote(name.as_bstr()).or_else(|| match name {
+            remote::Name::Url(url) => Some(gix_url::parse(&url).and_then(|url| self.repo.remote_at(url))),
+            remote::Name::Symbol(_) => None,
+        })?;
+        Some(found.and_then(|mut remote| {
+            if direction == remote::Direction::Fetch
+                && remote.refspecs(direction).is_empty()
+                && let Some(name) = self.remote_ref_name(direction).transpose()?
+            {
+                remote.replace_refspecs([name.as_bstr()], direction)?;
+            }
+            Ok(remote)
+        }))
     }
 
     /// Return the name of this reference on the remote side.

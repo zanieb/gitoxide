@@ -118,6 +118,8 @@ pub struct Context {
     ///
     /// If set, it will be used to set the `GIT_DIR` environment variable.
     pub git_dir: Option<PathBuf>,
+    /// The directory containing Git helper programs, exposed as `GIT_EXEC_PATH`.
+    pub git_exec_path: Option<PathBuf>,
     /// Set the `GIT_WORK_TREE` environment variable with the given absolute path.
     pub worktree_dir: Option<PathBuf>,
     /// If `true`, set `GIT_NO_REPLACE_OBJECTS` to `1`, which turns off object replacements, or `0` otherwise.

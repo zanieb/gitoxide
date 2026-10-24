@@ -44,7 +44,7 @@ pub struct Link {
 }
 
 /// The extension for untracked files.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UntrackedCache {
     /// Something identifying the location and machine that this cache is for.
     /// Should the repository be copied to a different machine, the entire cache can immediately be invalidated.
@@ -62,11 +62,7 @@ pub struct UntrackedCache {
 }
 
 /// The extension for keeping state on recent information provided by the filesystem monitor.
-#[expect(
-    dead_code,
-    reason = "for the time when we know what to do with it, for now we just ser-de it"
-)]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FsMonitor {
     token: fs_monitor::Token,
     /// if a bit is true, the respective entry is NOT valid as per the fs monitor.

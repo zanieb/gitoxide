@@ -10,7 +10,7 @@ use crate::{fixture_hash_kind, fixture_oid, tree_fixture};
 #[test]
 fn empty() {
     assert_eq!(
-        TreeRefIter::from_bytes_with_hash(&[], gix_testtools::object_hash()).count(),
+        TreeRefIter::from_bytes(&[], gix_testtools::object_hash()).count(),
         0,
         "empty trees are definitely ok"
     );
@@ -19,7 +19,7 @@ fn empty() {
 #[test]
 fn error_handling() {
     let data = tree_fixture("everything.tree").expect("fixture is valid");
-    let iter = TreeRefIter::from_bytes_with_hash(&data[..data.len() / 2], fixture_hash_kind());
+    let iter = TreeRefIter::from_bytes(&data[..data.len() / 2], fixture_hash_kind());
     let entries = iter.collect::<Vec<_>>();
     assert!(
         entries.last().expect("at least one token").is_err(),
@@ -31,14 +31,14 @@ fn error_handling() {
 fn offset_to_next_entry() {
     let hash_kind = fixture_hash_kind();
     let buf = tree_fixture("everything.tree").expect("fixture is valid");
-    let mut iter = TreeRefIter::from_bytes_with_hash(&buf, hash_kind);
+    let mut iter = TreeRefIter::from_bytes(&buf, hash_kind);
     assert_eq!(iter.offset_to_next_entry(&buf), 0, "first entry is always at 0");
     iter.next();
 
     let actual = iter.offset_to_next_entry(&buf);
     assert_eq!(actual, 11 + hash_kind.len_in_bytes(), "now the offset increases");
     assert_eq!(
-        TreeRefIter::from_bytes_with_hash(&buf[actual..], hash_kind)
+        TreeRefIter::from_bytes(&buf[actual..], hash_kind)
             .next()
             .map(|e| e.unwrap().filename),
         iter.next().map(|e| e.unwrap().filename),
@@ -106,18 +106,18 @@ fn sha256_entries_use_the_configured_hash_length() -> crate::Result {
     let mut data = b"100644 file\0".to_vec();
     data.extend_from_slice(id.as_slice());
 
-    let mut iter = TreeRefIter::from_bytes_with_hash(&data, gix_hash::Kind::Sha256);
+    let mut iter = TreeRefIter::from_bytes(&data, gix_hash::Kind::Sha256);
     let entry = iter.next().expect("one entry")?;
     assert_eq!(entry.filename, b"file".as_bstr());
     assert_eq!(entry.oid, id.as_ref());
     assert!(iter.next().is_none());
 
     assert_eq!(
-        gix_object::TreeRef::from_bytes_with_hash(&data, gix_hash::Kind::Sha256)?.entries[0].oid,
+        gix_object::TreeRef::from_bytes(&data, gix_hash::Kind::Sha256)?.entries[0].oid,
         id.as_ref()
     );
 
-    let mut default_sha1_iter = TreeRefIter::from_bytes_with_hash(&data, gix_hash::Kind::Sha1);
+    let mut default_sha1_iter = TreeRefIter::from_bytes(&data, gix_hash::Kind::Sha1);
     assert!(default_sha1_iter.next().expect("sha1-sized prefix is parsed").is_ok());
     assert!(
         default_sha1_iter

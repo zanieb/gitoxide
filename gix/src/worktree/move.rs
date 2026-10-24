@@ -20,6 +20,8 @@ pub struct Options {
 #[allow(missing_docs)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Lookup(#[from] gix_error::Error),
     #[error("Worktree '{id}' was not found")]
     NotFound { id: BString },
     #[error("Cannot move the main worktree")]
@@ -29,20 +31,20 @@ pub enum Error {
     #[error("Destination path '{path}' already exists")]
     DestinationExists { path: PathBuf },
     #[error("Failed to read worktree base path")]
-    ReadBase(#[source] std::io::Error),
+    ReadBase(#[source] gix_error::Error),
     #[error("Worktree '{id}' has invalid gitdir linkage at '{path}'")]
     InvalidWorktreeLink {
         id: BString,
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: gix_error::Error,
     },
     #[error("Cannot move worktree '{id}' because it contains submodules")]
     ContainsSubmodules { id: BString },
     #[error("Failed to open worktree as repository")]
-    OpenWorktree(#[source] crate::worktree::proxy::into_repo::Error),
+    OpenWorktree(#[source] gix_error::Error),
     #[error("Failed to inspect worktree submodules")]
-    Submodules(#[source] crate::submodule::modules::Error),
+    Submodules(#[source] gix_error::Error),
     #[error("Failed to move worktree directory from '{from}' to '{to}'")]
     MoveWorktreeDir {
         from: PathBuf,
@@ -98,7 +100,7 @@ impl crate::Repository {
     fn worktree_move_inner(&self, id: &BStr, new_path: &Path, options: Options) -> Result<(), Error> {
         // Find the worktree by id
         let proxy = self
-            .worktree_proxy_by_id(id)
+            .worktree_proxy_by_id(id)?
             .ok_or_else(|| Error::NotFound { id: id.to_owned() })?;
 
         // Verify this is not the main worktree
@@ -117,13 +119,13 @@ impl crate::Repository {
 
         // Get the current worktree base path
         let current_path = proxy.base().map_err(Error::ReadBase)?;
-        proxy
-            .validate_gitfile_backlink(&current_path)
-            .map_err(|source| Error::InvalidWorktreeLink {
+        super::remove::validate_backlink(&current_path, proxy.git_dir(), self.config.ignore_case).map_err(
+            |source| Error::InvalidWorktreeLink {
                 id: id.to_owned(),
                 path: current_path.clone(),
                 source,
-            })?;
+            },
+        )?;
         let worktree_repo = proxy.clone().into_repo().map_err(Error::OpenWorktree)?;
         if worktree_repo.submodules().map_err(Error::Submodules)?.is_some() {
             return Err(Error::ContainsSubmodules { id: id.to_owned() });
@@ -148,10 +150,10 @@ impl crate::Repository {
         }
 
         // Create parent directory if needed
-        if let Some(parent) = new_path.parent() {
-            if !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(Error::CreateParentDir)?;
-            }
+        if let Some(parent) = new_path.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent).map_err(Error::CreateParentDir)?;
         }
 
         // Move the worktree directory

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use gix_index::State;
-use gix_testtools::scripted_fixture_read_only_standalone;
+use gix_testtools::scripted_fixture_read_only;
 
 fn hash_tree(tree: &gix_object::Tree) -> Result<gix_hash::ObjectId, std::io::Error> {
     use gix_object::WriteTo;
@@ -26,11 +26,11 @@ fn roundtrip_tree_to_index_to_tree() -> crate::Result {
     ];
 
     for fixture in fixtures {
-        let worktree_dir = scripted_fixture_read_only_standalone(fixture)?;
+        let worktree_dir = scripted_fixture_read_only(fixture)?;
         let expected_tree_id = tree_id(&worktree_dir);
 
         let git_dir = worktree_dir.join(".git");
-        let odb = gix_odb::at(git_dir.join("objects"))?;
+        let odb = gix_odb::at(git_dir.join("objects"), gix_testtools::object_hash())?;
 
         // Create index from the known tree
         let mut state = State::from_tree(&expected_tree_id, &odb, Default::default())?;
@@ -76,9 +76,9 @@ fn empty_index_produces_empty_tree() -> crate::Result {
 #[test]
 fn entries_with_remove_flag_are_skipped() -> crate::Result {
     let fixture = "make_index/v2_more_files.sh";
-    let worktree_dir = scripted_fixture_read_only_standalone(fixture)?;
+    let worktree_dir = scripted_fixture_read_only(fixture)?;
     let git_dir = worktree_dir.join(".git");
-    let odb = gix_odb::at(git_dir.join("objects"))?;
+    let odb = gix_odb::at(git_dir.join("objects"), gix_testtools::object_hash())?;
     let expected_tree_id = tree_id(&worktree_dir);
 
     let mut state = State::from_tree(&expected_tree_id, &odb, Default::default())?;

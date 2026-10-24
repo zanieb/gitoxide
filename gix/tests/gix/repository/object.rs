@@ -282,7 +282,11 @@ mod edit_tree {
     }
 }
 mod write_object {
+    #[cfg(feature = "sha256")]
+    use super::empty_bare_repo_with_object_hash;
     use crate::repository::object::empty_bare_in_memory_repo;
+    use crate::util::hex_to_id;
+    use gix_object::tree::EntryKind;
     use gix_testtools::TestResult;
 
     #[test]
@@ -335,6 +339,190 @@ mod write_object {
 
         assert_eq!(actual_blob.data, blob.data);
 
+        Ok(())
+    }
+
+    #[test]
+    fn checked_commit_allows_the_known_empty_tree() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: repo.object_hash().empty_tree(),
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "empty".into(),
+            extra_headers: vec![],
+        };
+
+        let id = repo.write_object_checked(commit)?;
+        assert!(repo.has_object(id));
+        Ok(())
+    }
+
+    #[test]
+    fn checked_commit_rejects_missing_tree() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let missing_tree = hex_to_id("1111111111111111111111111111111111111111");
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: missing_tree,
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "missing tree".into(),
+            extra_headers: vec![],
+        };
+
+        assert_eq!(
+            repo.write_object_checked(commit).unwrap_err().to_string(),
+            format!("Cannot write commit object because it references missing tree object {missing_tree}")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checked_commit_rejects_tree_reference_to_blob() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let blob = repo.write_blob(b"not a tree")?.detach();
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: blob,
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "wrong tree kind".into(),
+            extra_headers: vec![],
+        };
+
+        assert_eq!(
+            repo.write_object_checked(commit).unwrap_err().to_string(),
+            format!("Cannot write commit object because it references tree object {blob}, which is actually blob")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tree_rejects_missing_blob_but_allows_submodule_gitlinks() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let missing_blob = hex_to_id("2222222222222222222222222222222222222222");
+        let submodule_commit = hex_to_id("3333333333333333333333333333333333333333");
+        let mut tree = gix::objs::Tree::empty();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Blob.into(),
+            filename: "missing".into(),
+            oid: missing_blob,
+        });
+        assert_eq!(
+            repo.write_object_checked(&tree).unwrap_err().to_string(),
+            format!("Cannot write tree object because it references missing blob object {missing_blob}")
+        );
+
+        tree.entries.clear();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Commit.into(),
+            filename: "submodule".into(),
+            oid: submodule_commit,
+        });
+        let id = repo.write_object_checked(&tree)?;
+        assert!(repo.has_object(id));
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tree_rejects_entry_reference_to_wrong_kind() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let tree_id = repo.write_object(gix::objs::Tree::empty())?.detach();
+        let mut tree = gix::objs::Tree::empty();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Blob.into(),
+            filename: "tree-as-blob".into(),
+            oid: tree_id,
+        });
+
+        assert_eq!(
+            repo.write_object_checked(&tree).unwrap_err().to_string(),
+            format!("Cannot write tree object because it references blob object {tree_id}, which is actually tree")
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn checked_tree_uses_repository_hash_kind_for_entries() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo_with_object_hash(gix::hash::Kind::Sha256)?;
+        let blob = repo.write_blob(b"sha256 blob")?.detach();
+        let mut tree = gix::objs::Tree::empty();
+        tree.entries.push(gix::objs::tree::Entry {
+            mode: EntryKind::Blob.into(),
+            filename: "blob".into(),
+            oid: blob,
+        });
+
+        let id = repo.write_object_checked(&tree)?;
+        assert!(repo.has_object(id));
+        Ok(())
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn checked_commit_rejects_cross_hash_empty_tree() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo_with_object_hash(gix::hash::Kind::Sha256)?;
+        let sha1_empty_tree = gix::hash::ObjectId::empty_tree(gix::hash::Kind::Sha1);
+        let actor = gix::actor::Signature {
+            name: "author".into(),
+            email: "author@example.com".into(),
+            time: gix_date::parse_header("1 +0000").unwrap(),
+        };
+        let commit = gix::objs::Commit {
+            tree: sha1_empty_tree,
+            author: actor.clone(),
+            committer: actor,
+            parents: Default::default(),
+            encoding: None,
+            message: "cross-hash empty tree".into(),
+            extra_headers: vec![],
+        };
+
+        assert_eq!(
+            repo.write_object_checked(commit).unwrap_err().to_string(),
+            format!("Cannot write commit object because it references missing tree object {sha1_empty_tree}")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checked_tag_rejects_target_reference_to_wrong_kind() -> crate::Result {
+        let repo = empty_bare_in_memory_repo()?;
+        let blob = repo.write_blob(b"not a commit")?.detach();
+        let tag = gix::objs::Tag {
+            target: blob,
+            target_kind: gix::objs::Kind::Commit,
+            name: "v1.0".into(),
+            tagger: None,
+            message: "wrong target kind".into(),
+            signature: None,
+        };
+
+        assert_eq!(
+            repo.write_object_checked(tag).unwrap_err().to_string(),
+            format!("Cannot write tag object because it references commit object {blob}, which is actually blob")
+        );
         Ok(())
     }
 }
@@ -642,6 +830,55 @@ mod find {
         repo.write_blob(&empty_blob.data)?;
         assert!(repo.has_object(empty_blob.id), "it exists after it was written");
 
+        Ok(())
+    }
+
+    #[test]
+    fn try_find_object_verified_returns_only_objects_with_matching_checksums() -> crate::Result {
+        let repo = basic_repo()?;
+        let commit = repo.head()?.into_peeled_id()?;
+        assert_eq!(
+            repo.try_find_object_verified(commit)?.expect("present").kind,
+            gix_object::Kind::Commit
+        );
+
+        let empty_tree = gix::hash::ObjectId::empty_tree(repo.object_hash());
+        assert_eq!(
+            repo.try_find_object_verified(empty_tree)?
+                .expect("present")
+                .into_tree()
+                .iter()
+                .count(),
+            0
+        );
+        assert!(
+            repo.try_find_object_verified(hex_to_id("1111111111111111111111111111111111111111"))?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn try_find_object_verified_rejects_objects_stored_under_the_wrong_id() -> crate::Result {
+        let (_tmp, repo) = empty_bare_repo()?;
+        let actual_id = repo.write_blob(b"content")?;
+        let expected_id = hex_to_id("1111111111111111111111111111111111111111");
+        let store = gix::odb::loose::Store::at(repo.git_dir().join("objects"), repo.object_hash());
+        let expected_path = store.object_path(&expected_id);
+        std::fs::create_dir_all(expected_path.parent().expect("loose objects have a directory"))?;
+        std::fs::copy(store.object_path(&actual_id), expected_path)?;
+
+        assert_eq!(
+            repo.try_find_object(expected_id)?
+                .expect("object exists under its wrong path")
+                .data,
+            b"content",
+            "regular lookup keeps the historical unchecked behavior"
+        );
+        assert_eq!(
+            repo.try_find_object_verified(expected_id).unwrap_err().to_string(),
+            format!("Hash was {actual_id}, but should have been {expected_id}")
+        );
         Ok(())
     }
 }

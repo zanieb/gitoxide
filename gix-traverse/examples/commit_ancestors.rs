@@ -14,9 +14,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
 
-    let odb = gix_odb::at(objects_dir)?;
     let tip = gix_hash::ObjectId::from_hex(tip.to_string_lossy().as_bytes())?;
-    let commit_graph = gix_commitgraph::at(odb.store_ref().path().join("info")).ok();
+    let odb = gix_odb::at(objects_dir, tip.kind())?;
+    let commit_graph = gix_commitgraph::at(odb.store_ref().path().join("info"), tip.kind(), None).ok();
 
     for commit in Simple::new([tip], &odb)
         .sorting(Sorting::ByCommitTime(CommitTimeOrder::NewestFirst))?

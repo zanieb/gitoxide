@@ -293,3 +293,22 @@ impl gix_transport::client::async_io::ReadlineBufRead for Fixture<'_> {
         Ok(len)
     }
 }
+
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn extract_empty_v1_refs_from_capabilities_dummy_ref() {
+    let input = &mut Fixture("0000000000000000000000000000000000000000 capabilities^{}".as_bytes());
+    let (out, shallow) = refs::from_v1_refs_received_as_part_of_handshake_and_capabilities(
+        input,
+        Capabilities::from_bytes(b"\0multi_ack agent=git/2.50.1")
+            .expect("valid capabilities")
+            .0
+            .iter(),
+    )
+    .await
+    .expect("no failure from empty refs advertisement");
+
+    assert!(out.is_empty());
+    assert!(shallow.is_empty());
+}

@@ -84,7 +84,7 @@ impl Repository {
             let path = path.as_bstr();
             match filter.worktree_file_to_object(path, &index)? {
                 Some((id, kind, _metadata)) => {
-                    let worktree_path = workdir.join(gix_path::from_bstr(path));
+                    let worktree_path = workdir.join(gix_path::from_bstr(path)?);
                     let metadata = gix_index::fs::Metadata::from_path_no_follow(&worktree_path).map_err(|source| {
                         Error::Metadata {
                             path: worktree_path.clone(),

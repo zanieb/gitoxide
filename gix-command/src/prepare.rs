@@ -266,6 +266,9 @@ impl TryFrom<Prepare> for Command {
             if let Some(git_dir) = ctx.git_dir {
                 cmd.env("GIT_DIR", &git_dir);
             }
+            if let Some(path) = ctx.git_exec_path {
+                cmd.env("GIT_EXEC_PATH", path);
+            }
             if let Some(worktree_dir) = ctx.worktree_dir {
                 cmd.env("GIT_WORK_TREE", worktree_dir);
             }

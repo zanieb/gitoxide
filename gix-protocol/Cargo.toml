@@ -79,6 +79,7 @@ path = "tests/async-protocol.rs"
 required-features = ["async-client"]
 
 [dependencies]
+thiserror = "2.0.18"
 gix-error = { version = "^0.5.2", path = "../gix-error" }
 gix-transport = { version = "^0.62.0", path = "../gix-transport" }
 gix-hash = { version = "^0.28.1", path = "../gix-hash" }

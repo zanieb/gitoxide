@@ -16,6 +16,8 @@ pub enum ResetMode {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
+    #[error(transparent)]
+    Operation(#[from] gix_error::Error),
     #[error("Cannot do a soft reset in the middle of a merge")]
     SoftResetDuringMerge,
     #[error("Cannot do a soft reset with unmerged index entries")]
@@ -28,27 +30,27 @@ pub enum Error {
         actual: gix_object::Kind,
     },
     #[error(transparent)]
-    FindObject(#[from] crate::object::find::existing::Error),
+    FindObject(gix_error::Error),
     #[error(transparent)]
-    DecodeCommit(#[from] gix_object::decode::Error),
+    DecodeCommit(gix_error::Error),
     #[error(transparent)]
-    FindHead(#[from] crate::reference::find::existing::Error),
+    FindHead(gix_error::Error),
     #[error(transparent)]
-    EditReference(#[from] crate::reference::edit::Error),
+    EditReference(gix_error::Error),
     #[error(transparent)]
-    OpenIndex(#[from] crate::worktree::open_index::Error),
+    OpenIndex(gix_error::Error),
     #[error(transparent)]
-    IndexFromTree(#[from] super::index_from_tree::Error),
+    IndexFromTree(gix_error::Error),
     #[error(transparent)]
-    WriteIndex(#[from] gix_index::file::write::Error),
+    WriteIndex(gix_error::Error),
     #[error(transparent)]
-    CheckoutOptions(#[from] crate::config::checkout_options::Error),
+    CheckoutOptions(gix_error::Error),
     #[error(transparent)]
-    Checkout(#[from] gix_worktree_state::checkout::Error),
+    Checkout(gix_error::Error),
     #[error("Failed to convert object database to Arc for thread-safe access")]
     ObjectsToArc(#[from] std::io::Error),
     #[error(transparent)]
-    BooleanConfig(#[from] crate::config::boolean::Error),
+    BooleanConfig(gix_error::Error),
 }
 
 impl crate::Repository {
@@ -96,13 +98,11 @@ impl crate::Repository {
         }
 
         // Obtain the tree of the target commit
-        let target_commit = self
-            .find_object(target_id)?
+        let object = self.find_object(target_id)?;
+        let actual = object.kind;
+        let target_commit = object
             .try_into_commit()
-            .map_err(|err| Error::NotACommit {
-                id: err.id,
-                actual: err.actual,
-            })?;
+            .map_err(|_| Error::NotACommit { id: target_id, actual })?;
         let target_tree_id = target_commit.tree_id().map_err(Error::DecodeCommit)?;
 
         // Update ORIG_HEAD and HEAD
@@ -166,9 +166,9 @@ impl crate::Repository {
         let target_tree_id: ObjectId = match obj_kind {
             gix_object::Kind::Commit => target_obj
                 .try_into_commit()
-                .map_err(|err| Error::NotACommit {
-                    id: err.id,
-                    actual: err.actual,
+                .map_err(|_| Error::NotACommit {
+                    id: obj_id,
+                    actual: obj_kind,
                 })?
                 .tree_id()
                 .map_err(Error::DecodeCommit)?
@@ -190,7 +190,10 @@ impl crate::Repository {
 
         // Collect normalized repository-relative paths. An empty path means the
         // entire index, and directory paths match all entries below them.
-        let reset_paths: Vec<Vec<u8>> = paths.into_iter().map(|p| normalize_reset_path(p.as_ref())).collect();
+        let reset_paths: Vec<Vec<u8>> = paths
+            .into_iter()
+            .map(|p| normalize_reset_path(p.as_ref()))
+            .collect::<gix_error::Result<_>>()?;
 
         // Build a lookup of target entries by path.
         let target_entries: std::collections::HashMap<Vec<u8>, (gix_hash::ObjectId, gix_index::entry::Mode)> =
@@ -369,6 +372,7 @@ impl crate::Repository {
 impl From<super::worktree_ops::CheckoutError> for Error {
     fn from(err: super::worktree_ops::CheckoutError) -> Self {
         match err {
+            super::worktree_ops::CheckoutError::Operation(e) => Self::Operation(e),
             super::worktree_ops::CheckoutError::CheckoutOptions(e) => Error::CheckoutOptions(e),
             super::worktree_ops::CheckoutError::Checkout(e) => Error::Checkout(e),
             super::worktree_ops::CheckoutError::ObjectsToArc(e) => Error::ObjectsToArc(e),
@@ -383,13 +387,13 @@ fn path_matches_reset_path(path: &[u8], reset_path: &[u8]) -> bool {
     path.get(..reset_path.len()).is_some_and(|prefix| prefix == reset_path) && path.get(reset_path.len()) == Some(&b'/')
 }
 
-fn normalize_reset_path(path: &std::path::Path) -> Vec<u8> {
-    let mut path = gix_path::to_unix_separators_on_windows(gix_path::into_bstr(path.to_owned())).into_owned();
+fn normalize_reset_path(path: &std::path::Path) -> gix_error::Result<Vec<u8>> {
+    let mut path = gix_path::to_unix_separators_on_windows(gix_path::into_bstr(path.to_owned())?).into_owned();
     while path.last() == Some(&b'/') {
         path.pop();
     }
     if path.is_empty() || path == b"." || path.starts_with(b"/") {
-        return path.into();
+        return Ok(path.into());
     }
 
     let mut normalized = Vec::with_capacity(path.len());
@@ -402,5 +406,5 @@ fn normalize_reset_path(path: &std::path::Path) -> Vec<u8> {
         }
         normalized.extend_from_slice(component);
     }
-    normalized
+    Ok(normalized)
 }

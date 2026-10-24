@@ -1,8 +1,9 @@
 use std::{borrow::Cow, fmt::Display, time::SystemTime};
 
-use bstr::{BStr, BString};
+use bstr::BStr;
+use gix_error::{Error, ResultExt, validation};
 
-use crate::{Date, Error};
+use crate::Date;
 
 impl Date {
     /// Parse a date from `input` using `now` as the base time for relative dates.
@@ -10,8 +11,12 @@ impl Date {
     /// This accepts the same formats as [`gix_date::parse()`], including raw commit-header dates,
     /// RFC 2822 dates, ISO 8601 variants, UNIX timestamps, and relative dates like `2 weeks ago`.
     pub fn try_from_with_now(input: &BStr, now: Option<SystemTime>) -> Result<Self, Error> {
-        let date = std::str::from_utf8(input).map_err(|err| date_err(input).with_err(err))?;
-        gix_date::parse(date, now).map(Date).map_err(|_| date_err(input))
+        let date = std::str::from_utf8(input).or_raise(|| date_err(input))?;
+        let now = now
+            .map(gix_date::Zoned::try_from)
+            .transpose()
+            .or_raise(|| date_err(input))?;
+        gix_date::parse(date, now).map(Date).or_raise(|| date_err(input))
     }
 
     /// Return the contained time value.
@@ -26,11 +31,8 @@ impl Display for Date {
     }
 }
 
-fn date_err(input: impl Into<BString>) -> Error {
-    Error::new(
-        "Dates need to be parseable by git, like '1970-01-01', '1745582210 +0200', or '2 weeks ago'",
-        input,
-    )
+fn date_err(input: &BStr) -> gix_error::Message {
+    validation("Invalid Git date").with_input(input)
 }
 
 impl TryFrom<&BStr> for Date {

@@ -70,17 +70,19 @@ mod validate {
 
     impl ObjectFormat {
         pub(super) fn parse(value: &BStr) -> Result<gix_hash::Kind> {
+            let sha1 = value.eq_ignore_ascii_case(b"sha1") || value.eq_ignore_ascii_case(b"sha-1");
+            let sha256 = value.eq_ignore_ascii_case(b"sha256") || value.eq_ignore_ascii_case(b"sha-256");
             #[cfg(feature = "sha1")]
-            if value.eq_ignore_ascii_case(b"sha1") {
+            if sha1 {
                 return Ok(gix_hash::Kind::Sha1);
             }
 
             #[cfg(feature = "sha256")]
-            if value.eq_ignore_ascii_case(b"sha256") {
+            if sha256 {
                 return Ok(gix_hash::Kind::Sha256);
             }
 
-            if value.eq_ignore_ascii_case(b"sha1") || value.eq_ignore_ascii_case(b"sha256") {
+            if sha1 || sha256 {
                 return Err(message("Object format is not enabled in this build")
                     .with_input(value)
                     .unsupported_error());

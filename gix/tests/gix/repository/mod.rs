@@ -184,7 +184,7 @@ mod index {
 
     #[cfg(feature = "dirwalk")]
     mod add {
-        use super::*;
+        use gix::bstr::ByteSlice;
 
         fn repo_rw() -> crate::Result<(gix::Repository, gix_testtools::tempfile::TempDir)> {
             let tmp = gix_testtools::tempfile::tempdir()?;
@@ -403,3 +403,6 @@ fn repository_is_send() -> TestResult {
     f(crate::util::basic_repo()?);
     Ok(())
 }
+
+#[cfg(feature = "hooks")]
+mod hook;

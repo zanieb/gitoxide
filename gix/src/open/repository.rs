@@ -559,6 +559,7 @@ impl ThreadSafeRepository {
                     config.object_hash,
                     &mut replacements.into_iter(),
                     gix_odb::store::init::Options {
+                        use_alternates: true,
                         slots: object_store_slots,
                         use_multi_pack_index: config.use_multi_pack_index,
                         alloc_limit_bytes: config.alloc_limit_bytes,
@@ -750,7 +751,7 @@ mod tests {
     use crate::bstr::BString;
 
     fn path_to_bstring(path: &std::path::Path) -> BString {
-        gix_path::into_bstr(path.to_owned()).into_owned()
+        gix_path::into_bstr(path.to_owned()).expect("fixture path").into_owned()
     }
 
     #[test]

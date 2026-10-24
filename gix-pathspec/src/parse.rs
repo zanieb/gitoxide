@@ -273,3 +273,79 @@ fn validated_attr_value_byte(byte: u8) -> Result<u8> {
             .validation_error())
     }
 }
+
+/// Parse pathspecs from `--pathspec-from-file` style input.
+pub mod file {
+    /// Options for [`from_file()`][super::from_file].
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub struct Options {
+        /// The separator between pathspec entries.
+        pub separator: Separator,
+        /// If true, entries may be double-quoted as described by Git's `core.quotePath`.
+        ///
+        /// Set this to `false` for `--pathspec-file-nul` behavior, where quotes and newlines
+        /// are part of the pathspec entry.
+        pub allow_quoted_strings: bool,
+    }
+
+    impl Default for Options {
+        fn default() -> Self {
+            Options {
+                separator: Separator::Line,
+                allow_quoted_strings: true,
+            }
+        }
+    }
+
+    /// The separator between pathspec entries.
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub enum Separator {
+        /// Entries are separated by LF, with a preceding CR stripped from each line.
+        Line,
+        /// Entries are separated by NUL bytes.
+        Nul,
+    }
+}
+
+/// Parse `input` in `--pathspec-from-file` format.
+///
+/// Line-separated input strips one trailing CR before the LF separator and supports
+/// double-quoted entries. NUL-separated input should set [`file::Options::allow_quoted_strings`]
+/// to `false` to match Git's `--pathspec-file-nul` behavior.
+pub fn from_file(input: &[u8], defaults: Defaults, options: file::Options) -> Result<Vec<Pattern>> {
+    use gix_error::ResultExt;
+    use std::borrow::Cow;
+    let separator = match options.separator {
+        file::Separator::Line => b'\n',
+        file::Separator::Nul => b'\0',
+    };
+    let mut entries = input.split(|b| *b == separator).peekable();
+    let mut patterns = Vec::new();
+    let mut entry = 0;
+
+    while let Some(mut raw) = entries.next() {
+        if raw.is_empty() && entries.peek().is_none() {
+            break;
+        }
+        entry += 1;
+
+        if matches!(options.separator, file::Separator::Line) && raw.last() == Some(&b'\r') {
+            raw = &raw[..raw.len() - 1];
+        }
+
+        let unquoted = if options.allow_quoted_strings {
+            let (unquoted, _) = gix_quote::ansi_c::undo(raw.as_bstr())
+                .or_raise(|| gix_error::message!("Could not unquote pathspec entry {entry}").validation())?;
+            unquoted
+        } else {
+            Cow::Borrowed(raw.as_bstr())
+        };
+
+        patterns.push(
+            Pattern::from_bytes(unquoted.as_ref(), defaults)
+                .or_raise(|| gix_error::message!("Could not parse pathspec entry {entry}").validation())?,
+        );
+    }
+
+    Ok(patterns)
+}

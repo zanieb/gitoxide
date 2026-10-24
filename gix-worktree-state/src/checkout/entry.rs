@@ -206,10 +206,8 @@ where
             0
         }
         gix_index::entry::Mode::COMMIT => {
-            gix_trace::warn!(
-                "Skipped submodule at \"{entry_path}\" ({id}) as it cannot yet be handled",
-                id = entry.id
-            );
+            try_op_or_unlink(dest, overwrite_existing, create_or_reuse_directory).or_error()?;
+            entry.stat = Stat::from_fs(&gix_index::fs::Metadata::from_path_no_follow(dest).or_error()?).or_error()?;
             0
         }
         _ => unreachable!(),

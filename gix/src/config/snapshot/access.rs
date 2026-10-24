@@ -1,3 +1,4 @@
+use crate::bstr::BStr;
 use std::ffi::OsString;
 
 use crate::error::{bail, validation};
@@ -202,16 +203,16 @@ impl<'repo> CommitAutoRollback<'repo> {
 }
 
 /// Utilities
-impl<'repo> ConfigEditGuard<'repo> {
+impl<'repo> crate::config::ConfigEditGuard<'repo> {
     /// Set the value at `key` to `new_value`, possibly creating the section if it doesn't exist yet, or overriding the most recent existing
     /// value, which will be returned.
     pub fn set_value<'b>(
         &mut self,
         key: &'static dyn crate::config::tree::Key,
         new_value: impl Into<&'b BStr>,
-    ) -> Result<Option<BString>, crate::config::set_value::Error> {
+    ) -> Result<Option<BString>> {
         if let Some(crate::config::tree::SubSectionRequirement::Parameter(_)) = key.subsection_requirement() {
-            return Err(crate::config::set_value::Error::SubSectionRequired);
+            gix_error::bail!(gix_error::validation("This key requires a subsection"));
         }
         let value = new_value.into();
         key.validate(value)?;
@@ -223,7 +224,7 @@ impl<'repo> ConfigEditGuard<'repo> {
             }
             None => self.config.set_raw_value_by(section.name(), None, key.name(), value)?,
         };
-        Ok(current.map(std::borrow::Cow::into_owned))
+        Ok(current)
     }
 
     /// Set the value at `key` to `new_value` in the given `subsection`, possibly creating the section and sub-section if it doesn't exist yet,
@@ -233,9 +234,9 @@ impl<'repo> ConfigEditGuard<'repo> {
         key: &'static dyn crate::config::tree::Key,
         subsection: impl Into<&'a BStr>,
         new_value: impl Into<&'b BStr>,
-    ) -> Result<Option<BString>, crate::config::set_value::Error> {
+    ) -> Result<Option<BString>> {
         if let Some(crate::config::tree::SubSectionRequirement::Never) = key.subsection_requirement() {
-            return Err(crate::config::set_value::Error::SubSectionForbidden);
+            gix_error::bail!(gix_error::validation("This key does not accept a subsection"));
         }
         let value = new_value.into();
         key.validate(value)?;
@@ -245,16 +246,16 @@ impl<'repo> ConfigEditGuard<'repo> {
             .expect("we know it needs a subsection");
         let key = gix_config::KeyRef::parse_unvalidated((**name).as_bstr())
             .expect("statically known keys can always be parsed");
-        let current =
-            self.config
-                .set_raw_value_by(key.section_name, key.subsection_name, key.value_name.to_owned(), value)?;
-        Ok(current.map(std::borrow::Cow::into_owned))
+        let current = self
+            .config
+            .set_raw_value_by(key.section_name, key.subsection_name, key.value_name, value)?;
+        Ok(current)
     }
 
     /// Apply all changes made to this instance, writing them to disk atomically and updating the in-memory configuration.
     ///
     /// Note that this would also happen once this instance is dropped, but using this method may be more intuitive and won't squelch errors.
-    pub fn commit(mut self) -> Result<&'repo mut crate::Repository, crate::config::edit::CommitError> {
+    pub fn commit(mut self) -> std::result::Result<&'repo mut crate::Repository, crate::config::edit::CommitError> {
         let repo = self.repo.take().expect("always present here");
         self.commit_inner(repo)
     }
@@ -268,7 +269,7 @@ impl<'repo> ConfigEditGuard<'repo> {
     pub(crate) fn commit_inner(
         &mut self,
         repo: &'repo mut crate::Repository,
-    ) -> Result<&'repo mut crate::Repository, crate::config::edit::CommitError> {
+    ) -> std::result::Result<&'repo mut crate::Repository, crate::config::edit::CommitError> {
         if let Some(mut lock) = self.lock.take() {
             self.config
                 .write_to_filter(&mut lock, |s| s.meta().source == gix_config::Source::Local)?;

@@ -604,6 +604,38 @@ mod find_remote {
         .into_owned()
         .to_string()
     }
+
+    #[test]
+    fn legacy_remotes_and_branches_files() -> crate::Result {
+        let repo = remote::repo("legacy-remote-files");
+
+        let remote = repo.find_remote("legacy")?;
+        assert_eq!(remote.name().expect("named remote").as_bstr(), "legacy");
+        assert_eq!(remote.url(Direction::Fetch).unwrap().path, ".");
+        assert_eq!(
+            remote.refspecs(Direction::Fetch),
+            &[fetchspec("+refs/heads/*:refs/remotes/legacy/*")]
+        );
+        assert_eq!(
+            remote.refspecs(Direction::Push),
+            &[pushspec("refs/heads/main:refs/heads/main")]
+        );
+
+        let remote = repo.find_remote("branchfile")?;
+        assert_eq!(remote.name().expect("named remote").as_bstr(), "branchfile");
+        assert_eq!(remote.url(Direction::Fetch).unwrap().path, ".");
+        assert_eq!(
+            remote.refspecs(Direction::Fetch),
+            &[fetchspec("refs/heads/main:refs/heads/branchfile")]
+        );
+        assert_eq!(remote.refspecs(Direction::Push), &[pushspec("HEAD:refs/heads/main")]);
+
+        assert!(
+            repo.try_find_remote("directory/name").is_none(),
+            "legacy remote names cannot cross directory boundaries"
+        );
+        Ok(())
+    }
 }
 
 mod find_fetch_remote {

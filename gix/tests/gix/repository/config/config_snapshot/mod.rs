@@ -308,7 +308,7 @@ mod config_edit {
             "subsection value should be in the file"
         );
         assert_eq!(
-            repo.config_snapshot().string("branch.main.merge").as_deref(),
+            repo.config_snapshot().string("branch.main.merge"),
             Some("refs/heads/other".into()),
             "in-memory config was updated"
         );
@@ -329,7 +329,7 @@ mod config_edit {
         // The fixture has core.autocrlf = true. Overwrite it.
         {
             let mut guard = repo.config_edit()?;
-            guard.set_raw_value(&Core::AUTO_CRLF, "false")?;
+            guard.set_raw_value(Core::AUTO_CRLF, "false")?;
             guard.commit()?;
         }
 
@@ -360,7 +360,7 @@ mod config_edit {
         {
             let mut guard = repo.config_edit()?;
             guard.set_value(&Core::ABBREV, "6")?;
-            guard.set_raw_value(&Core::AUTO_CRLF, "false")?;
+            guard.set_raw_value(Core::AUTO_CRLF, "false")?;
             guard.commit()?;
         }
 
@@ -387,7 +387,7 @@ mod config_edit {
         // Second edit should not lose the first
         {
             let mut guard = repo.config_edit()?;
-            guard.set_raw_value(&Core::AUTO_CRLF, "false")?;
+            guard.set_raw_value(Core::AUTO_CRLF, "false")?;
             guard.commit()?;
         }
         assert_eq!(
@@ -413,7 +413,7 @@ mod config_edit {
         // Set a value in a section that doesn't exist yet via raw value.
         {
             let mut guard = repo.config_edit()?;
-            guard.set_raw_value(&"custom.key", "myvalue")?;
+            guard.set_raw_value("custom.key", "myvalue")?;
             guard.commit()?;
         }
 
@@ -424,7 +424,7 @@ mod config_edit {
         );
         assert!(new_contents.contains("key = myvalue"));
         assert_eq!(
-            repo.config_snapshot().string("custom.key").as_deref(),
+            repo.config_snapshot().string("custom.key"),
             Some("myvalue".into()),
             "in-memory config has the new value"
         );
@@ -492,8 +492,8 @@ mod config_edit {
         {
             let mut guard = repo.config_edit()?;
             // Set a value containing spaces and special characters.
-            guard.set_raw_value(&"test.path-value", "/some/path with spaces/file.txt")?;
-            guard.set_raw_value(&"test.url-value", "https://example.com/repo.git")?;
+            guard.set_raw_value("test.path-value", "/some/path with spaces/file.txt")?;
+            guard.set_raw_value("test.url-value", "https://example.com/repo.git")?;
             guard.commit()?;
         }
 
@@ -501,12 +501,12 @@ mod config_edit {
         assert!(new_contents.contains("path-value"), "path value should be in the file");
 
         assert_eq!(
-            repo.config_snapshot().string("test.path-value").as_deref(),
+            repo.config_snapshot().string("test.path-value"),
             Some("/some/path with spaces/file.txt".into()),
             "value with spaces is preserved"
         );
         assert_eq!(
-            repo.config_snapshot().string("test.url-value").as_deref(),
+            repo.config_snapshot().string("test.url-value"),
             Some("https://example.com/repo.git".into()),
             "URL value is preserved"
         );

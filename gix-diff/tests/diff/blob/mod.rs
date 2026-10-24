@@ -72,3 +72,5 @@ index 0000000..1111111 100644
         "Git's optional hunk section isn't part of gix-diff's unified diff output"
     );
 }
+
+mod patch;

@@ -43,7 +43,7 @@ pub(crate) fn decode(data: &[u8], object_hash: gix_hash::Kind) -> Result<Link> {
     })
 }
 
-pub(crate) fn write_to(link: &Link, object_hash: gix_hash::Kind, mut out: impl Write) -> Result<(), std::io::Error> {
+pub(crate) fn write_to(link: &Link, object_hash: gix_hash::Kind, mut out: impl Write) -> std::io::Result<()> {
     let mut data = Vec::new();
     let checksum = link.shared_index_checksum.as_bytes();
     if checksum.len() != object_hash.len_in_bytes() {

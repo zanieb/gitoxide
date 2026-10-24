@@ -52,7 +52,7 @@ impl State {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        let _span = gix_features::trace::coarse!("gix_index::State::write_tree_to()");
+        let _span = gix_trace::coarse!("gix_index::State::write_tree_to()");
 
         // Validate: no conflicts allowed
         for entry in &self.entries {

@@ -25,7 +25,7 @@ fn empty() -> gix_testtools::TestResult {
 fn everything() -> gix_testtools::TestResult {
     let fixture = tree_fixture("everything.tree")?;
     let hash_kind = crate::fixture_hash_kind();
-    let tree_ref = TreeRef::from_bytes_with_hash(&fixture, hash_kind)?;
+    let tree_ref = TreeRef::from_bytes(&fixture, hash_kind)?;
     assert_eq!(
         tree_ref,
         TreeRef {
@@ -66,7 +66,7 @@ fn invalid() {
     let fixture = tree_fixture("definitely-special.tree").expect("fixture is valid");
     let partial_tree = &fixture[..fixture.len() / 2];
     let hash_kind = crate::fixture_hash_kind();
-    assert!(TreeRef::from_bytes_with_hash(partial_tree, hash_kind).is_err());
+    assert!(TreeRef::from_bytes(partial_tree, hash_kind).is_err());
     assert!(
         TreeRefIter::from_bytes(partial_tree, hash_kind)
             .take_while(std::result::Result::is_ok)
@@ -79,7 +79,7 @@ fn invalid() {
 #[test]
 fn fuzzed() {
     assert!(
-        gix_object::TreeRef::from_bytes_with_hash(b"2", gix_testtools::object_hash()).is_err(),
+        gix_object::TreeRef::from_bytes(b"2", gix_testtools::object_hash()).is_err(),
         "fail, but don't crash"
     );
 }
@@ -88,8 +88,8 @@ fn fuzzed() {
 fn fuzz_artifact_inputs_can_be_parsed_without_panicking() {
     for path in crate::fuzz_artifact_paths("fuzz_tree") {
         let input = std::fs::read(path).expect("artifact is readable");
-        _ = TreeRef::from_bytes_with_hash(&input, gix_hash::Kind::Sha1);
-        _ = TreeRef::from_bytes_with_hash(&input, gix_hash::Kind::Sha256);
+        _ = TreeRef::from_bytes(&input, gix_hash::Kind::Sha1);
+        _ = TreeRef::from_bytes(&input, gix_hash::Kind::Sha256);
     }
 }
 
@@ -106,7 +106,7 @@ fn special_trees() -> gix_testtools::TestResult {
         ("special-5", 17),
     ] {
         let fixture = tree_fixture(&format!("{name}.tree"))?;
-        let actual = TreeRef::from_bytes_with_hash(&fixture, hash_kind)?;
+        let actual = TreeRef::from_bytes(&fixture, hash_kind)?;
         assert_eq!(actual.entries.len(), expected_entry_count, "{name}");
         assert_eq!(
             TreeRefIter::from_bytes(&fixture, hash_kind)

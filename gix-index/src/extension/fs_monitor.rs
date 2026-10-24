@@ -5,11 +5,7 @@ use crate::{
     util::{read_u32, read_u64, split_at_byte_exclusive},
 };
 
-#[derive(Clone)]
-#[expect(
-    dead_code,
-    reason = "for the time when we actually support the git status daemon, this just models its data."
-)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     V1 { nanos_since_1970: u64 },
     V2 { token: BString },

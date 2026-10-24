@@ -24,6 +24,21 @@ fn git_dir_sets_env_only() -> gix_testtools::TestResult {
 }
 
 #[test]
+fn git_exec_path_sets_env_only() -> gix_testtools::TestResult {
+    let path = std::path::Path::new("git-core");
+    let cmd = std::process::Command::try_from(gix_command::prepare("").with_context(Context {
+        git_exec_path: Some(path.into()),
+        ..Default::default()
+    }))?;
+    assert_eq!(
+        cmd.get_envs().collect::<Vec<_>>(),
+        [(std::ffi::OsStr::new("GIT_EXEC_PATH"), Some(path.as_os_str()))]
+    );
+    assert_eq!(cmd.get_current_dir(), None);
+    Ok(())
+}
+
+#[test]
 fn worktree_dir_sets_env_only() -> gix_testtools::TestResult {
     let dir = gix_testtools::tempfile::TempDir::new()?;
     let path = gix_path::realpath(dir.path())?;

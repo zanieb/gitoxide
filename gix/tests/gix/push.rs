@@ -339,7 +339,7 @@ mod blocking_io {
 
         let empty_bare = dir.path().join("empty.git");
         let status = Command::new("git")
-            .args(["init", "--bare", empty_bare.to_str().unwrap()])
+            .args(["init", "--bare", "-b", "main", empty_bare.to_str().unwrap()])
             .output()
             .expect("git init --bare");
         assert!(status.status.success());
@@ -679,7 +679,7 @@ mod blocking_io {
         // Create a fresh empty bare repo
         let empty_bare = dir.path().join("empty.git");
         let status = Command::new("git")
-            .args(["init", "--bare", empty_bare.to_str().unwrap()])
+            .args(["init", "--bare", "-b", "main", empty_bare.to_str().unwrap()])
             .output()
             .expect("git init --bare");
         assert!(status.status.success());

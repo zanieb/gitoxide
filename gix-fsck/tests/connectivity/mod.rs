@@ -106,15 +106,11 @@ impl MemoryDb {
 }
 
 impl gix_object::Find for MemoryDb {
-    fn try_find<'a>(
-        &self,
-        id: &gix_hash::oid,
-        buffer: &'a mut Vec<u8>,
-    ) -> Result<Option<Data<'a>>, gix_object::find::Error> {
+    fn try_find<'a>(&self, id: &gix_hash::oid, buffer: &'a mut Vec<u8>) -> gix_error::Result<Option<Data<'a>>> {
         Ok(self.objects.get(id).map(|(kind, data)| {
             buffer.clear();
             buffer.extend_from_slice(data);
-            Data::new_with_hash(*kind, buffer, id.kind())
+            Data::new(buffer, *kind, id.kind())
         }))
     }
 }
@@ -511,14 +507,11 @@ fn blob_entries_reject_non_blob_objects_without_hash_validation() {
         .check_tag(&tag_id)
         .expect_err("a blob-mode tree entry must point to a blob object");
 
-    assert!(matches!(
-        err,
-        gix_object::find::existing_object::Error::ObjectKind {
-            oid,
-            actual: Kind::Commit,
-            expected: Kind::Blob,
-        } if oid == commit_id
-    ));
+    let diagnostic = err.to_string();
+    assert!(
+        diagnostic.contains(&commit_id.to_string()) && diagnostic.contains("commit") && diagnostic.contains("blob"),
+        "{diagnostic}"
+    );
 }
 
 #[test]
@@ -536,14 +529,11 @@ fn previously_seen_object_is_revalidated_when_referenced_as_a_blob() {
         .check_index_tree_cache([tree_id])
         .expect_err("a seen commit object still cannot satisfy a blob entry");
 
-    assert!(matches!(
-        err,
-        gix_object::find::existing_object::Error::ObjectKind {
-            oid,
-            actual: Kind::Commit,
-            expected: Kind::Blob,
-        } if oid == commit_id
-    ));
+    let diagnostic = err.to_string();
+    assert!(
+        diagnostic.contains(&commit_id.to_string()) && diagnostic.contains("commit") && diagnostic.contains("blob"),
+        "{diagnostic}"
+    );
 }
 
 #[test]
@@ -557,14 +547,11 @@ fn previously_seen_object_is_revalidated_when_referenced_as_a_tree() {
         .check_index_tree_cache([blob_id])
         .expect_err("a seen blob object still cannot satisfy a tree entry");
 
-    assert!(matches!(
-        err,
-        gix_object::find::existing_object::Error::ObjectKind {
-            oid,
-            actual: Kind::Blob,
-            expected: Kind::Tree,
-        } if oid == blob_id
-    ));
+    let diagnostic = err.to_string();
+    assert!(
+        diagnostic.contains(&blob_id.to_string()) && diagnostic.contains("blob") && diagnostic.contains("tree"),
+        "{diagnostic}"
+    );
 }
 
 #[test]
