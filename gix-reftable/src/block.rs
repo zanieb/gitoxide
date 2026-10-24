@@ -133,11 +133,37 @@ pub fn read_ref_records_at(
     }
     let records_end = data_end - restart_table_size;
 
+    let mut restarts = block_data[records_end..data_end - 2]
+        .chunks_exact(3)
+        .map(|bytes| crate::get_be24(bytes.try_into().expect("three-byte restart offset")) as usize)
+        .peekable();
+    if records_end > header_size
+        && restarts
+            .peek()
+            .copied()
+            .and_then(|offset| offset.checked_sub(header_off))
+            != Some(header_size)
+    {
+        return Err(Error::InvalidRestartOffset);
+    }
+
     let mut records = Vec::new();
     let mut pos = header_size;
     let mut last_name: Vec<u8> = Vec::new();
 
     while pos < records_end {
+        if let Some(&offset) = restarts.peek() {
+            let position = pos.checked_add(header_off).ok_or(Error::InvalidRestartOffset)?;
+            if offset < position {
+                return Err(Error::InvalidRestartOffset);
+            }
+            if offset == position {
+                if block_data[pos] != 0 {
+                    return Err(Error::InvalidRestartOffset);
+                }
+                restarts.next();
+            }
+        }
         match crate::parse_ref_record(&block_data[pos..records_end], &last_name, hash_size, min_update_index) {
             Ok((record, consumed)) => {
                 last_name = record.name().to_vec();
@@ -148,6 +174,9 @@ pub fn read_ref_records_at(
         }
     }
 
+    if restarts.next().is_some() {
+        return Err(Error::InvalidRestartOffset);
+    }
     Ok(records)
 }
 
@@ -518,7 +547,8 @@ mod tests {
         crate::write_varint(0, &mut block);
         crate::write_varint(7, &mut block);
         crate::write_varint(0, &mut block);
-        block.extend_from_slice(&0u16.to_be_bytes());
+        block.extend_from_slice(&[0, 0, 4]);
+        block.extend_from_slice(&1u16.to_be_bytes());
         let block_len = block.len() as u32;
         crate::put_be24((&mut block[1..4]).try_into().expect("3 bytes"), block_len);
 

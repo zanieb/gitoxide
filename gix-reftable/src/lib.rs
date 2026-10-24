@@ -224,6 +224,8 @@ pub enum Error {
     InvalidBlockType { byte: u8 },
     #[error("unexpected end of data")]
     UnexpectedEof,
+    #[error("invalid reftable restart offset")]
+    InvalidRestartOffset,
     #[error("invalid varint encoding")]
     InvalidVarint,
     #[error("invalid ref record value type: {value_type}")]

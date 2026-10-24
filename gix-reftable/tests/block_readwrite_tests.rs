@@ -41,6 +41,26 @@ fn make_val1(name: &str, oid_byte: u8, update_index: u64) -> RefRecord {
 // Block header tests
 // ---------------------------------------------------------------------------
 
+#[test]
+fn ref_block_rejects_invalid_restart_offsets() {
+    let records = [make_val1("HEAD", 1, 1), make_val1("refs/heads/b", 2, 1)];
+    let block = write_ref_block(&records, 1, 20, 0).expect("two restart points");
+    let start = block.len() - 8;
+    assert_eq!(read_ref_records(&block, 20, 1).expect("valid restarts"), records);
+
+    for offset in [0, 4, 5, start as u32] {
+        let mut invalid = block.clone();
+        gix_reftable::put_be24(
+            (&mut invalid[start + 3..start + 6]).try_into().expect("three bytes"),
+            offset,
+        );
+        assert!(
+            read_ref_records(&invalid, 20, 1).is_err(),
+            "invalid second restart at {offset}"
+        );
+    }
+}
+
 /// Port of block header parsing from `u-reftable-block.c`.
 ///
 /// The block header format is:
