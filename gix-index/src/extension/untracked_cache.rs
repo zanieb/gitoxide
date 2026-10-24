@@ -422,10 +422,10 @@ fn write_object_id(
 }
 
 fn write_stat(stat: &entry::Stat, out: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
-    out.write_all(&stat.mtime.secs.to_be_bytes())?;
-    out.write_all(&stat.mtime.nsecs.to_be_bytes())?;
     out.write_all(&stat.ctime.secs.to_be_bytes())?;
     out.write_all(&stat.ctime.nsecs.to_be_bytes())?;
+    out.write_all(&stat.mtime.secs.to_be_bytes())?;
+    out.write_all(&stat.mtime.nsecs.to_be_bytes())?;
     out.write_all(&stat.dev.to_be_bytes())?;
     out.write_all(&stat.ino.to_be_bytes())?;
     out.write_all(&stat.uid.to_be_bytes())?;
@@ -565,6 +565,30 @@ mod tests {
         let err = write_object_id(&stat.id, gix_hash::Kind::Sha256, &mut out).unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn untracked_cache_fields_round_trip_in_git_order() -> std::io::Result<()> {
+        let mut cache = cache(vec![directory([])]);
+        let stat = entry::Stat {
+            ctime: entry::stat::Time { secs: 1, nsecs: 2 },
+            mtime: entry::stat::Time { secs: 3, nsecs: 4 },
+            ..Default::default()
+        };
+        cache.info_exclude = Some(OidStat {
+            stat,
+            id: ObjectId::from_bytes_or_panic(&[0x11; 20]),
+        });
+        cache.excludes_file = Some(OidStat {
+            stat: entry::Stat { size: 42, ..stat },
+            id: ObjectId::from_bytes_or_panic(&[0x22; 20]),
+        });
+        cache.dir_flags = 0x1234;
+        cache.directories[0].stat = Some(stat);
+        let mut output = Vec::new();
+        write_to(&cache, gix_hash::Kind::Sha1, &mut output)?;
+        assert_eq!(decode(&output[8..], gix_hash::Kind::Sha1, None), Some(cache));
+        Ok(())
     }
 
     #[test]
