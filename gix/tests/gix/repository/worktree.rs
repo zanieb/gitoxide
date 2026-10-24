@@ -3743,6 +3743,46 @@ mod mutation {
         }
 
         #[test]
+        fn explicit_start_point_does_not_read_a_missing_head_object() -> crate::Result {
+            use gix::worktree::add::Options;
+            let (repo, fixture) = repo_rw()?;
+            let target = repo.head_id()?.detach();
+            let hex = target.to_string();
+            std::fs::write(repo.git_dir().join("HEAD"), format!("{}\n", "1".repeat(hex.len())))?;
+            let start = Options {
+                start_point: Some(hex.as_str().into()),
+                ..Default::default()
+            };
+            for (name, options) in [
+                (
+                    "detached",
+                    Options {
+                        detach: true,
+                        ..start.clone()
+                    },
+                ),
+                (
+                    "new",
+                    Options {
+                        new_branch: Some(b"from-explicit".as_bstr()),
+                        ..start.clone()
+                    },
+                ),
+                (
+                    "reset",
+                    Options {
+                        reset_branch: Some(b"reset-explicit".as_bstr()),
+                        ..start
+                    },
+                ),
+            ] {
+                let linked = repo.worktree_add(fixture.path().join(name), options)?.into_repo()?;
+                assert_eq!(linked.head_id()?.detach(), target);
+            }
+            Ok(())
+        }
+
+        #[test]
         fn new_branch_with_start_point() -> crate::Result {
             let (repo, _keep) = repo_rw()?;
             let worktree_path = repo.workdir().unwrap().parent().unwrap().join("wt-new-branch-sp");

@@ -150,11 +150,14 @@ impl crate::Repository {
         } else {
             None
         };
+        let start_point_or_head = || match start_point_id {
+            Some(id) => Ok(Some(id)),
+            None => self.current_head_id(),
+        };
 
         if options.detach {
             // Detached HEAD mode
-            let id = start_point_id
-                .or(self.current_head_id()?)
+            let id = start_point_or_head()?
                 .ok_or_else(|| gix_error::message!("Cannot detach or reset an unborn HEAD").validation_error())?;
             Ok(HeadTarget::Detached(id))
         } else if let Some(branch) = options.branch {
@@ -175,14 +178,11 @@ impl crate::Repository {
             }
             Ok(HeadTarget::Symbolic {
                 branch: branch_ref,
-                create: start_point_id
-                    .or(self.current_head_id()?)
-                    .map_or(BranchCreation::Unborn, BranchCreation::At),
+                create: start_point_or_head()?.map_or(BranchCreation::Unborn, BranchCreation::At),
             })
         } else if let Some(reset_branch) = options.reset_branch {
             let branch_ref = local_branch_ref(reset_branch);
-            let target_id = start_point_id
-                .or(self.current_head_id()?)
+            let target_id = start_point_or_head()?
                 .ok_or_else(|| gix_error::message!("Cannot detach or reset an unborn HEAD").validation_error())?;
             Ok(HeadTarget::Symbolic {
                 branch: branch_ref,
