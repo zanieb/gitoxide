@@ -3,7 +3,7 @@
 //! This module provides functionality to create new reftable files from
 //! sorted reference records.
 
-use crate::{BlockType, DEFAULT_BLOCK_SIZE, Error, RefRecord, Version, put_be24, write_varint};
+use crate::{put_be24, write_varint, BlockType, Error, RefRecord, Version, DEFAULT_BLOCK_SIZE};
 
 /// Options for writing a reftable file.
 #[derive(Debug, Clone)]
@@ -146,62 +146,32 @@ pub fn write_ref_blocks_at(
     block_size: u32,
     first_header_off: usize,
 ) -> Result<Vec<Vec<u8>>, Error> {
-    if records.is_empty() || block_size == 0 {
-        return Ok(vec![write_ref_block_at(
-            records,
+    let mut blocks = Vec::new();
+    let mut remaining = records;
+    let mut header_off = first_header_off;
+    loop {
+        let (block, count) = encode_ref_block(
+            remaining,
             min_update_index,
             hash_size,
             block_size,
-            first_header_off,
-        )?]);
-    }
-
-    let mut blocks = Vec::new();
-    let mut start = 0usize;
-    let mut header_off = first_header_off;
-
-    while start < records.len() {
-        let mut best: Option<(usize, Vec<u8>)> = None;
-        for end in start + 1..=records.len() {
-            match write_ref_block_at(
-                &records[start..end],
-                min_update_index,
-                hash_size,
-                block_size,
-                header_off,
-            ) {
-                Ok(block) => best = Some((end, block)),
-                Err(Error::BlockTooLarge { .. }) => break,
-                Err(err) => return Err(err),
-            }
-        }
-
-        let Some((next_start, block)) = best else {
-            let block = write_ref_block_at(
-                &records[start..start + 1],
-                min_update_index,
-                hash_size,
-                block_size,
-                header_off,
-            )?;
-            blocks.push(block);
-            return Ok(blocks);
-        };
-
+            header_off,
+            block_size != 0,
+        )?;
         blocks.push(block);
-        start = next_start;
+        remaining = &remaining[count..];
+        if remaining.is_empty() {
+            return Ok(blocks);
+        }
         header_off = 0;
     }
-
-    Ok(blocks)
 }
 
-/// Write a single ref block at a given file offset, producing C Git-compatible output.
+/// Write a single ref block, producing C Git-compatible output.
 ///
-/// `header_off` is the byte offset of this block within the reftable file.
-/// C Git stores `block_len` as a file-level end offset, and restart offsets as
-/// file-level positions. When `header_off` is 0, the output matches the legacy
-/// gitoxide format (block-relative offsets).
+/// The first ref block shares space with the file header. Pass the file header
+/// length as `header_off` for that block and zero for subsequent blocks. The
+/// encoded block length and restart offsets include the file header length.
 ///
 /// The writer records restart offsets for names stored without prefix compression until
 /// the two-byte restart count reaches its maximum.
@@ -215,92 +185,86 @@ pub fn write_ref_block_at(
     block_size: u32,
     header_off: usize,
 ) -> Result<Vec<u8>, Error> {
-    let mut block = Vec::new();
+    encode_ref_block(records, min_update_index, hash_size, block_size, header_off, false).map(|(block, _)| block)
+}
 
-    // Block header: 4 bytes (type + BE24 block_len placeholder)
-    block.push(BlockType::Ref as u8);
-    block.extend_from_slice(&[0, 0, 0]);
-
-    // Serialize records with prefix compression, tracking restart points.
-    // In C Git, a record is a restart when its prefix_len == 0 (which always
-    // happens at restart_interval boundaries because the previous key is suppressed,
-    // but can also happen naturally when records share no prefix).
-    let mut prev_name: Vec<u8> = Vec::new();
-    let mut restart_offsets = Vec::new();
-    let restart_interval = 16;
-
-    for (i, record) in records.iter().enumerate() {
-        if record.name().is_empty() {
-            return Err(Error::EmptyRefName);
-        }
-        if i > 0 && prev_name.as_slice() >= record.name() {
-            return Err(Error::RefRecordsOutOfOrder);
-        }
-
-        let use_prefix = if i % restart_interval == 0 {
-            &[] as &[u8]
-        } else {
-            &prev_name
-        };
-
-        let serialized = serialize_ref_record(record, use_prefix, min_update_index, hash_size)?;
-
-        // Check if this record has prefix_len == 0 (the first varint in serialized).
-        // If so, it's a restart point. The restart offset is a file-level position.
-        let is_restart = serialized.first() == Some(&0);
-        if is_restart && restart_offsets.len() < usize::from(u16::MAX) {
-            restart_offsets.push(block.len());
-        }
-
-        block.extend_from_slice(&serialized);
-        prev_name = record.name().to_vec();
-    }
-
+fn encode_ref_block(
+    records: &[RefRecord],
+    min_update_index: u64,
+    hash_size: usize,
+    block_size: u32,
+    header_off: usize,
+    allow_split: bool,
+) -> Result<(Vec<u8>, usize), Error> {
     const MAX_BLOCK_SIZE: usize = 0x00ff_ffff;
-    let block_len = header_off
-        .saturating_add(block.len())
-        .saturating_add(3 * restart_offsets.len() + 2);
     let max_len = if block_size == 0 {
         MAX_BLOCK_SIZE
     } else {
         block_size as usize
     };
+    let mut block = vec![BlockType::Ref as u8, 0, 0, 0];
+    let mut block_len = header_off.saturating_add(block.len() + 2);
     if max_len > MAX_BLOCK_SIZE || block_len > max_len {
         return Err(Error::BlockTooLarge {
             block_len: block_len.max(max_len),
             max_len: max_len.min(MAX_BLOCK_SIZE),
         });
     }
+    let mut prev_name: &[u8] = &[];
+    let mut restart_offsets = Vec::new();
+    let mut count = 0;
 
-    // Write restart table: each entry is 3-byte BE24 file-level offset
+    for record in records {
+        if record.name().is_empty() {
+            return Err(Error::EmptyRefName);
+        }
+        if prev_name >= record.name() {
+            return Err(Error::RefRecordsOutOfOrder);
+        }
+
+        let use_prefix = if count % 16 == 0 { &[] } else { prev_name };
+        let serialized = serialize_ref_record(record, use_prefix, min_update_index, hash_size)?;
+        let is_restart = serialized[0] == 0 && restart_offsets.len() < usize::from(u16::MAX);
+        let next_len = block_len
+            .saturating_add(serialized.len())
+            .saturating_add(3 * usize::from(is_restart));
+        if next_len > max_len {
+            if allow_split && count > 0 {
+                break;
+            }
+            return Err(Error::BlockTooLarge {
+                block_len: next_len,
+                max_len,
+            });
+        }
+        if is_restart {
+            restart_offsets.push(block.len());
+        }
+        block.extend_from_slice(&serialized);
+        block_len = next_len;
+        prev_name = record.name();
+        count += 1;
+    }
+
     for offset in &restart_offsets {
         let mut buf = [0u8; 3];
         put_be24(&mut buf, (header_off + offset) as u32);
         block.extend_from_slice(&buf);
     }
 
-    // Restart count as uint16 BE
     let restart_count = restart_offsets.len() as u16;
     block.extend_from_slice(&restart_count.to_be_bytes());
 
-    // block_len = file-level end offset (header_off + current block size)
-    // This matches C Git's `put_be24(w->block + 1 + w->header_off, w->next)`
     put_be24(
         (&mut block[1..4]).try_into().expect("3 bytes for BE24"),
         block_len as u32,
     );
 
-    // Pad to block alignment if needed. The first ref block shares the file's
-    // first block with the file header, so only the bytes after `header_off`
-    // are emitted here.
     if block_size > 0 {
-        let target_len = (block_size as usize).saturating_sub(header_off);
-        if block.len() < target_len {
-            block.resize(target_len, 0);
-        }
+        block.resize(max_len - header_off, 0);
     }
 
-    Ok(block)
+    Ok((block, count))
 }
 
 /// Calculate the length of the shared prefix between two byte slices.
@@ -523,6 +487,36 @@ mod tests {
             block_len < 256,
             "block_len ({block_len}) should exclude padding while still including the header offset"
         );
+    }
+
+    #[test]
+    fn aligned_ref_blocks_use_the_longest_prefix_that_fits() -> Result<(), Error> {
+        let records: Vec<_> = (0..80)
+            .map(|i| make_val1(&format!("refs/heads/topic-{i:03}"), i, 1))
+            .collect();
+        for (block_size, first_header_off) in [(96, 24), (512, 28)] {
+            let blocks = write_ref_blocks_at(&records, 1, 20, block_size, first_header_off)?;
+            let mut remaining = &records[..];
+            for (i, block) in blocks.iter().enumerate() {
+                let header_off = if i == 0 { first_header_off } else { 0 };
+                let parsed = crate::block::read_ref_records_at(block, 20, 1, header_off)?;
+                let count = parsed.len();
+                assert_eq!(parsed, remaining[..count]);
+                assert_eq!(
+                    block,
+                    &write_ref_block_at(&remaining[..count], 1, 20, block_size, header_off)?
+                );
+                if count < remaining.len() {
+                    assert!(matches!(
+                        write_ref_block_at(&remaining[..=count], 1, 20, block_size, header_off),
+                        Err(Error::BlockTooLarge { .. })
+                    ));
+                }
+                remaining = &remaining[count..];
+            }
+            assert!(remaining.is_empty());
+        }
+        Ok(())
     }
 
     #[test]
