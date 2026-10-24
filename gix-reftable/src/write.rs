@@ -3,7 +3,7 @@
 //! This module provides functionality to create new reftable files from
 //! sorted reference records.
 
-use crate::{put_be24, write_varint, BlockType, Error, RefRecord, Version, DEFAULT_BLOCK_SIZE};
+use crate::{BlockType, DEFAULT_BLOCK_SIZE, Error, RefRecord, Version, put_be24, write_varint};
 
 /// Options for writing a reftable file.
 #[derive(Debug, Clone)]
@@ -203,9 +203,8 @@ pub fn write_ref_blocks_at(
 /// file-level positions. When `header_off` is 0, the output matches the legacy
 /// gitoxide format (block-relative offsets).
 ///
-/// Records with `prefix_len == 0` are automatically marked as restart points,
-/// matching C Git's behavior where ANY record without prefix compression becomes
-/// a restart regardless of the restart interval.
+/// The writer records restart offsets for names stored without prefix compression until
+/// the two-byte restart count reaches its maximum.
 ///
 /// The block is padded to `block_size` if specified. If `block_size` is 0,
 /// no padding is applied (unaligned mode).
@@ -227,7 +226,7 @@ pub fn write_ref_block_at(
     // happens at restart_interval boundaries because the previous key is suppressed,
     // but can also happen naturally when records share no prefix).
     let mut prev_name: Vec<u8> = Vec::new();
-    let mut restart_offsets: Vec<u32> = Vec::new();
+    let mut restart_offsets = Vec::new();
     let restart_interval = 16;
 
     for (i, record) in records.iter().enumerate() {
@@ -249,18 +248,34 @@ pub fn write_ref_block_at(
         // Check if this record has prefix_len == 0 (the first varint in serialized).
         // If so, it's a restart point. The restart offset is a file-level position.
         let is_restart = serialized.first() == Some(&0);
-        if is_restart {
-            restart_offsets.push((header_off + block.len()) as u32);
+        if is_restart && restart_offsets.len() < usize::from(u16::MAX) {
+            restart_offsets.push(block.len());
         }
 
         block.extend_from_slice(&serialized);
         prev_name = record.name().to_vec();
     }
 
+    const MAX_BLOCK_SIZE: usize = 0x00ff_ffff;
+    let block_len = header_off
+        .saturating_add(block.len())
+        .saturating_add(3 * restart_offsets.len() + 2);
+    let max_len = if block_size == 0 {
+        MAX_BLOCK_SIZE
+    } else {
+        block_size as usize
+    };
+    if max_len > MAX_BLOCK_SIZE || block_len > max_len {
+        return Err(Error::BlockTooLarge {
+            block_len: block_len.max(max_len),
+            max_len: max_len.min(MAX_BLOCK_SIZE),
+        });
+    }
+
     // Write restart table: each entry is 3-byte BE24 file-level offset
     for offset in &restart_offsets {
         let mut buf = [0u8; 3];
-        put_be24(&mut buf, *offset);
+        put_be24(&mut buf, (header_off + offset) as u32);
         block.extend_from_slice(&buf);
     }
 
@@ -270,20 +285,16 @@ pub fn write_ref_block_at(
 
     // block_len = file-level end offset (header_off + current block size)
     // This matches C Git's `put_be24(w->block + 1 + w->header_off, w->next)`
-    let block_len = (header_off + block.len()) as u32;
-    put_be24((&mut block[1..4]).try_into().expect("3 bytes for BE24"), block_len);
+    put_be24(
+        (&mut block[1..4]).try_into().expect("3 bytes for BE24"),
+        block_len as u32,
+    );
 
     // Pad to block alignment if needed. The first ref block shares the file's
     // first block with the file header, so only the bytes after `header_off`
     // are emitted here.
     if block_size > 0 {
         let target_len = (block_size as usize).saturating_sub(header_off);
-        if block.len() > target_len {
-            return Err(Error::BlockTooLarge {
-                block_len: block.len(),
-                max_len: target_len,
-            });
-        }
         if block.len() < target_len {
             block.resize(target_len, 0);
         }
@@ -512,6 +523,33 @@ mod tests {
             block_len < 256,
             "block_len ({block_len}) should exclude padding while still including the header offset"
         );
+    }
+
+    #[test]
+    fn ref_block_restart_count_fits_the_file_format() {
+        let records: Vec<_> = (0..=usize::from(u16::MAX) * 16)
+            .map(|i| crate::RefRecord {
+                name: format!("refs/heads/{i:07}").into(),
+                update_index: 1,
+                value: crate::RefRecordValue::Deletion,
+            })
+            .collect();
+        let block = write_ref_block(&records, 1, 20, 0).expect("one unaligned block");
+        assert_eq!(&block[block.len() - 2..], &u16::MAX.to_be_bytes());
+        assert_eq!(
+            crate::block::read_ref_records(&block, 20, 1)
+                .expect("valid block")
+                .last(),
+            records.last()
+        );
+    }
+
+    #[test]
+    fn ref_block_rejects_offsets_that_do_not_fit_in_three_bytes() {
+        for header_off in [0x00ff_ffff, usize::MAX] {
+            let err = write_ref_block_at(&[], 1, 20, 0, header_off).expect_err("block end cannot be encoded");
+            assert!(matches!(err, Error::BlockTooLarge { .. }));
+        }
     }
 
     #[test]
