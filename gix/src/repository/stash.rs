@@ -925,6 +925,32 @@ impl Repository {
         Ok(())
     }
 
+    /// Clear all stash entries, as in `git stash clear`.
+    /// The reference transaction clears the stack only if `refs/stash` still resolves to
+    /// the observed object ID. Clearing an absent stash succeeds.
+    pub fn stash_clear(&self) -> crate::Result<()> {
+        let Some(mut stash) = self.try_find_reference("refs/stash")? else {
+            return Ok(());
+        };
+        match stash.follow_to_object() {
+            Ok(target) => self.clear_stash_at(target.detach()),
+            Err(err) if err.is_not_found() => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn clear_stash_at(&self, expected: ObjectId) -> crate::Result<()> {
+        use gix_ref::transaction::{PreviousValue, RefEdit};
+        self.edit_reference(
+            RefEdit::delete(
+                "refs/stash".try_into().expect("valid ref name"),
+                PreviousValue::MustExistAndMatch(gix_ref::Target::Object(expected)),
+            )
+            .with_deref(true),
+        )?;
+        Ok(())
+    }
+
     /// Drop a stash entry by its index (0 = most recent).
     ///
     /// This implements `git stash drop [stash@{n}]`.
@@ -947,20 +973,8 @@ impl Repository {
         use gix_ref::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
 
         if entries.len() == 1 {
-            // Last stash entry: delete the ref entirely.
-            self.edit_reference(RefEdit {
-                change: Change::Delete {
-                    expected: PreviousValue::MustExistAndMatch(gix_ref::Target::Object(entries[0].commit_id.detach())),
-                    log: RefLog::AndReference,
-                },
-                name: "refs/stash".try_into().expect("valid ref name"),
-                deref: false,
-            })
-            .map_err(DropError::EditReference)?;
-
-            // Also remove the reflog file.
-            let reflog_path = self.common_dir().join("logs").join("refs").join("stash");
-            let _ = std::fs::remove_file(reflog_path);
+            self.clear_stash_at(entries[0].commit_id.detach())
+                .map_err(DropError::EditReference)?;
         } else {
             // Rewrite the reflog to remove the entry at the given index.
             // The reflog is stored chronologically (oldest first), but stash entries

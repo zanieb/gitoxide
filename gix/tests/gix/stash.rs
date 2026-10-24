@@ -187,6 +187,70 @@ mod stash {
     }
 
     #[test]
+    fn stash_clear_removes_the_stack_and_reflog_and_accepts_an_empty_stack() -> crate::Result {
+        for use_git in [true, false] {
+            let (repo, _tmp) = repo_rw_stash()?;
+            let dir = repo.workdir().expect("non-bare fixture");
+            repo.stash_save(Some("first"))?;
+            std::fs::write(dir.join("file.txt"), "second\n")?;
+            repo.stash_save(Some("second"))?;
+            assert_eq!(repo.stash_list()?.len(), 2);
+            std::fs::write(dir.join("file.txt"), "local\n")?;
+            let index = std::fs::read(repo.index_path())?;
+            for _ in 0..2 {
+                if use_git {
+                    assert!(
+                        std::process::Command::new("git")
+                            .args(["stash", "clear"])
+                            .current_dir(dir)
+                            .status()?
+                            .success()
+                    );
+                } else {
+                    repo.stash_clear()?;
+                }
+                assert!(repo.try_find_reference("refs/stash")?.is_none());
+                assert!(!repo.common_dir().join("logs/refs/stash").exists());
+                assert_eq!(std::fs::read(dir.join("file.txt"))?, b"local\n");
+                assert_eq!(std::fs::read(repo.index_path())?, index);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn stash_clear_follows_a_symbolic_stash() -> crate::Result {
+        let (repo, _tmp) = repo_rw_stash()?;
+        let target = repo.stash_save(None)?.detach();
+        let dir = repo.workdir().expect("non-bare fixture");
+        assert!(
+            std::process::Command::new("git")
+                .current_dir(dir)
+                .args(["update-ref", "--create-reflog", "refs/heads/stack", &target.to_string()])
+                .status()?
+                .success()
+        );
+        assert!(
+            std::process::Command::new("git")
+                .current_dir(dir)
+                .args(["symbolic-ref", "refs/stash", "refs/heads/stack"])
+                .status()?
+                .success()
+        );
+        for _ in 0..2 {
+            repo.stash_clear()?;
+            assert!(repo.try_find_reference("refs/heads/stack")?.is_none());
+            assert_eq!(
+                std::fs::read_to_string(repo.common_dir().join("refs/stash"))?,
+                "ref: refs/heads/stack\n"
+            );
+            assert!(!repo.common_dir().join("logs/refs/heads/stack").exists());
+            assert!(!repo.common_dir().join("logs/refs/stash").exists());
+        }
+        Ok(())
+    }
+
+    #[test]
     fn stash_drop_last_entry_removes_ref() -> crate::Result {
         let (repo, _tmp) = repo_rw_stash()?;
 

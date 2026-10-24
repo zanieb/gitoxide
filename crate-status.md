@@ -50,7 +50,7 @@ today's code and goals.
     * [ ] `merge` and multi-commit `cherry-pick` / `revert` sequences - mainly `gix`, `gix-merge`, `gix-sequencer`, `gix-rerere`, `gix::hook`
     * [ ] `rebase` - mainly `gix-rebase`, `gix-sequencer`, `gix-merge`, `gix-apply`, `gix-rerere`, `gix::hook`, `gix`
     * [ ] `bisect` - mainly `gix-bisect`, `gix-sequencer`, `gix-revision`, `gix-revwalk`, `gix-traverse`, `gix`
-    * [ ] stash subcommands beyond save/apply/pop/drop/list, plus `am` and `apply` - mainly `gix`, `gix-apply`, `gix-mailbox`, `gix-diff`, `gix-worktree-state`, `gix-sequencer`, `gix-rerere`
+    * [ ] stash subcommands beyond save/apply/pop/drop/list/clear, plus `am` and `apply` - mainly `gix`, `gix-apply`, `gix-mailbox`, `gix-diff`, `gix-worktree-state`, `gix-sequencer`, `gix-rerere`
     * [ ] self-contained clone/fetch/push over `file://` and `ssh://` without external `git-*` or `ssh` helpers - mainly `gix`, `gix-protocol`, `gix-transport`, `gix-ssh`
 * **cross-cutting parity work**
     * [ ] hook integration into workflows - mainly `gix`, `gix-ref`, `gix-protocol`
@@ -77,7 +77,7 @@ The top-level crate that acts as hub to all functionality provided by the `gix-*
     * [x] single-commit cherry-pick and revert workflow orchestration
         * [ ] multi-commit sequence `continue`, `skip`, `abort` and `quit` flows
     * [ ] bisect workflow orchestration
-    * [x] stash save, apply, pop, drop and list workflow orchestration
+    * [x] stash save, apply, pop, drop, list and clear workflow orchestration
         * [ ] stash show, branch, autostash and rerere integration
     * [ ] `git am` and `git apply` workflow orchestration
         * [ ] connect mailbox ingestion, patch application, hook execution and resulting commit creation
