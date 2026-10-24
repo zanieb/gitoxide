@@ -305,7 +305,7 @@ mod refedit_ext {
                 vec![
                     RefEdit::delete_with_log(
                         "refs/heads/delete-symbolic-1".try_into()?,
-                        PreviousValue::Any,
+                        PreviousValue::MustExistAndMatch(Target::Symbolic("refs/heads/delete-symbolic-2".try_into()?)),
                         RefLog::Only,
                     ),
                     RefEdit::update_with_log(
@@ -316,7 +316,7 @@ mod refedit_ext {
                     ),
                     RefEdit::delete_with_log(
                         "refs/heads/delete-symbolic-2".try_into()?,
-                        PreviousValue::Any,
+                        PreviousValue::MustExistAndMatch(Target::Symbolic("refs/heads/delete-symbolic-3".try_into()?)),
                         RefLog::Only,
                     ),
                     RefEdit::update_with_log(

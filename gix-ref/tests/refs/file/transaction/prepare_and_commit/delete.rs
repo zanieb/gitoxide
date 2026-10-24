@@ -352,6 +352,28 @@ fn delete_broken_ref_that_may_not_exist_works_even_in_deref_mode() -> TestResult
 }
 
 #[test]
+fn dereferenced_deletion_checks_the_object_at_the_referent() -> TestResult {
+    let (_keep, store) = store_writable("make_repo_for_reflog.sh")?;
+    let head = store.find_loose("HEAD")?;
+    let branch = store.find_loose("main")?;
+    let edit = |target| RefEdit::delete(head.name.clone(), PreviousValue::MustExistAndMatch(target)).with_deref(true);
+    let wrong = crate::fixture_hash_kind().null().into();
+    let err = store
+        .transaction()
+        .prepare([edit(wrong)], Fail::Immediately, Fail::Immediately)
+        .expect_err("a different object must not be deleted");
+    assert!(err.is_conflict());
+    assert_eq!(store.find_loose("main")?.target, branch.target);
+    store
+        .transaction()
+        .prepare([edit(branch.target)], Fail::Immediately, Fail::Immediately)?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+    assert_eq!(store.find_loose("HEAD")?.target, head.target);
+    assert!(store.try_find_loose("main")?.is_none());
+    Ok(())
+}
+
+#[test]
 fn store_write_mode_has_no_effect_and_reflogs_are_always_deleted() -> TestResult {
     for reflog_writemode in &[
         gix_ref::store::WriteReflog::Normal,
