@@ -3,7 +3,11 @@ fn repo_rw(name: &str) -> crate::Result<(gix::Repository, gix_testtools::tempfil
     let dir = gix_testtools::scripted_fixture_writable("make_submodule_update.sh")?;
     let repo_path = dir.path().join(name);
     Ok((
-        gix::ThreadSafeRepository::open_opts(repo_path, gix::open::Options::isolated())?.to_thread_local(),
+        gix::ThreadSafeRepository::open_opts(
+            repo_path,
+            gix::open::Options::isolated().config_overrides(["protocol.file.allow=always"]),
+        )?
+        .to_thread_local(),
         dir,
     ))
 }
@@ -137,10 +141,41 @@ mod update {
     use super::repo_rw;
 
     #[test]
+    fn update_denies_file_transport_without_explicit_permission() -> crate::Result {
+        let (repo, _tmp) = repo_rw("after-clone")?;
+        let repo = gix::open_opts(repo.git_dir(), gix::open::Options::isolated())?;
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+        let error = sm
+            .update_submodule(
+                gix::progress::Discard,
+                &Default::default(),
+                &gix::submodule::update::Options::new(true, true),
+            )
+            .expect_err("a submodule URL is not supplied by the user");
+        assert!(
+            matches!(&error, gix::submodule::update::Error::Operation(err) if err.is_permission_denied()),
+            "{error:#}"
+        );
+        assert!(!sm.state()?.repository_exists);
+        let git = gix_testtools::git_command(repo.workdir().expect("worktree"))
+            .env_remove("GIT_ALLOW_PROTOCOL")
+            .args(["-c", "protocol.file.allow=user", "submodule", "update", "--init"])
+            .output()?;
+        assert!(!git.status.success());
+        assert!(String::from_utf8_lossy(&git.stderr).contains("transport 'file' not allowed"));
+        Ok(())
+    }
+
+    #[test]
     fn update_clones_relative_to_the_superproject_remote() -> crate::Result {
         let (repo, fixture) = repo_rw("after-clone")?;
         let options = gix::open::Options::isolated().config_overrides([
             "remote.origin.url=https://example.invalid/team/super".to_owned(),
+            "protocol.file.allow=always".to_owned(),
             format!(
                 "url.{}/.insteadOf=https://example.invalid/team/",
                 fixture.path().display()

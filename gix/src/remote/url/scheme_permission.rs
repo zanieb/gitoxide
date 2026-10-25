@@ -116,7 +116,8 @@ impl SchemePermission {
                 || {
                     use gix_url::Scheme::*;
                     match scheme {
-                        File | Git | Ssh | Http | Https => true,
+                        Git | Ssh | Http | Https => true,
+                        File => Allow::User.to_bool(self.user_allowed),
                         Ext => false,
                         Helper(name) | HelperUrl(name) => match name.as_str() {
                             // Git applies its known-safe defaults by transport name even when that name selects a
@@ -185,6 +186,7 @@ mod tests {
         };
         assert!(no_user.allow(&gix_url::Scheme::Helper("ssh".into())));
         assert!(no_user.allow(&gix_url::Scheme::HelperUrl("https".into())));
+        assert!(!no_user.allow(&gix_url::Scheme::File));
         assert!(
             !no_user.allow(&gix_url::Scheme::Helper("file".into())),
             "file::address invokes git-remote-file, which has the default user policy and is denied when GIT_PROTOCOL_FROM_USER is false"

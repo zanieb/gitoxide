@@ -116,7 +116,8 @@ impl Submodule<'_> {
                 crate::create::Kind::WithWorktree,
                 Default::default(),
                 self.state.repo.options.clone(),
-            )?;
+            )?
+            .with_in_memory_config_overrides(["gitoxide.allow.protocolFromUser=false"]);
             if self.shallow()?.unwrap_or(false) {
                 prep = prep.with_shallow(crate::remote::fetch::Shallow::DepthAtRemote(
                     1.try_into().expect("1 is non-zero"),
@@ -138,7 +139,7 @@ impl Submodule<'_> {
             (repo, true)
         } else {
             // Repository exists, open it
-            let sm_repo = match self.open()? {
+            let mut sm_repo = match self.open()? {
                 Some(repo) => repo,
                 None => {
                     // Repository directory exists but can't be opened
@@ -156,6 +157,9 @@ impl Submodule<'_> {
             // If not, fetch. This matches git's run_update_procedure():
             // "Run fetch only if oid isn't present or it is not reachable from a ref."
             if sm_repo.find_object(target_commit).is_err() {
+                sm_repo
+                    .config_snapshot_mut()
+                    .set_value(&crate::config::tree::gitoxide::Allow::PROTOCOL_FROM_USER, "false")?;
                 // Try to fetch from the origin remote
                 if let Ok(remote) = sm_repo.find_remote("origin") {
                     let _outcome = remote
