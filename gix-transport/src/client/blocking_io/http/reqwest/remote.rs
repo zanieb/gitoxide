@@ -64,6 +64,21 @@ impl Default for Remote {
                     let mut builder = reqwest::blocking::ClientBuilder::new()
                         .connect_timeout(std::time::Duration::from_secs(20))
                         .http1_title_case_headers();
+                    #[cfg(any(
+                        feature = "http-client-reqwest-rust-tls",
+                        feature = "http-client-reqwest-rust-tls-trust-dns",
+                        feature = "http-client-reqwest-native-tls"
+                    ))]
+                    if let Some(ca_file) = &config.ssl_ca_info {
+                        let pem = std::fs::read(ca_file)
+                            .or_raise(|| message!("Could not read CA bundle at {}", ca_file.display()))?;
+                        let certificates = reqwest::Certificate::from_pem_bundle(&pem)
+                            .or_raise(|| message!("Could not parse CA bundle at {}", ca_file.display()))?;
+                        if certificates.is_empty() {
+                            return Err(message!("No certificates found in CA bundle at {}", ca_file.display()).raise());
+                        }
+                        builder = builder.tls_certs_only(certificates);
+                    }
                     if let Some(backend) = config.backend.as_ref() {
                         let mut backend = backend
                             .lock()

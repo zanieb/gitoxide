@@ -21,6 +21,33 @@ use gix_transport::{
 mod http_helpers;
 use http_helpers::{observe_connection_within_deadline, read_request_lines, response_with_connection_close};
 
+#[cfg(any(
+    feature = "http-client-reqwest-rust-tls",
+    feature = "http-client-reqwest-rust-tls-trust-dns",
+    feature = "http-client-reqwest-native-tls"
+))]
+#[test]
+fn an_unreadable_ca_bundle_fails_before_connecting() -> gix_testtools::TestResult {
+    let directory = gix_testtools::tempfile::tempdir()?;
+    let ca = directory.path().join("missing-ca.pem");
+    let mut client =
+        http::connect::<http::reqwest::Remote>("https://127.0.0.1:9/repo".try_into()?, Protocol::V1, false);
+    client.configure(&http::Options {
+        ssl_ca_info: Some(ca.clone()),
+        ..Default::default()
+    })?;
+    let error = client
+        .handshake(Service::UploadPack, &[])
+        .err()
+        .expect("the CA file is missing");
+    let diagnostic = format!("{:?}", gix_error::TestError::from(error));
+    assert!(
+        diagnostic.contains("missing-ca.pem"),
+        "the diagnostic identifies the configured CA bundle: {diagnostic}"
+    );
+    Ok(())
+}
+
 /// Regression for <https://github.com/GitoxideLabs/gitoxide/issues/2140>: when a request fails
 /// without an HTTP status (for example a connection or TLS failure), the underlying error must be
 /// kept as `source()` instead of being stringified, so callers can see the real cause.
