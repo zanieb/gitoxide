@@ -1858,7 +1858,12 @@ where
                 if !output.status.success() {
                     eprintln!("stdout: {}", output.stdout.as_bstr());
                     eprintln!("stderr: {}", output.stderr.as_bstr());
-                    return Err(format!("fixture script of {cmd:?} failed with {}", output.status).into());
+                    return Err(format!(
+                        "fixture script {} {args:?} failed with {}",
+                        script_absolute_path.display(),
+                        output.status
+                    )
+                    .into());
                 }
             }
             if let Some(mut f) = post_process_closure {
@@ -1918,7 +1923,8 @@ pub fn git(current_dir: impl AsRef<Path>, arguments: &str) -> Result<String> {
     let output = cmd.args(args).output()?;
     if !output.status.success() {
         return Err(format!(
-            "{cmd:?} failed with status {}\nstdout: {}\nstderr: {}",
+            "{} {arguments} failed with status {}\nstdout: {}\nstderr: {}",
+            Path::new(cmd.get_program()).display(),
             output.status,
             output.stdout.as_bstr(),
             output.stderr.as_bstr()

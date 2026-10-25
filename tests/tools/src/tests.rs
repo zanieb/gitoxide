@@ -317,6 +317,29 @@ fn invoke_bash_runs_in_given_working_directory() -> TestResult {
 }
 
 #[test]
+fn failed_commands_omit_inherited_environment() -> TestResult {
+    if run_in_isolated_process()? {
+        return Ok(());
+    }
+    let _environment = Env::new().set("FIXTURE_PRIVATE_VALUE", "fixture-only-secret");
+    let dir = tempfile::tempdir()?;
+    let git_error = git(dir.path(), "rev-parse --verify").unwrap_err().to_string();
+    assert!(git_error.contains("rev-parse"));
+    let script = dir.path().join("private-diagnostic-test.sh");
+    std::fs::write(&script, "exit 23\n")?;
+    let fixture_error = scripted_fixture_writable_with_args(&script, ["fixture-argument"], Creation::Execute)
+        .unwrap_err()
+        .to_string();
+    assert!(fixture_error.contains("private-diagnostic-test.sh"));
+    assert!(fixture_error.contains("fixture-argument"));
+    for error in [git_error, fixture_error] {
+        assert!(!error.contains("FIXTURE_PRIVATE_VALUE"));
+        assert!(!error.contains("fixture-only-secret"));
+    }
+    Ok(())
+}
+
+#[test]
 fn fixture_diagnostics_report_silent_failures_without_changing_stderr_baselines() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut cmd = command_with_environment_snapshot(bash_program());
