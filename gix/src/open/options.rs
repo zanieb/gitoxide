@@ -176,10 +176,11 @@ impl Options {
 }
 
 impl Options {
-    /// Prevent repository-local environment overrides from being inherited when opening another repository.
+    /// Ignore environment overrides for the worktree, index, shallow file, and reference namespace.
     ///
-    /// To be used when opening a nested repository, like worktrees or submodules.
-    pub(crate) fn without_repository_environment_overrides(mut self) -> Self {
+    /// Use this when opening a repository on behalf of a caller running inside another repository,
+    /// such as a Git hook. Global configuration and transport settings still apply.
+    pub fn without_repository_environment_overrides(mut self) -> Self {
         self.use_repository_local_environment = false;
         self
     }

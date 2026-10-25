@@ -290,6 +290,11 @@ fn index_paths_are_absolute_and_use_the_selected_values_base() -> TestResult {
         .config_overrides(["gitoxide.core.indexFile=api-index"])
         .cli_overrides(["gitoxide.core.indexFile=cli-index"]);
     options.permissions.env.git_prefix = gix_sec::Permission::Allow;
+    let nested = gix::open_opts(
+        repository.path(),
+        options.clone().without_repository_environment_overrides(),
+    )?;
+    assert_eq!(nested.index_path(), git_dir.join("api-index"));
     let repo = gix::open_opts(repository.path(), options)?;
     assert!(
         repo.index_path().is_absolute(),
