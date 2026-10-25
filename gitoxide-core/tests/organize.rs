@@ -62,6 +62,7 @@ fn url_components_cannot_move_repositories_outside_the_destination() -> TestResu
 #[test]
 fn ordinary_urls_still_move_repositories_below_the_destination() -> TestResult {
     let fixture = gix_testtools::scripted_fixture_writable("organize.sh")?;
+    std::fs::create_dir(fixture.path().join(".git"))?;
     let source = fixture.path().join("source").canonicalize()?;
     let destination = fixture.path().join("destination");
     run(Mode::Execute, &source, &destination, gix::progress::Discard, Some(1))?;

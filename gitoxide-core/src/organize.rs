@@ -164,26 +164,10 @@ fn handle(
             .collect()
     }
 
-    fn find_parent_repo(mut git_workdir: &Path) -> Option<PathBuf> {
-        while let Some(parent) = git_workdir.parent() {
-            let has_contained_git_folder_or_file = std::fs::read_dir(parent).ok()?.any(|e| {
-                e.ok()
-                    .and_then(|e| {
-                        e.file_name()
-                            .to_str()
-                            .map(|name| name == ".git" && e.path() != git_workdir)
-                    })
-                    .unwrap_or(false)
-            });
-            if has_contained_git_folder_or_file {
-                return Some(parent.to_owned());
-            }
-            git_workdir = parent;
-        }
-        None
-    }
-
-    if let Some(parent_repo_path) = find_parent_repo(git_workdir) {
+    if let Some(parent_repo_path) = git_workdir.ancestors().skip(1).find(|parent| {
+        let git_dir = parent.join(".git");
+        git_dir != git_workdir && gix::discover::is_git(&git_dir).is_ok()
+    }) {
         progress.fail(format!(
             "Skipping repository at \"{}\" as it is nested within repository \"{}\"",
             git_workdir.display(),
