@@ -102,6 +102,24 @@ mod lock {
 #[cfg(feature = "worktree-mutation")]
 mod add {
     #[test]
+    fn detached_worktree_without_a_configured_committer() -> gix_testtools::TestResult {
+        let (repo, _fixture) = crate::util::repo_rw_opts("make_basic_repo.sh", gix::open::Options::isolated())?;
+        assert!(repo.committer().is_none());
+        let destination = gix_testtools::tempfile::TempDir::new()?;
+        let commit = repo.head_id()?.detach();
+        let (linked, _) = repo.add_worktree(
+            destination.path().join("linked"),
+            gix::worktree::add::Head::Detached(commit),
+            gix::progress::Discard,
+            &std::sync::atomic::AtomicBool::default(),
+        )?;
+        assert_eq!(linked.head_id()?.detach(), commit);
+        let reopened = gix::open_opts(linked.git_dir(), gix::open::Options::isolated())?;
+        assert!(reopened.committer().is_none());
+        Ok(())
+    }
+
+    #[test]
     fn returned_repositories_and_preparation_have_absolute_paths() -> gix_testtools::TestResult {
         let (source, _fixture) = crate::basic_rw_repo()?;
         let destinations = gix_testtools::tempfile::TempDir::new()?;

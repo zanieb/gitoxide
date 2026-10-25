@@ -298,6 +298,7 @@ impl crate::Repository {
         repo.clear_namespace();
         // Like clone, initialize a symbolic HEAD's log without dereferencing or updating its branch.
         if let Some(commit_id) = commit_id {
+            repo.committer_or_set_generic_fallback()?;
             repo.edit_reference(RefEdit::update_with_log(
                 "HEAD".try_into().expect("valid reference name"),
                 commit_id,
