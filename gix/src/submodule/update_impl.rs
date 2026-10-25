@@ -98,7 +98,6 @@ impl Submodule<'_> {
             return Ok(None);
         }
 
-        let raw_url = self.url()?;
         let sm_state = self.state()?;
         let work_dir = self.work_dir()?;
 
@@ -109,70 +108,10 @@ impl Submodule<'_> {
             super::validate_submodule_path(&sm_path, worktree)?;
         }
 
-        // Resolve the submodule URL to a usable clone source.
-        //
-        // For relative URLs: resolve against the superproject's origin remote URL,
-        // falling back to resolving relative to the worktree (git falls back to getcwd()).
-        //
-        // For absolute file URLs: if the path doesn't exist (e.g. stale URL baked into
-        // .git/config from a different machine), fall back to resolving the .gitmodules
-        // relative URL against the worktree.
-        let resolved_url = {
-            let url_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(raw_url.path.as_ref()))?;
-            let cwd = self.state.repo.options.current_dir_or_empty();
-            let worktree = self.state.repo.workdir().unwrap_or_else(|| self.state.repo.git_dir());
-
-            if url_path.is_relative() && raw_url.scheme == gix_url::Scheme::File {
-                // Relative URL: try origin remote first, then worktree.
-                let from_remote = self
-                    .state
-                    .repo
-                    .find_remote("origin")
-                    .ok()
-                    .and_then(|r| {
-                        r.url(crate::remote::Direction::Fetch)
-                            .map(std::borrow::ToOwned::to_owned)
-                    })
-                    .and_then(|base_url| {
-                        let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref())).ok()?;
-                        let candidate = base_path.join(&url_path);
-                        gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS)
-                            .ok()
-                            .filter(|p| p.exists())
-                    });
-
-                let resolved = from_remote.unwrap_or_else(|| {
-                    let candidate = worktree.join(&url_path);
-                    gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS).unwrap_or(candidate)
-                });
-                resolved.to_string_lossy().into_owned()
-            } else if raw_url.scheme == gix_url::Scheme::File && !url_path.exists() {
-                // Absolute file URL that doesn't exist (stale path from another machine).
-                // Fall back to the .gitmodules relative URL resolved against the worktree.
-                let fallback = self.gitmodules_url().and_then(|gm_url| {
-                    let gm_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(gm_url.path.as_ref())).ok()?;
-                    if gm_path.is_relative() {
-                        let candidate = worktree.join(&gm_path);
-                        gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS)
-                            .ok()
-                            .filter(|p| p.exists())
-                    } else {
-                        None
-                    }
-                });
-                match fallback {
-                    Some(resolved) => resolved.to_string_lossy().into_owned(),
-                    None => raw_url.to_bstring().to_string(),
-                }
-            } else {
-                raw_url.to_bstring().to_string()
-            }
-        };
-
         let (sm_repo, freshly_cloned) = if !sm_state.repository_exists {
             // Clone the submodule using the standard clone infrastructure.
             let mut prep = crate::clone::PrepareFetch::new(
-                resolved_url,
+                self.resolved_url()?,
                 &work_dir,
                 crate::create::Kind::WithWorktree,
                 Default::default(),

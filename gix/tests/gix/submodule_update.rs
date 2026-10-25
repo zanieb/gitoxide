@@ -136,6 +136,40 @@ mod init {
 mod update {
     use super::repo_rw;
 
+    #[test]
+    fn update_clones_relative_to_the_superproject_remote() -> crate::Result {
+        let (repo, fixture) = repo_rw("after-clone")?;
+        let options = gix::open::Options::isolated().config_overrides([
+            "remote.origin.url=https://example.invalid/team/super".to_owned(),
+            format!(
+                "url.{}/.insteadOf=https://example.invalid/team/",
+                fixture.path().display()
+            ),
+        ]);
+        let repo = gix::open_opts(repo.git_dir(), options)?;
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("one submodule");
+        let outcome = sm
+            .update_submodule(
+                gix::progress::Discard,
+                &Default::default(),
+                &gix::submodule::update::Options::new(true, false),
+            )?
+            .expect("initialized submodule");
+        assert!(outcome.freshly_cloned);
+        let sub = sm.open()?.expect("cloned repository");
+        assert_eq!(sub.head_id()?.detach(), sm.index_id()?.expect("gitlink"));
+        let sub = gix::open_opts(sub.git_dir(), gix::open::Options::isolated())?;
+        assert_eq!(
+            sub.config_snapshot().string("remote.origin.url").expect("stored origin URL"),
+            "https://example.invalid/team/submodule"
+        );
+        Ok(())
+    }
+
     /// Ported from libgit2 test_submodule_update__update_and_init_submodule:
     /// Calling update with init=true on an uninitialized submodule should init and clone it.
     #[test]

@@ -16,22 +16,33 @@ impl Submodule<'_> {
     /// Other URLs are returned as configured; URL rewrite rules and transport permissions apply when connecting.
     /// An error is returned if traversal exhausts the upstream URL's components or the result cannot be parsed.
     pub fn resolved_url(&self) -> Result<gix_url::Url> {
-        let mut url = self.url()?;
+        let (_, mut url) = self.url_for_config_and_transport()?;
         let repo = self.state.repo;
         let root = repo.workdir().unwrap_or_else(|| repo.git_dir());
         let root = gix_path::realpath_opts(root, repo.current_dir(), gix_path::realpath::MAX_SYMLINKS)
             .or_raise(|| message("Could not resolve the superproject's directory"))?;
-        let configured_url = url.to_bstring();
+        url.canonicalize(&root)
+            .or_raise(|| message("Could not make the submodule URL independent of the current directory"))?;
+        Ok(url)
+    }
+
+    /// Return the URL spelling to store in local configuration and the parsed URL for transport.
+    pub(super) fn url_for_config_and_transport(&self) -> Result<(BString, gix_url::Url)> {
+        let mut url = self.url()?;
+        let repo = self.state.repo;
         let modules = self.state.modules.config();
         // The modules configuration includes trusted overrides, each retaining its origin metadata.
         // Only relative URLs originating in `.gitmodules` are resolved against the superproject's remote;
         // overrides are treated as initialized URLs, so relative overrides remain local paths.
         let mut from_modules_file = false;
-        modules.string_filter_by("submodule", Some(self.name()), "url", |meta| {
-            from_modules_file = std::ptr::eq(meta, modules.meta());
-            true
-        });
-        if from_modules_file && (starts_with_dot_slash(&configured_url) || starts_with_dot_dot_slash(&configured_url)) {
+        let configured_url = modules
+            .string_filter_by("submodule", Some(self.name()), "url", |meta| {
+                from_modules_file = std::ptr::eq(meta, modules.meta());
+                true
+            })
+            .expect("url() validated the configured URL");
+        let configured_url = configured_url.as_bstr();
+        if from_modules_file && (starts_with_dot_slash(configured_url) || starts_with_dot_dot_slash(configured_url)) {
             let remote_name = repo
                 .head()?
                 .referent_name()
@@ -56,11 +67,14 @@ impl Submodule<'_> {
             let remote_url = match remote_url.as_deref() {
                 Some(url) => url.as_bstr(),
                 None => {
-                    fallback = gix_path::into_bstr(&root)?;
+                    let root = repo.workdir().unwrap_or_else(|| repo.git_dir());
+                    let root = gix_path::realpath_opts(root, repo.current_dir(), gix_path::realpath::MAX_SYMLINKS)
+                        .or_raise(|| message("Could not resolve the superproject's directory"))?;
+                    fallback = gix_path::into_bstr(root)?;
                     fallback.as_ref()
                 }
             };
-            let resolved = resolve_relative_url(remote_url, &configured_url)?;
+            let resolved = resolve_relative_url(remote_url, configured_url)?;
             if own_upstream {
                 // The fallback is a known local path, including Windows verbatim prefixes that aren't URL syntax.
                 url.path = gix_path::into_bstr(gix_path::to_native_path_on_windows(resolved.as_bstr())?)?.into_owned();
@@ -70,13 +84,12 @@ impl Submodule<'_> {
                         "The resolved URL of submodule '{}' could not be parsed",
                         self.name()
                     ))
-                    .with_input(resolved)
+                    .with_input(resolved.as_bstr())
                 })?;
             }
+            return Ok((resolved, url));
         }
-        url.canonicalize(&root)
-            .or_raise(|| message("Could not make the submodule URL independent of the current directory"))?;
-        Ok(url)
+        Ok((configured_url.to_owned(), url))
     }
 }
 

@@ -176,26 +176,6 @@ impl Submodule<'_> {
         self.state.modules.url(self.name())
     }
 
-    /// Return the raw url from `.gitmodules` only, without configuration overrides.
-    ///
-    /// This is useful when the overridden URL (e.g. from `.git/config`) is stale or
-    /// invalid and we need the original relative URL for fallback resolution.
-    #[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
-    pub(crate) fn gitmodules_url(&self) -> Option<gix_url::Url> {
-        let worktree = self.state.repo.workdir()?;
-        let gitmodules_path = worktree.join(MODULES_FILE);
-        let bytes = std::fs::read(&gitmodules_path).ok()?;
-        let gitmodules = gix_config::File::from_bytes_no_includes(
-            &bytes,
-            gix_config::file::Metadata::from(gix_config::Source::Local),
-            Default::default(),
-        )
-        .ok()?;
-        let key = format!("submodule.{}.url", self.name());
-        let url_value = gitmodules.string(&key)?;
-        gix_url::Url::from_bytes(url_value.as_ref()).ok()
-    }
-
     /// Return the `update` field from this submodule's configuration, if present, or `None`.
     ///
     /// This method takes into consideration submodule configuration overrides.

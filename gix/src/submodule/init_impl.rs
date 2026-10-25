@@ -52,46 +52,7 @@ impl Submodule<'_> {
             return Ok(());
         }
 
-        // Resolve relative URLs against the superproject's remote.origin.url,
-        // matching git's resolve_relative_url() behavior.
-        // If the remote URL doesn't resolve to an existing path, fall back to resolving
-        // relative to the worktree directory (git falls back to getcwd() similarly).
-        let raw_url = self.url()?;
-        let resolved_url = {
-            let rel_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(raw_url.path.as_ref()))?;
-            if rel_path.is_relative() && raw_url.scheme == gix_url::Scheme::File {
-                let cwd = self.state.repo.options.current_dir_or_empty();
-
-                // Try to resolve against the superproject's origin URL first.
-                let from_remote = self
-                    .state
-                    .repo
-                    .find_remote("origin")
-                    .ok()
-                    .and_then(|r| {
-                        r.url(crate::remote::Direction::Fetch)
-                            .map(std::borrow::ToOwned::to_owned)
-                    })
-                    .and_then(|base_url| {
-                        let base_path = gix_path::from_bstr(std::borrow::Cow::Borrowed(base_url.path.as_ref())).ok()?;
-                        let candidate = base_path.join(&rel_path);
-                        gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS)
-                            .ok()
-                            .filter(|p| p.exists())
-                    });
-
-                let resolved = from_remote.unwrap_or_else(|| {
-                    // Fallback: resolve relative to the worktree directory.
-                    // This matches git's fallback to getcwd() when the remote URL is unavailable.
-                    let worktree = self.state.repo.workdir().unwrap_or_else(|| self.state.repo.git_dir());
-                    let candidate = worktree.join(&rel_path);
-                    gix_path::realpath_opts(&candidate, cwd, gix_path::realpath::MAX_SYMLINKS).unwrap_or(candidate)
-                });
-                gix_path::into_bstr(resolved)?.into_owned()
-            } else {
-                raw_url.to_bstring()
-            }
-        };
+        let (resolved_url, _) = self.url_for_config_and_transport()?;
 
         // Write the url — create or update the section
         {

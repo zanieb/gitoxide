@@ -50,6 +50,38 @@ mod url {
     }
 
     #[test]
+    fn init_persists_the_same_url_as_git() -> TestResult {
+        let fixture = gix_testtools::scripted_fixture_writable("make_submodule_urls.sh")?;
+        for case in Case::load_all(fixture.path())? {
+            let repo = case.open("worktree")?;
+            let result = submodule(&repo)?.init(false);
+            if !case.init_succeeded {
+                assert!(
+                    result.is_err(),
+                    "Git rejected {:?} + {:?}",
+                    case.remote_url,
+                    case.module_url
+                );
+                continue;
+            }
+            result?;
+            let reopened = case.open("worktree")?;
+            let config = reopened.config_snapshot();
+            let url = config
+                .string("submodule.m1.url")
+                .expect("init writes the submodule URL");
+            assert_eq!(
+                url.as_bstr(),
+                std::fs::read(case.path.join("expected-url"))?.trim_end().as_bstr(),
+                "persist the same URL as Git for {:?} + {:?}",
+                case.remote_url,
+                case.module_url
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn remote_selection_and_overrides_match_git() -> TestResult {
         let fixture = fixture()?;
         for name in [

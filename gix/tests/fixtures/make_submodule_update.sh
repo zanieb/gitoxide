@@ -31,11 +31,13 @@ git clone -q upstream super
 # A fresh clone has submodule config in .gitmodules but nothing in .git/config
 # and no submodule worktree.
 git clone -q super after-clone
+git -C after-clone remote set-url origin ../super
 
 # --- Scenario: initialized-not-updated ---
 # After `git submodule init`, the url is in .git/config but the worktree is empty.
 git clone -q super initialized-not-updated
 (cd initialized-not-updated
+  git remote set-url origin ../super
   git submodule init submodule
 )
 
@@ -171,6 +173,7 @@ git init -q recursive-super
 
 # Fresh clone for --init --recursive testing
 git clone -q recursive-super recursive-clone
+git -C recursive-clone remote set-url origin ../recursive-super
 
 # Fresh clone whose nested submodule URL is broken, so recursive update fails.
 git clone -q mid-module broken-mid-module
@@ -190,6 +193,7 @@ git init -q recursive-broken-super
 )
 
 git clone -q recursive-broken-super recursive-broken-clone
+git -C recursive-broken-clone remote set-url origin ../recursive-broken-super
 
 # --- Scenario: command-in-gitmodules-rejected ---
 # Superproject with update=!command in .gitmodules (must be rejected for security).
