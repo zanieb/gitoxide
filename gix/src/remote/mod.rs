@@ -63,5 +63,7 @@ pub use connection::{AuthenticateFn, Connection, ref_map};
 pub mod save;
 
 mod access;
+#[cfg(any(feature = "async-network-client", feature = "blocking-network-client"))]
+mod local;
 ///
 pub mod url;

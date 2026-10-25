@@ -98,6 +98,80 @@ mod blocking_and_async_io {
         Ok(())
     }
 
+    #[test]
+    fn local_fetch_copies_requested_objects_and_tags_pointing_to_them() -> TestResult {
+        if gix_testtools::run_in_isolated_process()? {
+            return Ok(());
+        }
+        let (source, fixture) = try_repo_rw("base")?;
+        let mut dest =
+            crate::init_repo_isolated(fixture.path().join("local"), gix::create::Kind::Bare)?.to_thread_local();
+        dest.committer_or_set_generic_fallback()?;
+        let remote = dest.remote_at(gix::path::into_bstr(source.git_dir())?)?;
+        let old = source.rev_parse_single("main^")?.detach();
+        let unrelated_tag = source.find_reference("annotated-detached-tag")?.id().detach();
+        let unreachable = source.write_blob(b"unreachable")?.detach();
+        let mapped = remote
+            .clone()
+            .with_refspecs([format!("+{old}:refs/commit/old").as_str()], Fetch)?;
+        assert!(mapped.try_fetch_local(&AtomicBool::default())?.is_some());
+        assert_eq!(dest.find_reference("refs/commit/old")?.id(), old);
+        assert!(!dest.has_object(source.head_id()?));
+        assert!(!dest.has_object(unrelated_tag));
+        assert!(!dest.has_object(unreachable));
+
+        let main = remote
+            .clone()
+            .with_refspecs(["+HEAD:refs/remotes/origin/main"], Fetch)?;
+        assert!(main.try_fetch_local(&AtomicBool::new(true)).is_err());
+        assert!(dest.try_find_reference("refs/remotes/origin/main")?.is_none());
+        let restricted = gix::open_opts(
+            dest.git_dir(),
+            crate::restricted().config_overrides(["protocol.file.allow=never"]),
+        )?;
+        assert!(
+            restricted
+                .remote_at(gix::path::into_bstr(source.git_dir())?)?
+                .with_refspecs(["HEAD"], Fetch)?
+                .try_fetch_local(&AtomicBool::default())
+                .is_err(),
+            "protocol.file.allow applies to in-process fetches"
+        );
+        assert!(main.try_fetch_local(&AtomicBool::default())?.is_some());
+        let control =
+            crate::init_repo_isolated(fixture.path().join("control"), gix::create::Kind::Bare)?.to_thread_local();
+        let out = gix_testtools::git_command(control.git_dir())
+            .arg("fetch")
+            .arg(source.git_dir())
+            .arg("+HEAD:refs/remotes/origin/main")
+            .output()?;
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        for repo in [&control, &dest] {
+            assert_eq!(repo.find_reference("refs/remotes/origin/main")?.id(), source.head_id()?);
+            assert!(
+                repo.find_reference("refs/tags/b-tag").is_ok(),
+                "an annotated tag follows its reached commit"
+            );
+            assert!(!repo.has_object(unrelated_tag));
+            gix_testtools::git(repo.git_dir(), "fsck --full --no-dangling")?;
+        }
+        assert!(
+            remote
+                .clone()
+                .with_refspecs([unreachable.to_string().as_str()], Fetch)?
+                .try_fetch_local(&AtomicBool::default())?
+                .is_none(),
+            "upload-pack decides whether an unadvertised object may be fetched"
+        );
+        assert!(!dest.has_object(unreachable));
+        gix_testtools::git(source.git_dir(), "config transfer.hideRefs refs/heads")?;
+        assert!(
+            main.try_fetch_local(&AtomicBool::default())?.is_none(),
+            "upload-pack enforces transfer.hideRefs"
+        );
+        Ok(())
+    }
+
     fn expected_pack_object_ids(sha1_hexes: &[&str]) -> Vec<gix::ObjectId> {
         let mut ids: Vec<_> = sha1_hexes.iter().copied().map(hex_to_id).collect();
         ids.sort();
