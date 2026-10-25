@@ -192,14 +192,10 @@ impl Submodule<'_> {
                     && let Ok(head_id) = sm_repo.head_id()
                     && head_id.detach() == target_commit
                 {
-                    return Ok(Some(super::update::Outcome {
-                        strategy: effective_strategy,
-                        target_commit,
-                        freshly_cloned: false,
-                        checkout: None,
-                    }));
+                    None
+                } else {
+                    Some(checkout_to_commit(&sm_repo, target_commit, should_interrupt)?)
                 }
-                Some(checkout_to_commit(&sm_repo, target_commit, should_interrupt)?)
             }
             gix_submodule::config::Update::Rebase | gix_submodule::config::Update::Merge => {
                 update_current_branch_strategy(&sm_repo, target_commit, effective_strategy.clone(), should_interrupt)?

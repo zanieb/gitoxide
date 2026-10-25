@@ -164,7 +164,9 @@ mod update {
         assert_eq!(sub.head_id()?.detach(), sm.index_id()?.expect("gitlink"));
         let sub = gix::open_opts(sub.git_dir(), gix::open::Options::isolated())?;
         assert_eq!(
-            sub.config_snapshot().string("remote.origin.url").expect("stored origin URL"),
+            sub.config_snapshot()
+                .string("remote.origin.url")
+                .expect("stored origin URL"),
             "https://example.invalid/team/submodule"
         );
         Ok(())
@@ -777,6 +779,40 @@ mod update {
                 );
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn recursive_update_after_direct_checkout() -> crate::Result {
+        let (repo, _tmp) = repo_rw("recursive-clone")?;
+        let sm = repo
+            .submodules()?
+            .expect("modules present")
+            .next()
+            .expect("mid submodule");
+        let interrupt = Default::default();
+        sm.update_submodule(
+            gix::progress::Discard,
+            &interrupt,
+            &gix::submodule::update::Options::new(true, false),
+        )?
+        .expect("direct update");
+        let child = sm.work_dir()?;
+        let nested_file = child.join("inner/inner-file");
+        assert!(!nested_file.exists());
+        std::fs::write(child.join("file"), "local change\n")?;
+
+        let outcome = sm
+            .update_submodule(
+                gix::progress::Discard,
+                &interrupt,
+                &gix::submodule::update::Options::new(true, true),
+            )?
+            .expect("recursive update");
+        assert!(!outcome.freshly_cloned);
+        assert!(outcome.checkout.is_none());
+        assert_eq!(std::fs::read_to_string(nested_file)?, "inner\n");
+        assert_eq!(std::fs::read_to_string(child.join("file"))?, "local change\n");
         Ok(())
     }
 
