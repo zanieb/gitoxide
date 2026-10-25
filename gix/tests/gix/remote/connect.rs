@@ -135,6 +135,22 @@ mod blocking_io {
         }
 
         #[test]
+        fn denied_protocol_omits_url_credentials() -> TestResult {
+            let repo = remote::repo("protocol_denied");
+            for url in [
+                "https://fixture-token@example.invalid/repo",
+                "https://fixture-user:fixture-password@example.invalid/repo",
+            ] {
+                let error = repo.remote_at(url)?.sanitized_url_and_version(Fetch).unwrap_err();
+                assert!(error.is_permission_denied());
+                let diagnostic = format!("{error:#}");
+                assert!(diagnostic.contains("https://example.invalid/repo"));
+                assert!(!diagnostic.contains("fixture-"));
+            }
+            Ok(())
+        }
+
+        #[test]
         #[serial]
         fn user() -> TestResult {
             let _environment = gix_testtools::isolate_git_environment()?;

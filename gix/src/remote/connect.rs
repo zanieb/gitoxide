@@ -66,8 +66,8 @@ impl<'repo> Remote<'repo> {
     /// Produce the sanitized URL and protocol version to use as obtained by querying the repository configuration.
     ///
     /// This can be useful when using custom transports to allow additional configuration.
-    /// Repository path resolution failures and denied protocols include the path or URL bytes as `input`
-    /// [metadata](gix_error::Error::metadata()).
+    /// Repository path resolution failures include the path as `input` [metadata](gix_error::Error::metadata()).
+    /// For denied protocols, `input` contains the URL without userinfo.
     pub fn sanitized_url_and_version(
         &self,
         direction: crate::remote::Direction,
@@ -106,7 +106,7 @@ impl<'repo> Remote<'repo> {
         let version = crate::config::tree::Protocol::VERSION
             .try_into_protocol_version(self.repo.config.resolved.integer(Protocol::VERSION))?;
 
-        let url = self
+        let mut url = self
             .url(direction)
             .ok_or_else(|| {
                 Error::from_error(gix_error::validation(format!(
@@ -116,6 +116,8 @@ impl<'repo> Remote<'repo> {
             })?
             .to_owned();
         if !self.repo.config.url_scheme()?.allow(&url.scheme) {
+            url.user = None;
+            url.password = None;
             bail!(
                 "Protocol {:?} is denied per configuration"
                     .permission_denied()
