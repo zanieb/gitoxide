@@ -149,6 +149,7 @@ where
             reflog_message: None,
             write_packed_refs: WritePackedRefs::Never,
             shallow: Default::default(),
+            filter: None,
         })
     }
 }
@@ -199,6 +200,7 @@ where
     reflog_message: Option<RefLogMessage>,
     write_packed_refs: WritePackedRefs,
     shallow: remote::fetch::Shallow,
+    filter: Option<remote::fetch::Filter>,
 }
 
 /// Builder
@@ -235,6 +237,13 @@ where
     /// *Has no effect if the current repository is not as shallow clone.*
     pub fn with_shallow(mut self, shallow: remote::fetch::Shallow) -> Self {
         self.inner.shallow = shallow;
+        self
+    }
+
+    /// Request a filtered pack when the server supports filtering. A server without support sends a full pack.
+    /// Filtered packs receive a `.promisor` marker. The caller must arrange to fetch omitted objects before reading them.
+    pub fn with_filter(mut self, filter: remote::fetch::Filter) -> Self {
+        self.inner.filter = Some(filter);
         self
     }
 }

@@ -46,6 +46,58 @@ mod blocking_and_async_io {
         "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
     ];
 
+    #[cfg(feature = "blocking-network-client")]
+    #[test]
+    fn treeless_fetch_marks_only_filtered_packs_as_promisor() -> TestResult {
+        if gix_testtools::run_in_isolated_process()? {
+            return Ok(());
+        }
+        let (source, fixture) = try_repo_rw("base")?;
+        let tree_id = source.head_commit()?.tree_id()?.detach();
+        for (name, version, allow_filter) in [
+            ("filtered-v1", "1", true),
+            ("filtered-v2", "2", true),
+            ("complete", "2", false),
+        ] {
+            gix_testtools::git(
+                source.git_dir(),
+                &format!("config uploadpack.allowFilter {allow_filter}"),
+            )?;
+            let mut repo = gix::ThreadSafeRepository::init_opts(
+                fixture.path().join(name),
+                gix::create::Kind::Bare,
+                Default::default(),
+                crate::restricted().config_overrides([format!("protocol.version={version}")]),
+            )?
+            .to_thread_local();
+            repo.committer_or_set_generic_fallback()?;
+            let remote = repo
+                .remote_at(gix::path::into_bstr(source.git_dir())?)?
+                .with_refspecs(["+HEAD:refs/heads/main"], Fetch)?
+                .with_fetch_tags(fetch::Tags::None);
+            let outcome = remote
+                .connect(Fetch)?
+                .prepare_fetch(progress::Discard, Default::default())?
+                .with_filter(fetch::Filter::TreeDepth(0))
+                .receive(progress::Discard, &AtomicBool::default())?;
+            let Status::Change { write_pack_bundle, .. } = outcome.status else {
+                panic!("the first fetch receives a pack");
+            };
+            let pack = write_pack_bundle.data_path.expect("the received pack is on disk");
+            assert_eq!(
+                pack.with_extension("promisor").is_file(),
+                allow_filter,
+                "only negotiated filters create promisor packs"
+            );
+            assert_eq!(
+                repo.try_find_header(tree_id)?.is_none(),
+                allow_filter,
+                "only a treeless pack omits the root tree"
+            );
+        }
+        Ok(())
+    }
+
     fn expected_pack_object_ids(sha1_hexes: &[&str]) -> Vec<gix::ObjectId> {
         let mut ids: Vec<_> = sha1_hexes.iter().copied().map(hex_to_id).collect();
         ids.sort();

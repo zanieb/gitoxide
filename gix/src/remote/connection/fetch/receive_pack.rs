@@ -180,6 +180,7 @@ where
             tags: con.remote.fetch_tags,
             negotiator,
             open_options: repo.options.clone(),
+            filter: self.filter,
         };
 
         let write_pack_options = gix_pack::bundle::write::Options {
@@ -222,6 +223,15 @@ where
             fetch_options,
         )
         .await?;
+        if negotiate.filter.is_some()
+            && let Some(path) = write_pack_bundle.as_ref().and_then(|pack| pack.data_path.as_ref())
+        {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path.with_extension("promisor"))
+                .or_raise(|| message!("Could not mark pack {} as promisor", path.display()))?;
+        }
         let negotiate = res.map(|v| outcome::Negotiate {
             graph: graph.detach(),
             rounds: v.negotiate.rounds,
@@ -309,6 +319,7 @@ struct Negotiate<'a, 'b, 'c> {
     ref_map: &'a gix_protocol::fetch::RefMap,
     shallow: &'a gix_protocol::fetch::Shallow,
     tags: gix_protocol::fetch::Tags,
+    filter: Option<crate::remote::fetch::Filter>,
     negotiator: Box<dyn gix_negotiate::Negotiator>,
     open_options: crate::open::Options,
 }
@@ -341,14 +352,19 @@ impl gix_protocol::fetch::Negotiate for Negotiate<'_, '_, '_> {
     }
 
     fn add_wants(&mut self, arguments: &mut Arguments, remote_ref_target_known: &[bool]) -> bool {
-        negotiate::add_wants(
+        let wants = negotiate::add_wants(
             self.objects,
             arguments,
             self.ref_map,
             remote_ref_target_known,
             self.shallow,
             negotiate::make_refmapping_ignore_predicate(self.tags, self.ref_map),
-        )
+        );
+        self.filter = self.filter.filter(|_| arguments.can_use_filter());
+        if let Some(filter) = self.filter {
+            arguments.filter(&filter.to_string());
+        }
+        wants
     }
 
     fn one_round(
