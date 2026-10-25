@@ -31,6 +31,7 @@ use bstr::{BStr, BString, ByteSlice};
 use gix_error::bail;
 use gix_utils::AsBStr;
 
+const FILE_PATH_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::AsciiSet::EMPTY.add(b'%');
 const HTTP_PATH_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')
     .add(b'"')
@@ -208,7 +209,8 @@ pub struct Url {
     ///
     /// Percent-encoded characters are decoded during parsing (e.g., `%20` becomes a space in this field). An unchanged
     /// parsed path may retain its original encoded spelling for serialization. Constructed or modified HTTP paths are
-    /// percent-encoded during canonical serialization; other schemes write the path bytes as stored.
+    /// percent-encoded during canonical serialization. Constructed or modified `file://` paths escape literal
+    /// percent signs. Bare filesystem paths treat percent signs literally.
     ///
     /// Path normalization during parsing:
     /// - SSH/Git schemes: Leading `/~` is stripped (e.g., `/~repo` becomes `~repo`)
@@ -261,7 +263,7 @@ impl<'de> serde::Deserialize<'de> for Url {
         }
 
         let mut fields = Fields::deserialize(deserializer)?;
-        if fields.path_with_percent_escapes.as_ref() == Some(&fields.path) {
+        if fields.scheme != Scheme::File && fields.path_with_percent_escapes.as_ref() == Some(&fields.path) {
             fields.path_with_percent_escapes = Some(encode_legacy_http_path(&fields.path));
             fields.path = percent_encoding::percent_decode(&fields.path)
                 .collect::<Vec<_>>()
@@ -311,8 +313,8 @@ fn encode_legacy_http_path(path: &[u8]) -> BString {
 impl Url {
     /// Create an instance from the given parts and validate it by serializing and parsing it back.
     ///
-    /// For HTTP and HTTPS, `path` is decoded data: literal percent signs are encoded during serialization, and an empty
-    /// path is normalized to `/`. Other schemes interpret `path` according to their serialized syntax.
+    /// For HTTP, HTTPS and canonical `file://` URLs, `path` is decoded data and literal percent signs are encoded
+    /// during serialization. HTTP(S) normalizes an empty path to `/`. Bare filesystem paths retain their literal bytes.
     /// `serialize_alternative_form` merely requests alternative form; passwords, ports, and unsupported schemes force
     /// canonical URL serialization.
     /// Invalid remote-helper names include the name bytes as `input` [metadata](gix_error::Error::metadata());
@@ -825,6 +827,12 @@ impl Url {
                 out,
                 "{}",
                 percent_encoding::percent_encode(&self.path, HTTP_PATH_ENCODE_SET)
+            )?;
+        } else if self.scheme == Scheme::File && self.path.contains(&b'%') {
+            write!(
+                out,
+                "{}",
+                percent_encoding::percent_encode(&self.path, FILE_PATH_ENCODE_SET)
             )?;
         } else {
             out.write_all(&self.path)?;

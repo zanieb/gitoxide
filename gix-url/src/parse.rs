@@ -332,11 +332,20 @@ pub(crate) fn file_url(input: &BStr, protocol_colon: usize) -> Result<crate::Url
     // default behavior on Unix platforms and if no Windows special case was triggered
     let path = windows_special_path.unwrap_or(&input_after_protocol[first_slash..]);
 
-    Ok(crate::Url {
+    let mut url = crate::Url {
         serialize_alternative_form: false,
         host: host.map(Into::into),
         ..local(path.into())?
-    })
+    };
+    if path.contains('%') {
+        url.path_with_percent_escapes = Some(std::mem::replace(
+            &mut url.path,
+            percent_encoding::percent_decode(path.as_bytes())
+                .collect::<Vec<_>>()
+                .into(),
+        ));
+    }
+    Ok(url)
 }
 
 pub(crate) fn local(input: &BStr) -> Result<crate::Url> {

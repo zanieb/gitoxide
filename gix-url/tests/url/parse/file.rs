@@ -28,6 +28,28 @@ fn file_path_without_protocol() -> gix_testtools::TestResult {
 }
 
 #[test]
+fn file_urls_decode_paths_once_and_local_paths_remain_literal() -> gix_testtools::TestResult {
+    let encoded = "file:///repo%20name/literal%2520";
+    let mut url = gix_url::parse(encoded)?;
+    assert_eq!(url.path, "/repo name/literal%20");
+    assert_eq!(url.to_bstring(), encoded);
+    url.path = "/different/%2f".into();
+    assert_eq!(gix_url::parse(url.to_bstring())?.path, url.path);
+    assert_eq!(gix_url::parse("/repo%20name")?.path, "/repo%20name");
+    assert_eq!(
+        gix_url::parse("file:///non-utf8/%FF")?.path,
+        b"/non-utf8/\xff".as_bstr()
+    );
+    #[cfg(feature = "serde")]
+    {
+        let original = gix_url::parse("file:///literal%zz")?;
+        let restored: gix_url::Url = serde_json::from_slice(&serde_json::to_vec(&original)?)?;
+        assert_eq!(restored.to_bstring(), "file:///literal%zz");
+    }
+    Ok(())
+}
+
+#[test]
 fn file_path_with_whitespace() -> gix_testtools::TestResult {
     Ok(assert_url_roundtrip(
         "/path/to/git with spaces ",

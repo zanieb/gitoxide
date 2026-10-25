@@ -127,7 +127,7 @@ mod path_query_fragment {
             ("ssh://git@host/repo%2523one?two#three", "/repo%23one?two#three"),
             ("ssh://git@host/~repo%23one?two", "~repo#one?two"),
             ("git://host/repo%23one?two", "/repo#one?two"),
-            ("file:///repo#one?two%23three", "/repo#one?two%23three"),
+            ("file:///repo#one?two%23three", "/repo#one?two#three"),
             ("./repo#one?two%23three", "./repo#one?two%23three"),
             ("http::repo#one?two%23three", "repo#one?two%23three"),
         ] {
