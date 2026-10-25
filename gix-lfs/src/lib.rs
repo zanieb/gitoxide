@@ -1,8 +1,13 @@
 //! Read Git LFS pointer files stored in Git blobs.
 #![forbid(unsafe_code)]
 
+/// Build basic Git LFS download batch requests, validate responses and verify object contents.
+#[cfg(feature = "download")]
+pub mod download;
+
 /// An extension-free Git LFS pointer identifying an object and its size.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "download", derive(serde::Serialize))]
 pub struct Pointer<'a> {
     /// The lowercase SHA-256 digest of the contents, encoded in hexadecimal.
     pub oid: &'a str,

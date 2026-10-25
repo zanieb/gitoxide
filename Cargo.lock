@@ -2099,6 +2099,13 @@ dependencies = [
 [[package]]
 name = "gix-lfs"
 version = "0.0.0"
+dependencies = [
+ "faster-hex",
+ "gix-error",
+ "serde",
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "gix-lock"

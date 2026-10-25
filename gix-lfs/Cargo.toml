@@ -14,4 +14,13 @@ include = ["/src/**/*", "/LICENSE-*"]
 [lib]
 doctest = false
 
+[features]
+## Build Git LFS Batch API download requests and verify streamed object contents.
+download = ["dep:faster-hex", "dep:gix-error", "dep:serde", "dep:serde_json", "dep:sha2"]
+
 [dependencies]
+gix-error = { version = "^0.5.2", path = "../gix-error", optional = true }
+faster-hex = { version = "0.10.1", default-features = false, features = ["std"], optional = true }
+serde = { version = "1.0.114", optional = true, features = ["derive"] }
+serde_json = { version = "1.0", optional = true }
+sha2 = { version = "0.11.0", optional = true }
