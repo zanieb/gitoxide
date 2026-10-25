@@ -21,6 +21,7 @@ impl State {
         rela_path: &BStr,
     ) -> Result<Option<Process<'_>>> {
         match driver.process.as_ref() {
+            Some(process) if process.is_empty() => Ok(None),
             Some(process) => {
                 let client = match self.running.remove(process) {
                     Some(c) => c,
@@ -49,23 +50,13 @@ impl State {
             }
             None => {
                 let cmd = match operation {
-                    Operation::Clean => driver
-                        .clean
-                        .as_ref()
-                        .map(|cmd| substitute_f_parameter(cmd.as_ref(), rela_path)),
-
-                    Operation::Smudge => driver
-                        .smudge
-                        .as_ref()
-                        .map(|cmd| substitute_f_parameter(cmd.as_ref(), rela_path)),
+                    Operation::Clean => &driver.clean,
+                    Operation::Smudge => &driver.smudge,
                 };
-
-                let cmd = match cmd {
-                    Some(cmd) => cmd,
-                    None => return Ok(None),
+                let Some(cmd) = cmd.as_ref().filter(|cmd| !cmd.is_empty()) else {
+                    return Ok(None);
                 };
-
-                let (child, command) = spawn_driver(cmd, &self.context)?;
+                let (child, command) = spawn_driver(substitute_f_parameter(cmd.as_ref(), rela_path), &self.context)?;
                 Ok(Some(Process::SingleFile { child, command }))
             }
         }

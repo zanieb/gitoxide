@@ -189,6 +189,11 @@ impl State {
                     Err(message!("The invoked command '{command}' in process indicated an error: {status:?}").raise())
                 }
             }
+            None if driver.required => bail!(
+                "Required {} filter '{}' has no active command",
+                operation.as_str(),
+                driver.name
+            ),
             None => Ok(None),
         }
     }

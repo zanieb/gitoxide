@@ -292,6 +292,46 @@ pub(crate) mod apply {
         driver
     }
 
+    #[test]
+    fn empty_filter_commands_follow_process_precedence() -> TestResult {
+        let mut state = driver::State::default();
+        for process in [Some(BString::default()), None] {
+            let single_file = if process.is_some() { "exit 1" } else { "" };
+            let mut driver = Driver {
+                name: "empty".into(),
+                process,
+                clean: Some(single_file.into()),
+                smudge: Some(single_file.into()),
+                required: false,
+            };
+            for operation in [Operation::Clean, Operation::Smudge] {
+                let input = b"unfiltered".as_slice();
+                let mut src = input;
+                assert!(
+                    state
+                        .apply(&driver, &mut src, operation, context_from_path("file"))?
+                        .is_none(),
+                    "{operation:?} has no active command with process={:?} and single-file command={single_file:?}",
+                    driver.process
+                );
+                assert_eq!(src, input);
+            }
+            driver.required = true;
+            assert!(
+                state
+                    .apply(
+                        &driver,
+                        &mut std::io::empty(),
+                        Operation::Smudge,
+                        context_from_path("file")
+                    )
+                    .is_err(),
+                "a required smudge filter must have an active command"
+            );
+        }
+        Ok(())
+    }
+
     pub(crate) fn driver_with_process() -> Driver {
         let command = |suffix| {
             let mut command = driver_path();
@@ -353,6 +393,7 @@ pub(crate) mod apply {
     fn missing_driver_means_no_filter_is_applied() -> TestResult {
         let mut state = gix_filter::driver::State::default();
         let mut driver = driver_no_process();
+        driver.required = false;
         driver.smudge = None;
         assert!(
             state
