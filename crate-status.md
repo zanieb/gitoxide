@@ -788,9 +788,9 @@ Record and reuse conflict resolutions across mergy workflows.
 
 Implement git large file support using the process protocol and make it flexible enough to handle a variety of cases.
 Make it the best-performing implementation and the most convenient one.
-The `gix-lfs` crate exists but is currently an empty placeholder.
 
-* [ ] LFS pointer parsing, process filter integration and transfer client support
+* [x] parse canonical, extension-free Git LFS v1 pointers
+* [ ] process filter integration and transfer client support
 * [ ] high-performance parallel transfer/compression implementation
 
 ### gix-glob
