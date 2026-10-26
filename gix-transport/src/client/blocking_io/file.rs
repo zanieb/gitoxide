@@ -38,6 +38,13 @@ const ENV_VARS_TO_REMOVE: &[&str] = &[
     "GIT_CONFIG_COUNT",
 ];
 
+/// Configuration for a local Git service process.
+#[derive(Clone, Debug)]
+pub struct Options {
+    /// Colon-separated protocols the service and its children may use, as in `GIT_ALLOW_PROTOCOL`.
+    pub allow_protocols: String,
+}
+
 /// A utility to spawn a helper process to actually transmit data, possibly over `ssh`.
 ///
 /// It can only be instantiated using the local [`connect()`] or [ssh connect][super::ssh::connect()].
@@ -177,7 +184,13 @@ impl client::TransportWithoutIO for SpawnProcessOnDemand {
         true
     }
 
-    fn configure(&mut self, _config: &dyn Any) -> Result {
+    fn configure(&mut self, config: &dyn Any) -> Result {
+        if self.ssh_cmd.is_none()
+            && let Some(options) = config.downcast_ref::<Options>()
+        {
+            self.envs.retain(|(key, _)| *key != "GIT_ALLOW_PROTOCOL");
+            self.envs.push(("GIT_ALLOW_PROTOCOL", options.allow_protocols.clone()));
+        }
         Ok(())
     }
 }
@@ -359,6 +372,27 @@ pub fn connect(
 mod tests {
     mod local {
         use crate::{Protocol, Service, client::blocking_io::file::SpawnProcessOnDemand};
+
+        #[test]
+        fn local_service_protocol_restrictions_keep_protocol_negotiation() {
+            use crate::client::{TransportWithoutIO, blocking_io::file::Options};
+
+            let mut local = SpawnProcessOnDemand::new_local("/repo".into(), Protocol::V2, false);
+            for protocols in ["file:http", "file"] {
+                local
+                    .configure(&Options {
+                        allow_protocols: protocols.into(),
+                    })
+                    .unwrap();
+            }
+            assert_eq!(
+                local.envs,
+                [
+                    ("GIT_PROTOCOL", "version=2".into()),
+                    ("GIT_ALLOW_PROTOCOL", "file".into())
+                ]
+            );
+        }
 
         #[test]
         fn fallback_command_prefers_the_core_dir_program_and_can_always_run_git_itself() {
