@@ -19,9 +19,9 @@ impl Remote<'_> {
     /// Protocol restrictions and repository ownership checks apply before any objects are read.
     pub fn try_fetch_local(&self, should_interrupt: &AtomicBool) -> Result<Option<fetch::refs::update::Outcome>> {
         if self.refspecs(Direction::Fetch).is_empty()
-            || !self
+            || self
                 .url(Direction::Fetch)
-                .is_some_and(|url| url.scheme == gix_url::Scheme::File)
+                .is_none_or(|url| url.scheme != gix_url::Scheme::File)
         {
             return Ok(None);
         }
