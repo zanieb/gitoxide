@@ -30,10 +30,11 @@ use crate::{
 ///
 pub mod curl;
 
-/// The experimental `reqwest` backend.
+/// An experimental blocking HTTP backend built on `reqwest`.
 ///
-/// It doesn't support any of the shared http options yet, but can be seen as example on how to integrate blocking `http` backends.
-/// There is also nothing that would prevent it from becoming a fully-featured HTTP backend except for demand and time.
+/// It honors Git settings for redirects, extra headers and proxies. It follows redirects only on
+/// requests without configured extra headers or a request callback. With TLS enabled, it also honors
+/// certificate verification and CA bundle settings. See [`reqwest::configure_proxy`] for proxy authentication support.
 #[cfg(feature = "http-client-reqwest")]
 pub mod reqwest;
 
