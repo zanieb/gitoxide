@@ -16,9 +16,11 @@ doctest = false
 
 [features]
 ## Build Git LFS Batch API download requests and verify streamed object contents.
-download = ["dep:faster-hex", "dep:gix-error", "dep:serde", "dep:serde_json", "dep:sha2"]
+download = ["dep:bstr", "dep:gix-glob", "dep:faster-hex", "dep:gix-error", "dep:serde", "dep:serde_json", "dep:sha2"]
 
 [dependencies]
+bstr = { version = "1.12.0", default-features = false, features = ["std"], optional = true }
+gix-glob = { version = "^0.29.1", path = "../gix-glob", optional = true }
 gix-error = { version = "^0.5.2", path = "../gix-error", optional = true }
 faster-hex = { version = "0.10.1", default-features = false, features = ["std"], optional = true }
 serde = { version = "1.0.114", optional = true, features = ["derive"] }

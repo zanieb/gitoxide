@@ -5,6 +5,10 @@
 #[cfg(feature = "download")]
 pub mod download;
 
+/// Select paths for LFS download and checkout.
+#[cfg(feature = "download")]
+pub mod filter;
+
 /// An extension-free Git LFS pointer identifying an object and its size.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "download", derive(serde::Serialize))]

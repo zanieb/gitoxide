@@ -2100,8 +2100,10 @@ dependencies = [
 name = "gix-lfs"
 version = "0.0.0"
 dependencies = [
+ "bstr",
  "faster-hex",
  "gix-error",
+ "gix-glob",
  "serde",
  "serde_json",
  "sha2",
