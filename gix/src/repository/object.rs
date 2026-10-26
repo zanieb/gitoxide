@@ -227,7 +227,7 @@ impl crate::Repository {
 
     /// Try to find the object with `id` and verify that its content matches its checksum.
     ///
-    /// Return `None` if the object wasn't found. The well-known empty tree is treated like [`Repository::try_find_object()`]
+    /// Return `None` if the object wasn't found. The well-known empty tree is treated like [`Self::try_find_object()`]
     /// and is always available for the repository's object hash.
     pub fn try_find_object_verified(&self, id: impl Into<ObjectId>) -> Result<Option<Object<'_>>> {
         let id = id.into();
