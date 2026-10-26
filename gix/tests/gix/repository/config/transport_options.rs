@@ -39,6 +39,46 @@ mod http {
     }
 
     #[test]
+    fn proxies_match_the_transport_scheme_and_remote_url() -> gix_testtools::TestResult {
+        let directory = gix_testtools::tempfile::tempdir()?;
+        let mut repo = crate::init_repo_isolated(directory.path(), gix::create::Kind::Bare)?.to_thread_local();
+        repo.config_snapshot_mut().append_config(
+            [
+                "gitoxide.http.proxy=plain",
+                "gitoxide.https.proxy=secure",
+                "http.https://code.example/private.proxy=private",
+                "http.https://code.example/private.proxyAuthMethod=digest",
+                "http.https://code.example/private/direct.proxy=",
+                "remote.origin.proxy=remote",
+            ],
+            gix_config::Source::Api,
+        )?;
+        for (url, remote, expected) in [
+            ("http://code.example/other", None, "http://plain"),
+            ("https://code.example/other", None, "http://secure"),
+            ("https://code.example/private/repo", None, "http://private"),
+            ("https://code.example/private-other", None, "http://secure"),
+            ("https://code.example/private/direct/repo", None, ""),
+            ("https://code.example/private/repo", Some("origin"), "http://remote"),
+        ] {
+            assert_eq!(
+                http_options(&repo, remote, url).proxy.as_deref(),
+                Some(expected),
+                "proxy for {url} and remote {remote:?}"
+            );
+        }
+        assert_eq!(
+            http_options(&repo, None, "https://code.example/private/repo").proxy_auth_method,
+            ProxyAuthMethod::Digest
+        );
+        assert_eq!(
+            http_options(&repo, None, "https://code.example/other").proxy_auth_method,
+            ProxyAuthMethod::AnyAuth
+        );
+        Ok(())
+    }
+
+    #[test]
     fn ssl_verification_is_scoped_to_the_matching_url() -> gix_testtools::TestResult {
         let directory = gix_testtools::tempfile::tempdir()?;
         let mut repo = gix::init(directory.path())?;
@@ -248,17 +288,13 @@ mod http {
         let repo = repo("gitoxide-http-proxy-only");
 
         let opts = http_options(&repo, None, "https://host.local/repo");
-        assert_eq!(
-            opts.proxy.as_deref(),
-            Some("http://http-fallback"),
-            "the `http_proxy` env var derived value serves as fallback…"
-        );
+        assert_eq!(opts.proxy, None, "the HTTP environment proxy applies only to HTTP URLs");
 
         let opts = http_options(&repo, None, "http://host.local/repo");
         assert_eq!(
             opts.proxy.as_deref(),
             Some("http://http-fallback"),
-            "…for http-urls as well, as there is nothing else set."
+            "HTTP URLs use the `http_proxy` environment setting"
         );
     }
 

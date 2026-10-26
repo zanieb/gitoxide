@@ -139,6 +139,24 @@ impl crate::Repository {
                         let config = &self.config.resolved;
                         let mut trusted_only = self.filter_config_section();
                         let lenient = self.config.lenient_config;
+                        let mut normalized_url = url.clone();
+                        crate::config::url_match::normalize(&mut normalized_url);
+                        let scoped_http_value = |key: &str| {
+                            config
+                                .sections_by_name_and_filter("http", self.filter_config_section())
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|section| {
+                                    let value = section.value_implicit(key)?;
+                                    let rank = crate::config::url_match::specificity(
+                                        section.header().subsection_name()?,
+                                        &normalized_url,
+                                    )?;
+                                    Some((rank, value))
+                                })
+                                .max_by_key(|(rank, _)| *rank)
+                                .map(|(_, value)| value)
+                        };
                         opts.extra_headers = {
                             let key = "http.extraHeader";
                             debug_assert_eq!(key, &config::tree::Http::EXTRA_HEADER.logical_name());
@@ -177,29 +195,19 @@ impl crate::Repository {
                                         .map(|v| (v, Some(name), &Remote::PROXY))
                                 })
                                 .or_else(|| {
-                                    let key = "http.proxy";
-                                    debug_assert_eq!(key, config::tree::Http::PROXY.logical_name());
-                                    let http_proxy = config
-                                        .string_filter(key, &mut trusted_only)
+                                    scoped_http_value("proxy")
+                                        .flatten()
+                                        .or_else(|| config.string_filter("http.proxy", &mut trusted_only))
                                         .map(|v| (v, None, &config::tree::Http::PROXY))
-                                        .or_else(|| {
-                                            let key = "gitoxide.http.proxy";
-                                            debug_assert_eq!(key, gitoxide::Http::PROXY.logical_name());
-                                            config
-                                                .string_filter(key, &mut trusted_only)
-                                                .map(|v| (v, None, &gitoxide::Http::PROXY))
-                                        });
-                                    if url.scheme == Https {
-                                        http_proxy.or_else(|| {
-                                            let key = "gitoxide.https.proxy";
-                                            debug_assert_eq!(key, gitoxide::Https::PROXY.logical_name());
-                                            config
-                                                .string_filter(key, &mut trusted_only)
-                                                .map(|v| (v, None, &gitoxide::Https::PROXY))
-                                        })
+                                })
+                                .or_else(|| {
+                                    let (name, key) = if url.scheme == Https {
+                                        ("gitoxide.https.proxy", &gitoxide::Https::PROXY)
                                     } else {
-                                        http_proxy
-                                    }
+                                        ("gitoxide.http.proxy", &gitoxide::Http::PROXY)
+                                    };
+                                    debug_assert_eq!(name, key.logical_name());
+                                    config.string_filter(name, &mut trusted_only).map(|v| (v, None, key))
                                 })
                                 .or_else(|| {
                                     let key = "gitoxide.http.allProxy";
@@ -237,8 +245,9 @@ impl crate::Repository {
                                         .or_else(|| {
                                             let key = "http.proxyAuthMethod";
                                             debug_assert_eq!(key, config::tree::Http::PROXY_AUTH_METHOD.logical_name());
-                                            config
-                                                .string_filter(key, &mut trusted_only)
+                                            scoped_http_value("proxyAuthMethod")
+                                                .flatten()
+                                                .or_else(|| config.string_filter(key, &mut trusted_only))
                                                 .map(|v| (v, None, &config::tree::Http::PROXY_AUTH_METHOD))
                                         })
                                 })
@@ -370,23 +379,7 @@ impl crate::Repository {
                             if ssl_no_verify {
                                 opts.ssl_verify = false;
                             } else {
-                                let mut url = url.clone();
-                                crate::config::url_match::normalize(&mut url);
-                                let scoped = config
-                                    .sections_by_name_and_filter("http", &mut trusted_only)
-                                    .into_iter()
-                                    .flatten()
-                                    .filter_map(|section| {
-                                        Some((
-                                            crate::config::url_match::specificity(
-                                                section.header().subsection_name()?,
-                                                &url,
-                                            )?,
-                                            section.value_implicit("sslVerify")?,
-                                        ))
-                                    })
-                                    .max_by_key(|(rank, _)| *rank);
-                                opts.ssl_verify = if let Some((_, value)) = scoped {
+                                opts.ssl_verify = if let Some(value) = scoped_http_value("sslVerify") {
                                     value
                                         .map(gix_config::Boolean::try_from)
                                         .transpose()
