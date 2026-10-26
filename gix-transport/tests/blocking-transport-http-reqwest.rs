@@ -48,6 +48,30 @@ fn an_unreadable_ca_bundle_fails_before_connecting() -> gix_testtools::TestResul
     Ok(())
 }
 
+#[test]
+fn disabling_tls_verification_does_not_follow_cross_origin_redirects() -> gix_testtools::TestResult {
+    let target = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let destination = target.local_addr()?;
+    let contacted = observe_connection_within_deadline(target);
+    let server = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let base = format!("http://{}/repo", server.local_addr()?);
+    let responder = std::thread::spawn(move || {
+        let (stream, _) = server.accept().expect("accept discovery");
+        let mut reader = std::io::BufReader::new(stream);
+        read_request_lines(&mut reader);
+        write!(reader.get_mut(), "HTTP/1.1 302 Found\r\nLocation: http://{destination}/repo/info/refs?service=git-upload-pack\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").expect("send redirect");
+    });
+    let mut client = http::connect::<http::reqwest::Remote>(base.try_into()?, Protocol::V1, false);
+    client.configure(&http::Options {
+        ssl_verify: false,
+        ..Default::default()
+    })?;
+    assert!(client.handshake(Service::UploadPack, &[]).is_err());
+    responder.join().expect("redirect server");
+    assert!(!contacted.join().expect("redirect target"));
+    Ok(())
+}
+
 /// Regression for <https://github.com/GitoxideLabs/gitoxide/issues/2140>: when a request fails
 /// without an HTTP status (for example a connection or TLS failure), the underlying error must be
 /// kept as `source()` instead of being stringified, so callers can see the real cause.

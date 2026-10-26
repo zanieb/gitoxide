@@ -69,15 +69,22 @@ impl Default for Remote {
                         feature = "http-client-reqwest-rust-tls-trust-dns",
                         feature = "http-client-reqwest-native-tls"
                     ))]
-                    if let Some(ca_file) = &config.ssl_ca_info {
-                        let pem = std::fs::read(ca_file)
-                            .or_raise(|| message!("Could not read CA bundle at {}", ca_file.display()))?;
-                        let certificates = reqwest::Certificate::from_pem_bundle(&pem)
-                            .or_raise(|| message!("Could not parse CA bundle at {}", ca_file.display()))?;
-                        if certificates.is_empty() {
-                            return Err(message!("No certificates found in CA bundle at {}", ca_file.display()).raise());
+                    {
+                        if !config.ssl_verify {
+                            builder = builder.tls_danger_accept_invalid_certs(true);
                         }
-                        builder = builder.tls_certs_only(certificates);
+                        if let Some(ca_file) = &config.ssl_ca_info {
+                            let pem = std::fs::read(ca_file)
+                                .or_raise(|| message!("Could not read CA bundle at {}", ca_file.display()))?;
+                            let certificates = reqwest::Certificate::from_pem_bundle(&pem)
+                                .or_raise(|| message!("Could not parse CA bundle at {}", ca_file.display()))?;
+                            if certificates.is_empty() {
+                                return Err(
+                                    message!("No certificates found in CA bundle at {}", ca_file.display()).raise()
+                                );
+                            }
+                            builder = builder.tls_certs_only(certificates);
+                        }
                     }
                     if let Some(backend) = config.backend.as_ref() {
                         let mut backend = backend
@@ -90,6 +97,7 @@ impl Default for Remote {
                                 configure_client(builder).or_raise(|| message("HTTP client configuration failed"))?;
                         }
                     }
+                    let ssl_verify = config.ssl_verify;
                     // Keep Git's redirect policy authoritative after client customization.
                     client = Some(
                         builder
@@ -113,6 +121,9 @@ impl Default for Remote {
                                                     attempt.stop()
                                                 }
                                                 Some(prev_url) if authority_changed(curr_url, prev_url) => {
+                                                    if !ssl_verify {
+                                                        return attempt.error("refusing a cross-origin redirect with TLS verification disabled");
+                                                    }
                                                     // Allowed only if the tail doesn't change.
                                                     let redirect_tail = redirect_tail.lock();
                                                     if curr_url.as_str().ends_with(redirect_tail.as_str()) {
