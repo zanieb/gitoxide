@@ -122,6 +122,14 @@ mod blocking_and_async_io {
             .with_refspecs([format!("+{old}:refs/commit/old").as_str()], Fetch)?;
         assert!(mapped.try_fetch_local(&AtomicBool::default())?.is_some());
         assert_eq!(dest.find_reference("refs/commit/old")?.id(), old);
+        #[cfg(unix)]
+        {
+            let authority = dest
+                .remote_at(format!("file://unused.example{}", source.git_dir().display()).as_str())?
+                .with_refspecs([format!("+{old}:refs/commit/authority").as_str()], Fetch)?;
+            assert!(authority.try_fetch_local(&AtomicBool::default())?.is_some());
+            assert_eq!(dest.find_reference("refs/commit/authority")?.id(), old);
+        }
         assert!(!dest.has_object(source.head_id()?));
         assert!(!dest.has_object(unrelated_tag));
         assert!(!dest.has_object(unreachable));

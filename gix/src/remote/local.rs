@@ -21,7 +21,7 @@ impl Remote<'_> {
         if self.refspecs(Direction::Fetch).is_empty()
             || !self
                 .url(Direction::Fetch)
-                .is_some_and(|url| url.scheme == gix_url::Scheme::File && url.host().is_none())
+                .is_some_and(|url| url.scheme == gix_url::Scheme::File)
         {
             return Ok(None);
         }

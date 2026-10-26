@@ -74,6 +74,18 @@ impl<'repo> Remote<'repo> {
     ) -> Result<(gix_url::Url, gix_protocol::transport::Protocol)> {
         fn sanitize(mut url: gix_url::Url) -> Result<gix_url::Url> {
             if url.scheme == gix_url::Scheme::File {
+                // Git uses the authority as the server of a Windows UNC path. On Unix
+                // the path starts at the slash following the authority.
+                if let Some(host) = url.host.take()
+                    && cfg!(windows)
+                {
+                    if matches!(host.as_str(), "." | "?") || host.contains(['/', '\\']) {
+                        bail!("Invalid UNC server in file URL".validation());
+                    }
+                    let mut unc = crate::bstr::BString::from(format!("//{host}"));
+                    unc.extend_from_slice(&url.path);
+                    url.path = unc;
+                }
                 let mut dir = gix_path::to_native_path_on_windows(Cow::Borrowed(url.path.as_ref()))?;
                 let kind = gix_discover::is_git(dir.as_ref())
                     .or_else(|_| {
