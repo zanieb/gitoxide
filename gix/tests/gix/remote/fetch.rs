@@ -48,16 +48,20 @@ mod blocking_and_async_io {
 
     #[cfg(feature = "blocking-network-client")]
     #[test]
-    fn treeless_fetch_marks_only_filtered_packs_as_promisor() -> TestResult {
+    fn fetch_filters_mark_only_negotiated_packs_as_promisor() -> TestResult {
         if gix_testtools::run_in_isolated_process()? {
             return Ok(());
         }
         let (source, fixture) = try_repo_rw("base")?;
         let tree_id = source.head_commit()?.tree_id()?.detach();
-        for (name, version, allow_filter) in [
-            ("filtered-v1", "1", true),
-            ("filtered-v2", "2", true),
-            ("complete", "2", false),
+        let small_blob = source.rev_parse_single("g:file")?.detach();
+        let large_blob = source.rev_parse_single("d:file")?.detach();
+        let treeless = fetch::Filter::TreeDepth(0);
+        for (name, version, allow_filter, filter) in [
+            ("filtered-v1", "1", true, treeless),
+            ("filtered-v2", "2", true, treeless),
+            ("complete", "2", false, treeless),
+            ("blob-limit", "2", true, fetch::Filter::BlobLimit(6)),
         ] {
             gix_testtools::git(
                 source.git_dir(),
@@ -78,7 +82,7 @@ mod blocking_and_async_io {
             let outcome = remote
                 .connect(Fetch)?
                 .prepare_fetch(progress::Discard, Default::default())?
-                .with_filter(fetch::Filter::TreeDepth(0))
+                .with_filter(filter)
                 .receive(progress::Discard, &AtomicBool::default())?;
             let Status::Change { write_pack_bundle, .. } = outcome.status else {
                 panic!("the first fetch receives a pack");
@@ -91,9 +95,11 @@ mod blocking_and_async_io {
             );
             assert_eq!(
                 repo.try_find_header(tree_id)?.is_none(),
-                allow_filter,
+                allow_filter && filter == treeless,
                 "only a treeless pack omits the root tree"
             );
+            assert_eq!(repo.has_object(small_blob), !allow_filter || filter != treeless);
+            assert_eq!(repo.has_object(large_blob), !allow_filter);
         }
         Ok(())
     }

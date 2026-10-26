@@ -36,6 +36,8 @@ pub use gix_protocol::fetch::{Shallow, Tags};
 pub enum Filter {
     /// Omit blob contents.
     BlobNone,
+    /// Omit blobs whose uncompressed size is at least this many bytes.
+    BlobLimit(u64),
     /// Omit trees and blobs at or below this depth. Zero requests only commits and tags.
     TreeDepth(u32),
 }
@@ -44,6 +46,7 @@ impl std::fmt::Display for Filter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BlobNone => f.write_str("blob:none"),
+            Self::BlobLimit(bytes) => write!(f, "blob:limit={bytes}"),
             Self::TreeDepth(depth) => write!(f, "tree:{depth}"),
         }
     }
