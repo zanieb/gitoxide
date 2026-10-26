@@ -39,6 +39,31 @@ mod http {
     }
 
     #[test]
+    fn ssl_verification_is_scoped_to_the_matching_url() -> gix_testtools::TestResult {
+        let directory = gix_testtools::tempfile::tempdir()?;
+        let mut repo = gix::init(directory.path())?;
+        repo.config_snapshot_mut().append_config(
+            [
+                "http.https://*.example.com/.sslVerify=false",
+                "http.https://api.example.com/private.sslVerify=true",
+                "http.https://api.example.com:9443/.sslVerify=false",
+            ],
+            gix_config::Source::Api,
+        )?;
+        for (url, expected) in [
+            ("https://api.example.com/repo", false),
+            ("https://api.example.com/private/repo", true),
+            ("https://api.example.com/private-other/repo", false),
+            ("https://api.example.com:9443/private/repo", false),
+            ("https://api.example.com:8443/repo", true),
+            ("https://nested.api.example.com/repo", true),
+        ] {
+            assert_eq!(http_options(&repo, None, url).ssl_verify, expected, "{url}");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn simple_configuration() {
         let repo = repo("http-config");
         let gix_transport::client::blocking_io::http::Options {

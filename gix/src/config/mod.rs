@@ -304,3 +304,5 @@ pub mod edit {
         Config(#[from] gix_error::Error),
     }
 }
+
+pub(crate) mod url_match;

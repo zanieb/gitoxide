@@ -81,36 +81,19 @@ pub(super) mod function {
         let mut programs = Vec::new();
         let mut context_options = gix_credentials::protocol::ContextOptions::default();
         let url_had_user_initially = url.user().is_some();
-        normalize(&mut url);
+        crate::config::url_match::normalize(&mut url);
 
         if let Some(credential_sections) = config.sections_by_name_and_filter("credential", &mut filter) {
             for section in credential_sections {
                 let section = match section.header().subsection_name() {
-                    Some(pattern) => parse_pattern(pattern).and_then(|mut pattern| {
-                        normalize(&mut pattern);
-                        let is_http = matches!(pattern.scheme, gix_url::Scheme::Https | gix_url::Scheme::Http);
-                        let scheme = &pattern.scheme;
-                        let host = pattern.host();
-                        let ports = if is_http {
-                            (pattern.port_or_default(), url.port_or_default())
-                        } else {
-                            (pattern.port, url.port)
-                        };
-                        let path = (!(is_http && pattern.path_is_root())).then_some(&pattern.path);
-
-                        if path.is_some_and(|path| !path_matches(path, &url.path)) {
-                            return None;
-                        }
-                        if pattern.user().is_some() && pattern.user() != url.user() {
-                            return None;
-                        }
-                        (scheme == &url.scheme && host_matches(host, url.host()) && ports.0 == ports.1).then_some((
+                    Some(pattern) => crate::config::url_match::specificity(pattern, &url).map(|_| {
+                        (
                             section,
                             &credential::UrlParameter::HELPER,
                             &credential::UrlParameter::USERNAME,
                             &credential::UrlParameter::USE_HTTP_PATH,
                             &credential::UrlParameter::PROTECT_PROTOCOL,
-                        ))
+                        )
                     }),
                     None => Some((
                         section,
@@ -207,55 +190,5 @@ pub(super) mod function {
             action,
             prompt_options,
         ))
-    }
-
-    fn host_matches(pattern: Option<&str>, host: Option<&str>) -> bool {
-        match (pattern, host) {
-            (Some(pattern), Some(host)) => {
-                let lfields = pattern.split('.');
-                let rfields = host.split('.');
-                if lfields.clone().count() != rfields.clone().count() {
-                    return false;
-                }
-                lfields.zip(rfields).all(|(pat, value)| {
-                    gix_glob::wildmatch(pat.into(), value.into(), gix_glob::wildmatch::Mode::empty())
-                })
-            }
-            (None, None) => true,
-            (Some(_), None) | (None, Some(_)) => false,
-        }
-    }
-
-    fn path_matches(pattern: &crate::bstr::BString, path: &crate::bstr::BString) -> bool {
-        let pattern = pattern.as_slice();
-        let path = path.as_slice();
-        path == pattern || path.starts_with(pattern) && path.get(pattern.len()) == Some(&b'/')
-    }
-
-    fn normalize(url: &mut gix_url::Url) {
-        // Transport dispatch is case-sensitive, but Git's credential URL matcher follows URL semantics.
-        url.scheme = match &url.scheme {
-            gix_url::Scheme::HelperUrl(name) if name.eq_ignore_ascii_case("http") => gix_url::Scheme::Http,
-            gix_url::Scheme::HelperUrl(name) if name.eq_ignore_ascii_case("https") => gix_url::Scheme::Https,
-            scheme => scheme.clone(),
-        };
-        if matches!(url.scheme, gix_url::Scheme::Http | gix_url::Scheme::Https) && url.path.is_empty() {
-            url.path = "/".into();
-        }
-        if !url.path_is_root() && url.path.ends_with(b"/") {
-            url.path.pop();
-        }
-    }
-
-    fn parse_pattern(pattern: &crate::bstr::BStr) -> Option<gix_url::Url> {
-        let mut pattern = pattern.to_owned();
-        if let Some(scheme_end) = pattern.find("://") {
-            let scheme = &mut pattern[..scheme_end];
-            if scheme.eq_ignore_ascii_case(b"http") || scheme.eq_ignore_ascii_case(b"https") {
-                // Transport dispatch is case-sensitive, but Git's credential URL matcher follows URL semantics.
-                scheme.make_ascii_lowercase();
-            }
-        }
-        gix_url::parse(pattern).ok()
     }
 }

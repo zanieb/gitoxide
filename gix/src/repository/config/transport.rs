@@ -370,11 +370,34 @@ impl crate::Repository {
                             if ssl_no_verify {
                                 opts.ssl_verify = false;
                             } else {
-                                let key = "http.sslVerify";
-                                opts.ssl_verify = config::tree::Http::SSL_VERIFY
-                                    .enrich_error(config.boolean_filter(key, &mut trusted_only))
-                                    .with_leniency(lenient)?
-                                    .unwrap_or(true);
+                                let mut url = url.clone();
+                                crate::config::url_match::normalize(&mut url);
+                                let scoped = config
+                                    .sections_by_name_and_filter("http", &mut trusted_only)
+                                    .into_iter()
+                                    .flatten()
+                                    .filter_map(|section| {
+                                        Some((
+                                            crate::config::url_match::specificity(
+                                                section.header().subsection_name()?,
+                                                &url,
+                                            )?,
+                                            section.value_implicit("sslVerify")?,
+                                        ))
+                                    })
+                                    .max_by_key(|(rank, _)| *rank);
+                                opts.ssl_verify = if let Some((_, value)) = scoped {
+                                    value
+                                        .map(gix_config::Boolean::try_from)
+                                        .transpose()
+                                        .or_raise(|| message("Invalid URL-specific http.sslVerify value"))?
+                                        .is_none_or(|v| v.0)
+                                } else {
+                                    config::tree::Http::SSL_VERIFY
+                                        .enrich_error(config.boolean_filter("http.sslVerify", &mut trusted_only))
+                                        .with_leniency(lenient)?
+                                        .unwrap_or(true)
+                                };
                             }
                         }
 
