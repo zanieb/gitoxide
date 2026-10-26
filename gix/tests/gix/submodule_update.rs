@@ -171,6 +171,44 @@ mod update {
     }
 
     #[test]
+    fn offline_update_only_fetches_from_an_allowed_local_repository() -> crate::Result {
+        let mut options = gix::submodule::update::Options::new(true, true);
+        options.fetch = gix::submodule::update::Fetch::LocalOnly;
+        for (root, available) in [("https://offline.invalid", false), ("local", true)] {
+            let (repo, fixture) = repo_rw("after-clone")?;
+            let origin = if available {
+                fixture.path().join("super").to_string_lossy().into_owned()
+            } else {
+                format!("{root}/team/super")
+            };
+            let repo = gix::open_opts(
+                repo.git_dir(),
+                gix::open::Options::isolated().config_overrides([
+                    format!("remote.origin.url={origin}"),
+                    "protocol.file.allow=always".to_owned(),
+                ]),
+            )?;
+            let sm = repo
+                .submodules()?
+                .expect("modules present")
+                .next()
+                .expect("one submodule");
+            let result = sm.update_submodule(gix::progress::Discard, &Default::default(), &options);
+            if available {
+                assert!(result?.expect("updated").freshly_cloned);
+                assert_eq!(
+                    sm.open()?.expect("checkout").head_id()?.detach(),
+                    sm.index_id()?.expect("gitlink")
+                );
+            } else {
+                assert!(matches!(result, Err(gix::submodule::update::Error::Offline)));
+                assert!(!sm.state()?.repository_exists);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn update_clones_relative_to_the_superproject_remote() -> crate::Result {
         let (repo, fixture) = repo_rw("after-clone")?;
         let options = gix::open::Options::isolated().config_overrides([

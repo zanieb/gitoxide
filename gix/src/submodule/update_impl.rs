@@ -124,9 +124,16 @@ impl Submodule<'_> {
                 ));
             }
 
-            let (mut checkout_prep, _fetch_outcome) = prep.fetch_then_checkout(&mut progress, should_interrupt)?;
-            let (_repo, _checkout_outcome) =
+            if options.fetch != super::update::Fetch::Transport
+                && prep.try_fetch_local_submodule(target_commit, should_interrupt)?
+            {
+                prep.persist();
+            } else if options.fetch == super::update::Fetch::LocalOnly {
+                return Err(super::update::Error::Offline);
+            } else {
+                let (mut checkout_prep, _) = prep.fetch_then_checkout(&mut progress, should_interrupt)?;
                 checkout_prep.main_worktree(gix_utils::progress::Discard, should_interrupt)?;
+            }
 
             // Move the cloned .git/ directory into the superproject's modules directory
             // and replace it with a .git file, matching modern git's submodule layout.
@@ -162,10 +169,20 @@ impl Submodule<'_> {
                     .set_value(&crate::config::tree::gitoxide::Allow::PROTOCOL_FROM_USER, "false")?;
                 // Try to fetch from the origin remote
                 if let Ok(remote) = sm_repo.find_remote("origin") {
-                    let _outcome = remote
-                        .connect(crate::remote::Direction::Fetch)?
-                        .prepare_fetch(&mut progress, Default::default())?
-                        .receive(&mut progress, should_interrupt)?;
+                    let pinned = remote
+                        .clone()
+                        .with_refspecs([target_commit.to_string().as_str()], crate::remote::Direction::Fetch)?;
+                    if options.fetch == super::update::Fetch::Transport
+                        || pinned.try_fetch_local(should_interrupt)?.is_none()
+                    {
+                        if options.fetch == super::update::Fetch::LocalOnly {
+                            return Err(super::update::Error::Offline);
+                        }
+                        remote
+                            .connect(crate::remote::Direction::Fetch)?
+                            .prepare_fetch(&mut progress, Default::default())?
+                            .receive(&mut progress, should_interrupt)?;
+                    }
                 }
             }
             (sm_repo, false)
@@ -217,16 +234,12 @@ impl Submodule<'_> {
         if options.recursive
             && let Some(submodules) = sm_repo.submodules()?
         {
-            let sub_opts = super::update::Options {
-                init: options.init,
-                recursive: true,
-            };
             for sm in submodules {
                 // With --init, update all submodules (git implicitly activates them).
                 // Without --init, only update active (initialized) ones.
                 let should_update = options.init || sm.is_active().unwrap_or(false);
                 if should_update {
-                    sm.update_submodule(gix_utils::progress::Discard, should_interrupt, &sub_opts)
+                    sm.update_submodule(gix_utils::progress::Discard, should_interrupt, options)
                         .map_err(|source| super::update::Error::RecursiveUpdate {
                             name: sm.name().to_owned(),
                             source: Box::new(source),

@@ -9,6 +9,18 @@
 //! 5. Apply the update strategy (for checkout: detach HEAD to target and checkout tree)
 //! 6. Optionally recurse into nested submodules
 
+/// Select how missing submodule commits are fetched.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Fetch {
+    /// Clone or fetch using the remote's upload-pack transport.
+    #[default]
+    Transport,
+    /// Try to fetch just the pinned commit from a local repository before using upload-pack.
+    PreferLocal,
+    /// Only fetch a pinned commit when it can be served from local objects in process.
+    LocalOnly,
+}
+
 /// Options for controlling a submodule update operation.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -20,12 +32,18 @@ pub struct Options {
     /// If `true`, recursively update nested submodules after updating this one.
     /// Equivalent to `git submodule update --recursive`.
     pub recursive: bool,
+    /// How to fetch an object that is missing from the submodule repository.
+    pub fetch: Fetch,
 }
 
 impl Options {
     /// Create new options with the given settings.
     pub fn new(init: bool, recursive: bool) -> Self {
-        Options { init, recursive }
+        Options {
+            init,
+            recursive,
+            fetch: Fetch::Transport,
+        }
     }
 }
 

@@ -6,6 +6,29 @@ use crate::config::tree::Key;
 
 /// Modification
 impl PrepareFetch {
+    #[cfg(all(feature = "blocking-network-client", feature = "worktree-mutation"))]
+    pub(crate) fn try_fetch_local_submodule(
+        &mut self,
+        revision: gix_hash::ObjectId,
+        interrupt: &std::sync::atomic::AtomicBool,
+    ) -> Result<bool> {
+        if !matches!(self.shallow, remote::fetch::Shallow::NoChange) {
+            return Ok(false);
+        }
+        let repo = self.repo.as_mut().expect("repository has not been consumed");
+        repo.config_snapshot_mut()
+            .append_config(&self.config_overrides, gix_config::Source::Api)?;
+        let remote = repo
+            .remote_at(self.url.clone())?
+            .with_refspecs([revision.to_string().as_str()], remote::Direction::Fetch)?;
+        if remote.try_fetch_local(interrupt)?.is_none() {
+            return Ok(false);
+        }
+        let mut remote = remote.with_refspecs(["+refs/heads/*:refs/remotes/origin/*"], remote::Direction::Fetch)?;
+        util::append_remote_to_local_config_file(&mut remote, "origin".into())?;
+        Ok(true)
+    }
+
     /// Fetch a pack and update local branches according to refspecs, providing `progress` and checking `should_interrupt` to stop
     /// the operation.
     /// On success, the persisted repository is returned, and this method must not be called again to avoid a **panic**.

@@ -30,6 +30,8 @@ pub mod update {
     #[derive(Debug, thiserror::Error)]
     #[allow(missing_docs)]
     pub enum Error {
+        #[error("The submodule cannot fetch the requested commit from a local repository offline")]
+        Offline,
         #[error(transparent)]
         Operation(#[from] gix_error::Error),
         #[error(transparent)]
