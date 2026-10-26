@@ -236,8 +236,12 @@ impl<H: Http> Transport<H> {
                 password: pass.to_string(),
                 oauth_refresh_token: None,
             });
+        let mut url = url.to_bstring().to_string();
+        if let Some(fragment) = url.find('#') {
+            url.truncate(fragment);
+        }
         Transport {
-            url: url.to_bstring().to_string(),
+            url,
             user_agent_header: concat!("User-Agent: git/oxide-", env!("CARGO_PKG_VERSION")),
             desired_version,
             actual_version: Default::default(),
@@ -372,7 +376,10 @@ impl<H: Http> blocking_io::Transport for Transport<H> {
         service: Service,
         extra_parameters: &'a [(&'a str, Option<&'a str>)],
     ) -> std::result::Result<SetServiceResponse<'_>, client::Error> {
-        let url = append_url(self.url.as_ref(), &format!("info/refs?service={}", service.as_str()));
+        let mut url = append_url(&self.url, "info/refs");
+        url.push(if self.url.contains('?') { '&' } else { '?' });
+        url.push_str("service=");
+        url.push_str(service.as_str());
         let static_headers = [Cow::Borrowed(self.user_agent_header)];
         let mut dynamic_headers = Vec::<Cow<'_, str>>::new();
         if self.desired_version != Protocol::V1 || !extra_parameters.is_empty() {

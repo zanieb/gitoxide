@@ -72,6 +72,29 @@ fn disabling_tls_verification_does_not_follow_cross_origin_redirects() -> gix_te
     Ok(())
 }
 
+#[test]
+fn discovery_appends_the_service_to_a_git_http_gateway_query() -> gix_testtools::TestResult {
+    let server = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let base = format!("http://{}/gateway?repo=project.git#client", server.local_addr()?);
+    let request = std::thread::spawn(move || {
+        let (stream, _) = server.accept().expect("accept discovery");
+        let mut reader = std::io::BufReader::new(stream);
+        let lines = read_request_lines(&mut reader);
+        reader
+            .get_mut()
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .expect("send response");
+        lines
+    });
+    let mut client = http::connect::<http::reqwest::Remote>(base.try_into()?, Protocol::V1, false);
+    assert!(client.handshake(Service::UploadPack, &[]).is_err());
+    assert_eq!(
+        request.join().expect("discovery request")[0],
+        "GET /gateway?repo=project.git/info/refs&service=git-upload-pack HTTP/1.1"
+    );
+    Ok(())
+}
+
 /// Regression for <https://github.com/GitoxideLabs/gitoxide/issues/2140>: when a request fails
 /// without an HTTP status (for example a connection or TLS failure), the underlying error must be
 /// kept as `source()` instead of being stringified, so callers can see the real cause.
