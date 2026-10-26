@@ -141,7 +141,7 @@ where
                 "Cannot perform a meaningful fetch operation without any configured ref-specs"
             ));
         }
-        let ref_map = self.ref_map_by_ref(repo, progress, options).await?;
+        let ref_map = self.ref_map_by_ref(repo, progress, options, true).await?;
         Ok(PrepareDetached {
             con: Some(self),
             ref_map,
@@ -158,7 +158,7 @@ impl<T> Prepare<'_, '_, T>
 where
     T: Transport,
 {
-    /// Return the `ref_map` (that includes the server handshake) which was part of listing refs prior to fetching a pack.
+    /// Return the mappings from the requested refspecs to the remote refs or object IDs to fetch.
     pub fn ref_map(&self) -> &RefMap {
         &self.inner.ref_map
     }
@@ -168,7 +168,7 @@ impl<T> PrepareDetached<'_, T>
 where
     T: Transport,
 {
-    /// Return the `ref_map` (that includes the server handshake) which was part of listing refs prior to fetching a pack.
+    /// Return the mappings from the requested refspecs to the remote refs or object IDs to fetch.
     pub(crate) fn ref_map(&self) -> &RefMap {
         &self.ref_map
     }

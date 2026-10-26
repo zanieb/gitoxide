@@ -104,6 +104,55 @@ mod blocking_and_async_io {
         Ok(())
     }
 
+    #[cfg(feature = "blocking-network-client")]
+    #[test]
+    fn protocol_v2_fetch_by_object_id_skips_listing_refs() -> TestResult {
+        if gix_testtools::run_in_isolated_process()? {
+            return Ok(());
+        }
+        let (source, fixture) = try_repo_rw("base")?;
+        gix_testtools::git(source.git_dir(), "config uploadpack.allowAnySHA1InWant true")?;
+        let mut dest =
+            crate::init_repo_isolated(fixture.path().join("dest"), gix::create::Kind::Bare)?.to_thread_local();
+        dest.committer_or_set_generic_fallback()?;
+        let blob = source.rev_parse_single("d:file")?.detach();
+        let remote = dest
+            .remote_at(gix::path::into_bstr(source.git_dir())?)?
+            .with_refspecs([blob.to_string().as_str()], Fetch)?
+            .with_fetch_tags(fetch::Tags::None);
+
+        let (listed, handshake) = remote.connect(Fetch)?.ref_map(progress::Discard, Default::default())?;
+        assert_eq!(
+            handshake.server_protocol_version,
+            gix::protocol::transport::Protocol::V2
+        );
+        assert!(!listed.remote_refs.is_empty());
+        let unfiltered = remote.connect(Fetch)?.prepare_fetch(
+            progress::Discard,
+            gix::remote::ref_map::Options {
+                prefix_from_spec_as_filter_on_remote: false,
+                ..Default::default()
+            },
+        )?;
+        assert!(!unfiltered.ref_map().remote_refs.is_empty());
+        drop(unfiltered);
+        let fetch = remote
+            .connect(Fetch)?
+            .prepare_fetch(progress::Discard, Default::default())?;
+        assert!(fetch.ref_map().remote_refs.is_empty());
+        assert_eq!(fetch.ref_map().mappings.len(), 1);
+        assert_eq!(fetch.ref_map().mappings[0].remote.as_id(), Some(blob.as_ref()));
+        fetch.receive(progress::Discard, &AtomicBool::default())?;
+        assert_eq!(dest.find_blob(blob)?.data, source.find_blob(blob)?.data);
+
+        let tagged = remote.with_fetch_tags(fetch::Tags::Included);
+        let fetch = tagged
+            .connect(Fetch)?
+            .prepare_fetch(progress::Discard, Default::default())?;
+        assert!(!fetch.ref_map().remote_refs.is_empty());
+        Ok(())
+    }
+
     #[test]
     fn local_fetch_copies_requested_objects_and_tags_pointing_to_them() -> TestResult {
         if gix_testtools::run_in_isolated_process()? {

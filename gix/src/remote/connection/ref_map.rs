@@ -15,6 +15,8 @@ use crate::{
 pub struct Options {
     /// Use a two-component prefix derived from the ref-spec's source, like `refs/heads/`  to let the server pre-filter refs
     /// with great potential for savings in traffic and local CPU time. Defaults to `true`.
+    /// With protocol v2, preparing a fetch skips `ls-refs` when every refspec is a full object ID without a
+    /// destination and there are no extra refspecs, including implicit tag refspecs.
     pub prefix_from_spec_as_filter_on_remote: bool,
     /// Parameters in the form of `(name, optional value)` to add to the handshake.
     ///
@@ -78,7 +80,7 @@ where
         progress: impl Progress,
         options: Options,
     ) -> Result<(fetch::RefMap, gix_protocol::Handshake)> {
-        let refmap = self.ref_map_by_ref(repo, progress, options).await?;
+        let refmap = self.ref_map_by_ref(repo, progress, options, false).await?;
         let handshake = self
             .handshake
             .expect("refmap always performs handshake and stores it if it succeeds");
@@ -95,6 +97,7 @@ where
             handshake_parameters,
             mut extra_refspecs,
         }: Options,
+        for_fetch: bool,
     ) -> Result<fetch::RefMap> {
         let _span = gix_trace::coarse!("remote::Connection::ref_map()");
         if let Some(tag_spec) = self.remote.fetch_tags.to_refspec().map(|spec| spec.to_owned())
@@ -136,6 +139,21 @@ where
             fetch_refspecs: self.remote.fetch_specs.clone(),
             extra_refspecs,
         };
+        if for_fetch
+            && prefix_from_spec_as_filter_on_remote
+            && handshake.server_protocol_version == gix_transport::Protocol::V2
+            && !context.fetch_refspecs.is_empty()
+            && context.extra_refspecs.is_empty()
+            && context.fetch_refspecs.iter().all(|spec| {
+                matches!(spec.to_ref().instruction(),
+                    gix_refspec::Instruction::Fetch(gix_refspec::instruction::Fetch::Only { src })
+                        if gix_hash::ObjectId::from_hex(src).is_ok())
+            })
+        {
+            let ref_map = fetch::RefMap::from_refs(Vec::new(), &handshake.capabilities, context)?;
+            self.handshake = Some(handshake);
+            return Ok(ref_map);
+        }
 
         let fetch_refmap = handshake.prepare_lsrefs_or_extract_refmap(
             repo.config.user_agent_tuple(),
