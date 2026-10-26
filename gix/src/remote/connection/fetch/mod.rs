@@ -142,15 +142,7 @@ where
             ));
         }
         let ref_map = self.ref_map_by_ref(repo, progress, options, true).await?;
-        Ok(PrepareDetached {
-            con: Some(self),
-            ref_map,
-            dry_run: DryRun::No,
-            reflog_message: None,
-            write_packed_refs: WritePackedRefs::Never,
-            shallow: Default::default(),
-            filter: None,
-        })
+        Ok(PrepareDetached::new(self, ref_map))
     }
 }
 
@@ -175,7 +167,9 @@ where
 }
 
 mod config;
+mod object_fetcher;
 mod receive_pack;
+pub use object_fetcher::ObjectFetcher;
 ///
 #[path = "update_refs/mod.rs"]
 pub mod refs;
@@ -270,5 +264,19 @@ where
     pub(crate) fn with_shallow(mut self, shallow: remote::fetch::Shallow) -> Self {
         self.shallow = shallow;
         self
+    }
+}
+
+impl<'auth, T: Transport> PrepareDetached<'auth, T> {
+    fn new(con: ConnectionDetached<'auth, T>, ref_map: RefMap) -> Self {
+        Self {
+            con: Some(con),
+            ref_map,
+            dry_run: DryRun::No,
+            reflog_message: None,
+            write_packed_refs: WritePackedRefs::Never,
+            shallow: Default::default(),
+            filter: None,
+        }
     }
 }

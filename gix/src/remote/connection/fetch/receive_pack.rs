@@ -78,7 +78,29 @@ where
         P::SubProgress: 'static,
     {
         let Prepare { inner, repo } = self;
-        inner.receive(repo, progress, should_interrupt).await
+        inner.receive(repo, progress, should_interrupt, None).await
+    }
+
+    /// Receive the pack and return an object fetcher for follow-up requests without repeating
+    /// discovery when using a stateless protocol v2 transport. Other transports and dry runs
+    /// return `None`. The pack `.keep` handling documented by [`Self::receive()`] also applies
+    /// to this initial fetch.
+    #[gix_protocol::bisync::bisync]
+    pub async fn receive_with_object_fetcher<P>(
+        self,
+        progress: P,
+        should_interrupt: &AtomicBool,
+    ) -> Result<(Outcome, Option<fetch::ObjectFetcher<T>>)>
+    where
+        P: gix_utils::progress::NestedProgress,
+        P::SubProgress: 'static,
+    {
+        let Prepare { inner, repo } = self;
+        let mut fetcher = None;
+        let outcome = inner
+            .receive(repo, progress, should_interrupt, Some(&mut fetcher))
+            .await?;
+        Ok((outcome, fetcher))
     }
 }
 
@@ -92,6 +114,7 @@ where
         repo: &crate::Repository,
         progress: P,
         should_interrupt: &AtomicBool,
+        object_fetcher: Option<&mut Option<fetch::ObjectFetcher<T>>>,
     ) -> Result<Outcome>
     where
         P: gix_utils::progress::NestedProgress,
@@ -263,6 +286,18 @@ where
             std::fs::remove_file(&path).or_raise(|| message!("Failed to remove .keep file at {:?}", path.display()))?;
         }
 
+        if let Some(fetcher) = object_fetcher
+            && matches!(self.dry_run, fetch::DryRun::No)
+            && handshake.server_protocol_version == gix_transport::Protocol::V2
+            && !con.transport.inner.connection_persists_across_multiple_requests()
+        {
+            *fetcher = Some(fetch::ObjectFetcher {
+                transport: con.transport,
+                remote: con.remote,
+                handshake: handshake.clone(),
+                trace: con.trace,
+            });
+        }
         let out = Outcome {
             handshake,
             ref_map: std::mem::take(&mut self.ref_map),

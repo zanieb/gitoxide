@@ -1,3 +1,9 @@
+#[cfg(any(
+    feature = "blocking-http-transport-curl",
+    feature = "blocking-http-transport-reqwest"
+))]
+mod object_fetcher;
+
 mod shallow {
     use gix::remote::fetch::Shallow;
 
@@ -56,6 +62,7 @@ mod blocking_and_async_io {
         let tree_id = source.head_commit()?.tree_id()?.detach();
         let small_blob = source.rev_parse_single("g:file")?.detach();
         let large_blob = source.rev_parse_single("d:file")?.detach();
+        gix_testtools::git(source.git_dir(), "config uploadpack.allowAnySHA1InWant true")?;
         let treeless = fetch::Filter::TreeDepth(0);
         for (name, version, allow_filter, filter) in [
             ("filtered-v1", "1", true, treeless),
@@ -79,11 +86,12 @@ mod blocking_and_async_io {
                 .remote_at(gix::path::into_bstr(source.git_dir())?)?
                 .with_refspecs(["+HEAD:refs/heads/main"], Fetch)?
                 .with_fetch_tags(fetch::Tags::None);
-            let outcome = remote
+            let (outcome, fetcher) = remote
                 .connect(Fetch)?
                 .prepare_fetch(progress::Discard, Default::default())?
                 .with_filter(filter)
-                .receive(progress::Discard, &AtomicBool::default())?;
+                .receive_with_object_fetcher(progress::Discard, &AtomicBool::default())?;
+            assert!(fetcher.is_none(), "a local upload-pack connection is stateful");
             let Status::Change { write_pack_bundle, .. } = outcome.status else {
                 panic!("the first fetch receives a pack");
             };
@@ -100,6 +108,12 @@ mod blocking_and_async_io {
             );
             assert_eq!(repo.has_object(small_blob), !allow_filter || filter != treeless);
             assert_eq!(repo.has_object(large_blob), !allow_filter);
+            if allow_filter {
+                remote
+                    .connect(Fetch)?
+                    .fetch_objects(&[large_blob], progress::Discard, &AtomicBool::default())?;
+                assert_eq!(repo.find_blob(large_blob)?.data, source.find_blob(large_blob)?.data);
+            }
         }
         Ok(())
     }

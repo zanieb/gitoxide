@@ -334,7 +334,7 @@ impl PrepareFetch {
                 message: reflog_message.clone(),
             })
             .with_shallow(self.shallow.clone())
-            .receive(&receiving_repo, &mut progress, should_interrupt)
+            .receive(&receiving_repo, &mut progress, should_interrupt, None)
             .await?;
 
         // Before finalisation, the current repo handle still needs to
