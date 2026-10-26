@@ -64,6 +64,7 @@ impl Default for Remote {
                     let mut builder = reqwest::blocking::ClientBuilder::new()
                         .connect_timeout(std::time::Duration::from_secs(20))
                         .http1_title_case_headers();
+                    builder = super::configure_proxy(builder, &config)?;
                     #[cfg(any(
                         feature = "http-client-reqwest-rust-tls",
                         feature = "http-client-reqwest-rust-tls-trust-dns",

@@ -1,4 +1,45 @@
-use gix_error::Result;
+use gix_error::{ErrorExt, Result};
+
+/// Apply Git's configured proxy and its host exclusions to a blocking HTTP client.
+/// An empty proxy or a `*` exclusion disables proxying. Digest, Negotiate, NTLM and
+/// credential-helper lookup for proxy passwords return an unsupported error.
+pub fn configure_proxy(
+    mut builder: reqwest::blocking::ClientBuilder,
+    config: &super::Options,
+) -> Result<reqwest::blocking::ClientBuilder> {
+    let no_proxy = config
+        .no_proxy
+        .clone()
+        .or_else(|| std::env::var("no_proxy").or_else(|_| std::env::var("NO_PROXY")).ok());
+    if config.proxy.as_deref() == Some("") || no_proxy.as_deref().is_some_and(|hosts| hosts.trim() == "*") {
+        builder = builder.no_proxy();
+    } else if let Some(url) = &config.proxy {
+        if !matches!(
+            config.proxy_auth_method,
+            super::options::ProxyAuthMethod::AnyAuth | super::options::ProxyAuthMethod::Basic
+        ) {
+            return Err(
+                gix_error::unsupported("The reqwest transport supports only Basic HTTP proxy authentication").raise(),
+            );
+        }
+        if config.proxy_authenticate.is_some()
+            && reqwest::Url::parse(url)
+                .ok()
+                .is_none_or(|proxy| proxy.password().is_none())
+        {
+            return Err(gix_error::unsupported(
+                "The reqwest transport does not support Git credential helpers for HTTP proxies",
+            )
+            .raise());
+        }
+        let proxy = reqwest::Proxy::all(url.as_str())
+            .map_err(|_| gix_error::message("Invalid Git HTTP proxy URL").raise())?
+            .no_proxy(no_proxy.as_deref().and_then(reqwest::NoProxy::from_string));
+        builder = builder.proxy(proxy);
+    }
+    Ok(builder)
+}
+
 /// An implementation for HTTP requests via `reqwest`.
 pub struct Remote {
     /// A worker thread which performs the actual request.

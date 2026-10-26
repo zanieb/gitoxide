@@ -21,6 +21,125 @@ use gix_transport::{
 mod http_helpers;
 use http_helpers::{observe_connection_within_deadline, read_request_lines, response_with_connection_close};
 
+#[test]
+fn git_proxy_settings_and_wildcard_exclusions_route_requests() -> gix_testtools::TestResult {
+    use http::Http;
+    use std::io::Read;
+
+    if gix_testtools::run_in_isolated_process()? {
+        return Ok(());
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let proxy = format!("http://{}", listener.local_addr()?);
+    let authenticated_proxy = format!("http://proxy-user:proxy-pass@{}", listener.local_addr()?);
+    let url = format!("{proxy}/repo");
+    let mut env = gix_testtools::Env::new();
+    for name in [
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
+    ] {
+        env = env.set(name, "");
+    }
+    let cases = [
+        (Some(proxy.as_str()), None, "", "", true),
+        (None, None, proxy.as_str(), "", true),
+        (Some(""), None, proxy.as_str(), "", false),
+        (Some(proxy.as_str()), Some("127.0.0.1"), "", "", false),
+        (Some(proxy.as_str()), Some("*"), "", "", false),
+        (None, None, proxy.as_str(), "*", false),
+        (Some(authenticated_proxy.as_str()), None, "", "", true),
+        (Some(authenticated_proxy.as_str()), Some("127.0.0.1"), "", "", false),
+    ];
+    let count = cases.len();
+    let server = std::thread::spawn(move || -> std::io::Result<()> {
+        for _ in 0..count {
+            let (stream, _) = listener.accept()?;
+            let mut request = std::io::BufReader::new(stream);
+            let lines = read_request_lines(&mut request);
+            let has_header = |name: &str| {
+                lines.iter().any(|line| {
+                    line.split_once(':')
+                        .is_some_and(|(key, _)| key.eq_ignore_ascii_case(name))
+                })
+            };
+            let body = format!(
+                "{}\n{}\n{}",
+                lines[0],
+                has_header("Proxy-Authorization"),
+                has_header("Authorization")
+            );
+            write!(
+                request.get_mut(),
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )?;
+            request.get_mut().write_all(body.as_bytes())?;
+        }
+        Ok(())
+    });
+    for (configured_proxy, no_proxy, env_proxy, env_no_proxy, proxied) in cases {
+        let _case = gix_testtools::Env::new()
+            .set("http_proxy", env_proxy)
+            .set("HTTP_PROXY", env_proxy)
+            .set("no_proxy", env_no_proxy)
+            .set("NO_PROXY", env_no_proxy);
+        let mut client = http::reqwest::Remote::default();
+        client.configure(&http::Options {
+            proxy: configured_proxy.map(str::to_owned),
+            no_proxy: no_proxy.map(str::to_owned),
+            ..Default::default()
+        })?;
+        let mut response = client.get(&url, &url, std::iter::empty::<&str>())?;
+        std::io::copy(&mut response.headers, &mut std::io::sink())?;
+        let mut request = String::new();
+        response.body.read_to_string(&mut request)?;
+        let target = if proxied { url.as_str() } else { "/repo" };
+        let proxy_auth = proxied && configured_proxy == Some(authenticated_proxy.as_str());
+        assert_eq!(
+            request,
+            format!("GET {target} HTTP/1.1\n{proxy_auth}\nfalse"),
+            "proxy {configured_proxy:?}, exclusion {no_proxy:?}, environment exclusion {env_no_proxy:?}"
+        );
+    }
+    server.join().expect("proxy fixture thread completed")?;
+    Ok(())
+}
+
+#[test]
+fn a_required_proxy_authentication_method_cannot_fall_back_to_basic() -> gix_testtools::TestResult {
+    use http::{Http, options::ProxyAuthMethod};
+
+    for auth_method in [
+        ProxyAuthMethod::Digest,
+        ProxyAuthMethod::Negotiate,
+        ProxyAuthMethod::Ntlm,
+    ] {
+        let mut client = http::reqwest::Remote::default();
+        client.configure(&http::Options {
+            proxy: Some("http://proxy-user:proxy-pass@127.0.0.1:9".into()),
+            no_proxy: Some(String::new()),
+            proxy_auth_method: auth_method,
+            ..Default::default()
+        })?;
+        let url = "http://127.0.0.1:9/repo";
+        let err = client
+            .get(url, url, std::iter::empty::<&str>())
+            .err()
+            .expect("the configured method cannot be used");
+        assert!(
+            err.is_unsupported(),
+            "reject the configured proxy authentication method before connecting: {err}"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(any(
     feature = "http-client-reqwest-rust-tls",
     feature = "http-client-reqwest-rust-tls-trust-dns",
